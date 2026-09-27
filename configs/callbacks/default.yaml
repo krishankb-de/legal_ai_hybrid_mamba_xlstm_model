@@ -1,0 +1,15 @@
+# Checkpointing: keep only last.ckpt by default (plan R6: SAVE_TOP_K=0 on arms, 1 + last on
+# pipeline runs). The filename has no metric in it: a "/" in a metric name once turned every save
+# into a directory in the reference.
+checkpoint:
+  monitor: val/loss
+  mode: min
+  save_top_k: 0
+  save_last: true
+  filename: "step{step:06d}"
+  auto_insert_metric_name: false
+  every_n_train_steps: 1000
+
+lr_monitor:
+  enabled: true
+  logging_interval: step

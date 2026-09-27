@@ -1,0 +1,40 @@
+# Reference replica: the reference's parameter-matched Transformer (transformer_150m_baseline),
+# GPT-2 vocabulary, 15 attention layers, canonical pre-norm. P4 sanity point only; its parameter
+# count must be exactly 183,386,880.
+model_type: lexhybrid
+
+vocab_size: 50257
+dim: 768
+num_layers: 15
+layer_pattern: [attention]
+
+num_heads: 12
+head_dim: 64
+attn_dropout: 0.0
+rope_theta: 10000.0
+
+# Recurrent fields: unused (no recurrent layers), declared for schema parity.
+state_size: 16
+conv_size: 4
+expand_factor: 2
+dt_rank: null
+use_fast_path: true
+scan_impl: legacy
+tfla_impl: legacy
+proj_factor: 2
+
+norm_type: rms
+norm_topology: pre_rms
+use_mlp: true
+mlp_ratio: 4.0
+max_position_embeddings: 1024
+dropout: 0.1
+initializer_range: 0.02
+tie_word_embeddings: false
+use_gradient_checkpointing: false
+
+learning_rate: 4.0e-4
+weight_decay: 0.1
+warmup_steps: 2000
+max_steps: 90000
+gradient_clip_val: 1.0

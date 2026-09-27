@@ -1,0 +1,11 @@
+# Seeded random-token rows with packed doc_ids (lexhybrid/data/synthetic.py): no data on disk.
+# Used by smoke tests, the validate.sh config gate and the profiler.
+name: synthetic
+num_rows: 64
+row_len: 128
+min_doc_len: 8
+max_doc_len: 96
+seed: 0
+batch_size: 4
+eval_batch_size: 4
+num_workers: 0

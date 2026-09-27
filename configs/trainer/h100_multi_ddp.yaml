@@ -1,0 +1,23 @@
+# Four H100 on one node, DDP. The strategy object is built in code as
+# DDPStrategy(find_unused_parameters=False, gradient_as_bucket_view=True): the reference's
+# `find_unused_parameters` key here was never read (its entry point passed the string "ddp").
+# Under DDP, max_steps counts GLOBAL optimizer steps, so tokens per step scale with `devices`.
+accelerator: gpu
+devices: 4
+num_nodes: 1
+precision: bf16-mixed
+strategy: ddp
+compile_model: false
+max_epochs: -1
+max_steps: 20000
+val_every_opt_steps: 1000
+check_val_every_n_epoch: null
+log_every_n_steps: 25
+accumulate_grad_batches: 2
+enable_checkpointing: true
+default_root_dir: ${output_dir}
+enable_progress_bar: true
+enable_model_summary: true
+num_sanity_val_steps: 2
+limit_train_batches: 1.0
+limit_val_batches: 1.0

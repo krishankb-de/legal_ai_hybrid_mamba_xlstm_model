@@ -1,0 +1,191 @@
+# Continuous integration (plan §8.4). Runs on every push and pull request; the network smoke and
+# the macOS clean install run weekly and on demand. GPU and multi-GPU tests cannot run on GitHub's
+# runners and run on the aisc cluster instead (scripts/slurm/gpu_tests.sh, multigpu_tests.sh).
+#
+# Every job installs with `uv sync --locked`: the environment is exactly uv.lock -- on Linux that is
+# torch 2.11.0+cu128, the same build the cluster runs (executed on CPU here). No job uses pip.
+name: ci
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"  # Mondays 03:17 UTC: live-source smoke and macOS clean install
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PYTHONUNBUFFERED: "1"
+  FORCE_COLOR: "1"
+  # Tests never reach the Hugging Face Hub unless marked `network` (tests/conftest.py).
+  HF_HUB_OFFLINE: "1"
+  HF_DATASETS_OFFLINE: "1"
+
+jobs:
+  hygiene:
+    name: hygiene (the pushed tree)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      # Before anything is installed, the checkout is exactly what was pushed: no venv, no caches.
+      - name: Pushed tree is clean (size, data, secrets, case collisions, CRLF, critical files)
+        run: python3 scripts/check_repo_hygiene.py --ci
+      - name: Plan and state are consistent
+        run: python3 scripts/plan_state.py check
+
+  lint:
+    name: lint (lock, ruff, shell, workflow)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: uv.lock is up to date with pyproject.toml
+        run: uv lock --check
+      - name: Install the locked dev tools only
+        run: uv sync --locked --only-group dev
+      - name: ruff check
+        run: .venv/bin/ruff check .
+      - name: ruff format --check
+        run: .venv/bin/ruff format --check .
+      - name: bash -n and shellcheck on every shell script
+        run: |
+          mapfile -t scripts < <(find scripts -name '*.sh' -type f | sort)
+          for f in "${scripts[@]}"; do bash -n "$f"; done
+          shellcheck --version
+          shellcheck -x "${scripts[@]}"
+      - name: actionlint
+        run: |
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.7/scripts/download-actionlint.bash) 1.7.7
+          ./actionlint -color
+
+  test:
+    name: test (Linux, Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.11 is the pinned interpreter (.python-version, the cluster); 3.12 is forward-compat.
+        python-version: ["3.11", "3.12"]
+    env:
+      LEXHYBRID_EXPECT_PYTHON: ${{ matrix.python-version }}
+    steps:
+      - uses: actions/checkout@v5
+      # The runner has ~86 GB free and the CUDA build of torch needs ~7 GB, so nothing is deleted
+      # (deleting runner toolchains once took 6+ minutes, run 36322586655). Report it instead.
+      - name: Disk space before the CUDA build of torch
+        run: df -h /
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install the locked environment (torch 2.11.0+cu128, as on the cluster)
+        run: uv sync --locked --python "${{ matrix.python-version }}"
+      - name: Environment equals the lock
+        run: .venv/bin/python scripts/check_env.py
+      - name: validate.sh --ci (every gate; slow and Linux-only tests included; coverage floor)
+        run: bash scripts/validate.sh --ci
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-py${{ matrix.python-version }}
+          path: |
+            junit.xml
+            coverage.xml
+          if-no-files-found: ignore
+
+  package:
+    name: package (wheel builds and imports without the source tree)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+      # The runner has ~86 GB free and the CUDA build of torch needs ~7 GB, so nothing is deleted
+      # (deleting runner toolchains once took 6+ minutes, run 36322586655). Report it instead.
+      - name: Disk space before the CUDA build of torch
+        run: df -h /
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Build sdist and wheel
+        run: uv build
+      - name: Locked dependencies without the editable project, then the built wheel
+        run: |
+          uv sync --locked --no-install-project --no-dev
+          uv pip install --python .venv/bin/python --no-deps dist/lexhybrid-*.whl
+      - name: Every subpackage imports from the wheel, outside the checkout
+        run: |
+          cd "$RUNNER_TEMP"
+          "$GITHUB_WORKSPACE/.venv/bin/python" - <<'PY'
+          import importlib, pathlib, pkgutil
+          import lexhybrid
+          origin = pathlib.Path(lexhybrid.__file__).resolve()
+          assert "site-packages" in origin.parts, f"imported from {origin}, not from the installed wheel"
+          names = [m.name for m in pkgutil.walk_packages(lexhybrid.__path__, "lexhybrid.")]
+          for name in names:
+              importlib.import_module(name)
+          print(f"imported {len(names)} modules from {origin.parent}")
+          PY
+      - name: CPU smoke through the installed wheel
+        run: |
+          cd "$RUNNER_TEMP"
+          "$GITHUB_WORKSPACE/.venv/bin/python" "$GITHUB_WORKSPACE/scripts/smoke_model.py"
+
+  macos:
+    name: macOS clean install (weekly)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install the locked environment (torch 2.11.0, CPU/MPS)
+        run: uv sync --locked
+      - name: Environment equals the lock
+        run: .venv/bin/python scripts/check_env.py
+      - name: validate.sh (the gate a code box is ticked on)
+        run: bash scripts/validate.sh
+
+  network:
+    name: live-source smoke (weekly)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      LEXHYBRID_NETWORK_TESTS: "1"
+      HF_HUB_OFFLINE: "0"
+      HF_DATASETS_OFFLINE: "0"
+    steps:
+      - uses: actions/checkout@v5
+      # The runner has ~86 GB free and the CUDA build of torch needs ~7 GB, so nothing is deleted
+      # (deleting runner toolchains once took 6+ minutes, run 36322586655). Report it instead.
+      - name: Disk space before the CUDA build of torch
+        run: df -h /
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - name: Install the locked environment
+        run: uv sync --locked
+      - name: pytest -m network (collectors against the live sources, from P3)
+        run: |
+          set +e
+          .venv/bin/python -m pytest tests/ -m network -q
+          rc=$?
+          if [ "$rc" -eq 5 ]; then echo "no network tests collected yet (they arrive with the P3 collectors)"; exit 0; fi
+          exit "$rc"

@@ -1,0 +1,24 @@
+# Hydra entry point. Override on the command line, e.g.
+#   python scripts/train_pretrain.py model=hybrid_legal_base dataset=mixture_pretrain trainer=h100_multi_ddp
+defaults:
+  - model: ref_hybrid_m3
+  - dataset: synthetic
+  - trainer: cpu_debug
+  - callbacks: default
+  - distill: null
+  - _self_
+
+seed: 42
+project_name: lexhybrid
+experiment_name: default
+
+# Outputs live on scratch on the cluster (SCRATCH_ROOT is exported by every SLURM wrapper) and
+# under ./outputs locally. Never in $HOME on the cluster: checkpoints are ~4 GB each (plan R6).
+output_dir: ${oc.env:SCRATCH_ROOT,.}/outputs/${experiment_name}
+checkpoint_dir: ${output_dir}/checkpoints
+log_dir: ${output_dir}/logs
+
+wandb:
+  enabled: false
+  project: ${project_name}
+  name: ${experiment_name}
