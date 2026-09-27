@@ -199,11 +199,9 @@ def test_param_bands(counts):
     )
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="plan P2-W bound 'legacy vs base <= 1%' does not hold for the 9 x mamba + 3 x mlstm shape of "
-    "P2-V: measured +2.36% (it holds against an all-recurrent 9 x mamba3 + 3 x mlstm hybrid). Recorded "
-    "negative awaiting a user decision; strict, so it fails loudly if the configs change.",
-)
-def test_legacy_is_within_one_percent_of_the_base(counts):
-    assert abs(counts["hybrid_legal_legacy"]["delta_pct"]) <= 1.0
+def test_legacy_delta_is_the_stated_difference(counts):
+    """S5 (legacy recipe): the pre-registered <= 1% did not hold (+2.36%); the user decided on
+    2026-09-27 (plan §14) to report it as a stated difference inside ±2.5%, not to reshape the arm.
+    Pinned to the measured value so a config change is loud."""
+    delta = counts["hybrid_legal_legacy"]["delta_pct"]
+    assert abs(delta - 2.36) < 0.005 and abs(delta) <= 2.5

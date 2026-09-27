@@ -12,8 +12,8 @@ model overrides that make it, the one lever it isolates (R3), the tokens its ARC
 ``ARM`` names are ``<arm>-s<seed>`` and are resolved on the compute node, never on the login node.
 
 The screen settings (plan P5) are one table, ``SCREEN``, emitted as Hydra overrides by ``env``.
-S5's pre-registered band (<= 1%) does not hold for the legacy shape (P2-W, +2.36%); ``verify --full``
-reports it and exits 1 until the user decides how S5 is reported.
+S5 (legacy recipe) is a stated difference, +2.36% inside ±2.5% (the user's decision of 2026-09-27,
+plan §14): it measures the old operators, PPL/probe-only, and is not reshaped to match.
 """
 
 import argparse
@@ -99,7 +99,7 @@ ARMS: dict[str, Arm] = {
         ["mambax9", "mlstmx3", "scan_impl=legacy", "tfla_impl=legacy"],
         forbid=["attention", "mamba3("],
         walltime="24:00:00",
-        band_pct=1.0,
+        band_pct=2.5,  # +2.36%, delta reported (user decision 2026-09-27)
     ),
     "S6": Arm(
         "hybrid_legal_base",

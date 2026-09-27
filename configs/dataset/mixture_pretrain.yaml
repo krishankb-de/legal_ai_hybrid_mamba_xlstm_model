@@ -1,0 +1,31 @@
+# Pretraining mixture over packed shards (plan P3-V, decisions 2 and 13; P6 trains on it).
+# Build the shards with scripts/build_shards.py (scrubbed, deduplicated, split by document).
+name: packed
+shards_root: ${oc.env:SCRATCH_ROOT,.}/data/shards
+row_len: 4096
+# commercial_safe: shippable (no research_only source may enter); research: decision 2's NC arm.
+arm: commercial_safe
+# Token shares of the groups; rows are fixed length, so row shares are token shares.
+groups:
+  legal: 0.7
+  general: 0.3
+# Weights within a group. `arm: research` marks a source that only the research arm admits.
+sources:
+  gii: {group: legal, weight: 1.0}
+  rii: {group: legal, weight: 1.0}
+  oldp: {group: legal, weight: 1.0}
+  eurlex: {group: legal, weight: 1.0}
+  ris: {group: legal, weight: 1.0}
+  fedlex: {group: legal, weight: 1.0}
+  bger: {group: legal, weight: 1.0}
+  dip: {group: legal, weight: 0.5}
+  multilegalpile: {group: legal, weight: 1.0, arm: research}
+  fineweb2_de: {group: general, weight: 1.0}
+# Rows drawn per epoch (the training schedule is seeded and precomputed; resumable by offset).
+train_samples: 1000000
+val_fraction: 0.001
+min_val_docs: 2000
+seed: 0
+batch_size: 8
+eval_batch_size: 8
+num_workers: 4

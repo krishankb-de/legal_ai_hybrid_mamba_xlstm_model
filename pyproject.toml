@@ -19,6 +19,8 @@ dependencies = [
     "packaging>=23.0",
     "tqdm>=4.66",
     "tensorboard>=2.16",
+    "requests>=2.31",  # collectors (P3-E); was only transitive
+    "datasketch>=1.6",  # MinHash deduplication (P3-S); pulls scipy
 ]
 
 [dependency-groups]

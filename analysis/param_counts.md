@@ -16,7 +16,9 @@
 | `hybrid_legal_ds64` | screen arm S3: Mamba-3 d_state 64 | mamba3x7, attentionx2, mlstmx3 | 103,287,352 | 219,974,200 | — | -0.75% |
 | `hybrid_legal_mtp` | screen arm S4: multi-token prediction | mamba3x7, attentionx2, mlstmx3 | 104,066,872 | 220,753,720 | 9,726,024 | +0.00% |
 
-Bands pre-registered in the plan (P2-W): Transformer within ±2.5% of the base; each screen variant
-within ±3%; the legacy ablation within 1%. The legacy band does not hold for the 9 x mamba +
-3 x mlstm shape of P2-V (see the table); it is recorded as a strict expected failure in
-`tests/test_config_invariants.py` and waits for a user decision (P2 notes).
+Bands (P2-W): Transformer within ±2.5% of the base; each screen variant within ±3%, its delta
+reported. The legacy ablation (S5) was pre-registered at <= 1% but measures +2.36% for the
+9 x mamba + 3 x mlstm shape; by the user's decision of 2026-09-27 (plan §14) it is reported as a
+stated difference inside ±2.5%, not reshaped: S5 measures the old recipe, PPL/probe-only, and
+the difference favours legacy, so a hybrid win is conservative and a legacy win inside the
+margin is inconclusive.

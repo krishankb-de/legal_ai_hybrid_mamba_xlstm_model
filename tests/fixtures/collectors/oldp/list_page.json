@@ -1,0 +1,67 @@
+{
+ "count": 424569,
+ "next": "https://de.openlegaldata.io/api/cases/?format=json&ordering=-date&page=2&page_size=30",
+ "previous": null,
+ "results": [
+  {
+   "id": 521973,
+   "slug": "vg-bremen-2026-08-26-2-k-134324",
+   "court": {
+    "id": 367,
+    "name": "Verwaltungsgericht Bremen",
+    "slug": "vg-bremen",
+    "city": 229,
+    "state": 7,
+    "jurisdiction": "Verwaltungsgerichtsbarkeit",
+    "level_of_appeal": null
+   },
+   "file_number": "2 K 1343/24",
+   "date": "2026-08-26",
+   "created_date": "2026-08-28T04:30:23Z",
+   "updated_date": "2026-08-29T05:52:19Z",
+   "type": "Urteil",
+   "ecli": "",
+   "source_url": "https://verwaltungsgericht.bremen.de/sixcms/media.php/13/24_1343_K_2%20.pdf"
+  },
+  {
+   "id": 521971,
+   "slug": "ovgnrw-2026-08-26-19-b-83026",
+   "court": {
+    "id": 823,
+    "name": "Oberverwaltungsgericht Nordrhein-Westfalen",
+    "slug": "ovgnrw",
+    "city": null,
+    "state": 12,
+    "jurisdiction": "Verwaltungsgerichtsbarkeit",
+    "level_of_appeal": null
+   },
+   "file_number": "19 B 830/26",
+   "date": "2026-08-26",
+   "created_date": "2026-08-28T03:45:08Z",
+   "updated_date": "2026-08-29T05:52:19Z",
+   "type": "Beschluss",
+   "ecli": "ECLI:DE:OVGNRW:2026:0826.19B830.26.00",
+   "source_url": "https://nrwe.justiz.nrw.de/ovgs/ovg_nrw/j2026/19_B_830_26_Beschluss_20260826.html"
+  },
+  {
+   "id": 521970,
+   "slug": "ovgnrw-2026-08-26-7-b-57126ne",
+   "court": {
+    "id": 823,
+    "name": "Oberverwaltungsgericht Nordrhein-Westfalen",
+    "slug": "ovgnrw",
+    "city": null,
+    "state": 12,
+    "jurisdiction": "Verwaltungsgerichtsbarkeit",
+    "level_of_appeal": null
+   },
+   "file_number": "7 B 571/26.NE",
+   "date": "2026-08-26",
+   "created_date": "2026-08-28T03:45:07Z",
+   "updated_date": "2026-08-29T05:52:19Z",
+   "type": "Beschluss",
+   "ecli": "ECLI:DE:OVGNRW:2026:0826.7B571.26NE.00",
+   "source_url": "https://nrwe.justiz.nrw.de/ovgs/ovg_nrw/j2026/7_B_571_26_NE_Beschluss_20260826.html"
+  }
+ ]
+}

@@ -1,0 +1,34 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE items [
+ <!ELEMENT items (item)*>
+ <!ELEMENT item (gericht?,entsch-datum?,aktenzeichen?,link,modified)>
+ <!ELEMENT gericht (#PCDATA)>
+ <!ELEMENT entsch-datum (#PCDATA)>
+ <!ELEMENT aktenzeichen (#PCDATA)>
+ <!ELEMENT link (#PCDATA)>
+ <!ELEMENT modified (#PCDATA)>
+]>
+<!-- generator:jps10-V37_35_00_production 10.09.2026 13:53:04, lastBuildDate:26.09.2026 23:56:24 -->
+<items>
+<item>
+ <gericht>BVerwG 9. Senat</gericht>
+ <entsch-datum>20100108</entsch-datum>
+ <aktenzeichen>9 B 3/09</aktenzeichen>
+ <link>http://www.rechtsprechung-im-internet.de/jportal/docs/bsjrs/jb-JURE100054597.zip</link>
+ <modified>2026-04-14T21:14:20.772Z</modified>
+</item>
+<item>
+ <gericht>BVerwG 10. Senat</gericht>
+ <entsch-datum>20100111</entsch-datum>
+ <aktenzeichen>10 C 6/09</aktenzeichen>
+ <link>http://www.rechtsprechung-im-internet.de/jportal/docs/bsjrs/jb-JURE100054926.zip</link>
+ <modified>2026-04-14T21:14:20.772Z</modified>
+</item>
+<item>
+ <gericht>BGH 9. Zivilsenat</gericht>
+ <entsch-datum>20100114</entsch-datum>
+ <aktenzeichen>IX ZB 72/08</aktenzeichen>
+ <link>http://www.rechtsprechung-im-internet.de/jportal/docs/bsjrs/jb-JURE100055033.zip</link>
+ <modified>2025-06-23T21:55:54.378Z</modified>
+</item>
+</items>

@@ -1,0 +1,21 @@
+{"info": {"eval_only": true, "licence": "non-commercial scientific research only (repository notice); the authors claim no copyright", "name": "gerlayqa", "note": "evaluation split bgb_eval.json; never training data (plan P3-Q)", "research_only": true, "source": "https://github.com/trusthlt/eacl24-german-legal-questions@cbc4659", "task": "qa"}}
+{"gold": ["BGB §573b"], "id": "gerlayqa:bgb_eval:0", "sha256": "4a108e78daed132888596a0347c66329bc50dfd9a7beca4d583739e5e06fc223"}
+{"gold": ["BGB §99"], "id": "gerlayqa:bgb_eval:1", "sha256": "6b8e15119d1c538903b0e82e3362d4d13e76e7cf1a09482a1171077cbe0791fc"}
+{"gold": ["BGB §138", "BGB §343", "BGB §313"], "id": "gerlayqa:bgb_eval:2", "sha256": "62e3c254c09937b7819cc9ec99f2d2f2c5b460998bd160c4fe41263bad144dfb"}
+{"gold": ["BGB §212", "BGB §826"], "id": "gerlayqa:bgb_eval:3", "sha256": "8c810f6bc04a7ae406f63b86048a6180ff70b5c3a336f4b802fa434134fad632"}
+{"gold": ["BGB §543"], "id": "gerlayqa:bgb_eval:4", "sha256": "e409b0c83c8c37b1b73bbab63768029d57c4b1fedff0895c96433491f3bf0c70"}
+{"gold": ["BGB §138", "BGB §1184", "BGB §873", "BGB §1191"], "id": "gerlayqa:bgb_eval:5", "sha256": "d8d560391e1ee253f8c3f2fcec046dcaaec83e62c04ff8b29127fb15c09afc24"}
+{"gold": ["BGB §910"], "id": "gerlayqa:bgb_eval:6", "sha256": "7fc2772fc7057b58f5308ba38f758410cc28b7617e475464024b5ab7501d109c"}
+{"gold": ["BGB §1741"], "id": "gerlayqa:bgb_eval:7", "sha256": "7d0e87727853b81f762f62c8c956eaf8198a4721e1ea3eeabc634495d4406258"}
+{"gold": ["BGB §562", "BGB §568"], "id": "gerlayqa:bgb_eval:8", "sha256": "b5d599cadf5ab20baa49f19350209eea8695ce955ab35142fb363d6891c47c90"}
+{"gold": ["BGB §575"], "id": "gerlayqa:bgb_eval:9", "sha256": "eda9934500f8ac2b2f9ba6425071c920d942d67c98f9be113f2d41b095ef406f"}
+{"gold": ["BGB §528"], "id": "gerlayqa:bgb_eval:10", "sha256": "5be82b9a8a62df7b80cc5a98bd459a0a3a6d663bdeead5e4b1ba12d0c243a08b"}
+{"gold": ["BGB §273"], "id": "gerlayqa:bgb_eval:11", "sha256": "0ed6bf8fdf1fead7ab05661179c1a35161a35c072ee928db288a84e578ad486c"}
+{"gold": ["BGB §573c"], "id": "gerlayqa:bgb_eval:12", "sha256": "70014cdf10af87c425cb269653f039be4383a245169d38d60fb25bdbc5f61a31"}
+{"gold": ["BGB §536", "BGB §537", "BGB §538"], "id": "gerlayqa:bgb_eval:13", "sha256": "fa81d5d1e01ae42bb9a480d1b330e68eabfdb8387c2b8146d50dfb5f8247d63b"}
+{"gold": ["BGB §917", "BGB §903"], "id": "gerlayqa:bgb_eval:14", "sha256": "afdc690aeb657cdc67547e05b854314e72ac71c6fcfe034f142bb5beba008c08"}
+{"gold": ["BGB §12"], "id": "gerlayqa:bgb_eval:15", "sha256": "46ebe0f0c01bb7ab7c1fe060afc8b6d35b8c8ebc3dfb42e10e76e794da9f27e7"}
+{"gold": ["BGB §917"], "id": "gerlayqa:bgb_eval:16", "sha256": "2af8274802786b1f0919b0c9fbc3921afc1835901dc5ce96bc80a42de1613592"}
+{"gold": ["BGB §64"], "id": "gerlayqa:bgb_eval:17", "sha256": "0092572f2d1d8876c723f4b03c8cd013cbf9ccc329de2355e8f27e64b8b7c520"}
+{"gold": ["BGB §823", "BGB §280"], "id": "gerlayqa:bgb_eval:18", "sha256": "75fadd3d5b6279f4ba4ecf527036eace67e037e6c5bfcc0477d9f8143eb20297"}
+{"gold": ["BGB §598", "BGB §604"], "id": "gerlayqa:bgb_eval:19", "sha256": "a061d945097171d3fbacb59722117469ab0bcb0109a3638055411598f567d842"}

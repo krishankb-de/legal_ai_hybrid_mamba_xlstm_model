@@ -10,6 +10,9 @@ data/raw/
 data/shards/
 data/hf/
 data/cache/
+data/evalsets/
+data/scrubbed/
+data/probes/
 outputs/
 logs/
 cluster/

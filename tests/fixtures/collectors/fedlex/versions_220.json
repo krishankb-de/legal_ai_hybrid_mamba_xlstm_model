@@ -1,0 +1,224 @@
+{
+ "head": {
+  "link": [],
+  "vars": [
+   "sr",
+   "date",
+   "file"
+  ]
+ },
+ "results": {
+  "distinct": false,
+  "ordered": true,
+  "bindings": [
+   {
+    "sr": {
+     "type": "literal",
+     "datatype": "https://fedlex.data.admin.ch/vocabulary/notation-type/id-systematique",
+     "value": "220"
+    },
+    "date": {
+     "type": "literal",
+     "datatype": "http://www.w3.org/2001/XMLSchema#date",
+     "value": "2021-07-01"
+    },
+    "file": {
+     "type": "uri",
+     "value": "https://fedlex.data.admin.ch/filestore/fedlex.data.admin.ch/eli/cc/27/317_321_377/20210701/de/xml/fedlex-data-admin-ch-eli-cc-27-317_321_377-20210701-de-xml-2.xml"
+    }
+   },
+   {
+    "sr": {
+     "type": "literal",
+     "datatype": "https://fedlex.data.admin.ch/vocabulary/notation-type/id-systematique",
+     "value": "220"
+    },
+    "date": {
+     "type": "literal",
+     "datatype": "http://www.w3.org/2001/XMLSchema#date",
+     "value": "2023-01-01"
+    },
+    "file": {
+     "type": "uri",
+     "value": "https://fedlex.data.admin.ch/filestore/fedlex.data.admin.ch/eli/cc/27/317_321_377/20230101/de/xml/fedlex-data-admin-ch-eli-cc-27-317_321_377-20230101-de-xml-25.xml"
+    }
+   },
+   {
+    "sr": {
+     "type": "literal",
+     "datatype": "https://fedlex.data.admin.ch/vocabulary/notation-type/id-systematique",
+     "value": "220"
+    },
+    "date": {
+     "type": "literal",
+     "datatype": "http://www.w3.org/2001/XMLSchema#date",
+     "value": "2022-01-01"
+    },
+    "file": {
+     "type": "uri",
+     "value": "https://fedlex.data.admin.ch/filestore/fedlex.data.admin.ch/eli/cc/27/317_321_377/20220101/de/xml/fedlex-data-admin-ch-eli-cc-27-317_321_377-20220101-de-xml-7.xml"
+    }
+   },
+   {
+    "sr": {
+     "type": "literal",
+     "datatype": "https://fedlex.data.admin.ch/vocabulary/notation-type/id-systematique",
+     "value": "220"
+    },
+    "date": {
+     "type": "literal",
+     "datatype": "http://www.w3.org/2001/XMLSchema#date",
+     "value": "2023-02-09"
+    },
+    "file": {
+     "type": "uri",
+     "value": "https://fedlex.data.admin.ch/filestore/fedlex.data.admin.ch/eli/cc/27/317_321_377/20230209/de/xml/fedlex-data-admin-ch-eli-cc-27-317_321_377-20230209-de-xml-30.xml"
+    }
+   },
+   {
+    "sr": {
+     "type": "literal",
+     "datatype": "https://fedlex.data.admin.ch/vocabulary/notation-type/id-systematique",
+     "value": "220"
+    },
+    "date": {
+     "type": "literal",
+     "datatype": "http://www.w3.org/2001/XMLSchema#date",
+     "value": "2024-01-01"
+    },
+    "file": {
+     "type": "uri",
+     "value": "https://fedlex.data.admin.ch/filestore/fedlex.data.admin.ch/eli/cc/27/317_321_377/20240101/de/xml/fedlex-data-admin-ch-eli-cc-27-317_321_377-20240101-de-xml-23.xml"
+    }
+   },
+   {
+    "sr": {
+     "type": "literal",
+     "datatype": "https://fedlex.data.admin.ch/vocabulary/notation-type/id-systematique",
+     "value": "220"
+    },
+    "date": {
+     "type": "literal",
+     "datatype": "http://www.w3.org/2001/XMLSchema#date",
+     "value": "2025-07-08"
+    },
+    "file": {
+     "type": "uri",
+     "value": "https://fedlex.data.admin.ch/filestore/fedlex.data.admin.ch/eli/cc/27/317_321_377/20250708/de/xml/fedlex-data-admin-ch-eli-cc-27-317_321_377-20250708-de-xml-4.xml"
+    }
+   },
+   {
+    "sr": {
+     "type": "literal",
+     "datatype": "https://fedlex.data.admin.ch/vocabulary/notation-type/id-systematique",
+     "value": "220"
+    },
+    "date": {
+     "type": "literal",
+     "datatype": "http://www.w3.org/2001/XMLSchema#date",
+     "value": "2023-09-01"
+    },
+    "file": {
+     "type": "uri",
+     "value": "https://fedlex.data.admin.ch/filestore/fedlex.data.admin.ch/eli/cc/27/317_321_377/20230901/de/xml/fedlex-data-admin-ch-eli-cc-27-317_321_377-20230901-de-xml-39.xml"
+    }
+   },
+   {
+    "sr": {
+     "type": "literal",
+     "datatype": "https://fedlex.data.admin.ch/vocabulary/notation-type/id-systematique",
+     "value": "220"
+    },
+    "date": {
+     "type": "literal",
+     "datatype": "http://www.w3.org/2001/XMLSchema#date",
+     "value": "2021-01-01"
+    },
+    "file": {
+     "type": "uri",
+     "value": "https://fedlex.data.admin.ch/filestore/fedlex.data.admin.ch/eli/cc/27/317_321_377/20210101/de/xml/fedlex-data-admin-ch-eli-cc-27-317_321_377-20210101-de-xml-1.xml"
+    }
+   },
+   {
+    "sr": {
+     "type": "literal",
+     "datatype": "https://fedlex.data.admin.ch/vocabulary/notation-type/id-systematique",
+     "value": "220"
+    },
+    "date": {
+     "type": "literal",
+     "datatype": "http://www.w3.org/2001/XMLSchema#date",
+     "value": "2021-05-01"
+    },
+    "file": {
+     "type": "uri",
+     "value": "https://fedlex.data.admin.ch/filestore/fedlex.data.admin.ch/eli/cc/27/317_321_377/20210501/de/xml/fedlex-data-admin-ch-eli-cc-27-317_321_377-20210501-de-xml-1.xml"
+    }
+   },
+   {
+    "sr": {
+     "type": "literal",
+     "datatype": "https://fedlex.data.admin.ch/vocabulary/notation-type/id-systematique",
+     "value": "220"
+    },
+    "date": {
+     "type": "literal",
+     "datatype": "http://www.w3.org/2001/XMLSchema#date",
+     "value": "2026-01-01"
+    },
+    "file": {
+     "type": "uri",
+     "value": "https://fedlex.data.admin.ch/filestore/fedlex.data.admin.ch/eli/cc/27/317_321_377/20260101/de/xml/fedlex-data-admin-ch-eli-cc-27-317_321_377-20260101-de-xml-12.xml"
+    }
+   },
+   {
+    "sr": {
+     "type": "literal",
+     "datatype": "https://fedlex.data.admin.ch/vocabulary/notation-type/id-systematique",
+     "value": "220"
+    },
+    "date": {
+     "type": "literal",
+     "datatype": "http://www.w3.org/2001/XMLSchema#date",
+     "value": "2025-10-01"
+    },
+    "file": {
+     "type": "uri",
+     "value": "https://fedlex.data.admin.ch/filestore/fedlex.data.admin.ch/eli/cc/27/317_321_377/20251001/de/xml/fedlex-data-admin-ch-eli-cc-27-317_321_377-20251001-de-xml-8.xml"
+    }
+   },
+   {
+    "sr": {
+     "type": "literal",
+     "datatype": "https://fedlex.data.admin.ch/vocabulary/notation-type/id-systematique",
+     "value": "220"
+    },
+    "date": {
+     "type": "literal",
+     "datatype": "http://www.w3.org/2001/XMLSchema#date",
+     "value": "2025-01-01"
+    },
+    "file": {
+     "type": "uri",
+     "value": "https://fedlex.data.admin.ch/filestore/fedlex.data.admin.ch/eli/cc/27/317_321_377/20250101/de/xml/fedlex-data-admin-ch-eli-cc-27-317_321_377-20250101-de-xml-33.xml"
+    }
+   },
+   {
+    "sr": {
+     "type": "literal",
+     "datatype": "https://fedlex.data.admin.ch/vocabulary/notation-type/id-systematique",
+     "value": "220"
+    },
+    "date": {
+     "type": "literal",
+     "datatype": "http://www.w3.org/2001/XMLSchema#date",
+     "value": "2021-02-01"
+    },
+    "file": {
+     "type": "uri",
+     "value": "https://fedlex.data.admin.ch/filestore/fedlex.data.admin.ch/eli/cc/27/317_321_377/20210201/de/xml/fedlex-data-admin-ch-eli-cc-27-317_321_377-20210201-de-xml-1.xml"
+    }
+   }
+  ]
+ }
+}

@@ -14,11 +14,17 @@ Exit code 1 on any failure.
 
     .venv/bin/python scripts/check_env.py
     .venv/bin/python scripts/check_env.py --expect-python 3.12      # CI forward-compat matrix entry
+    envs/scrub/.venv/bin/python scripts/check_env.py --scrub       # the LER scrub's own environment
+
+``--scrub`` checks the scrub environment of decision 22 instead (``envs/scrub``: its own
+``.python-version`` and ``uv.lock``, the imports flair, torch and transformers, transformers below 5,
+and no ``lexhybrid``, which that environment must not install).
 """
 
 import argparse
 import importlib
 import importlib.metadata as md
+import importlib.util
 import json
 import os
 import re
@@ -44,6 +50,17 @@ KEY_IMPORTS = (
     "yaml",
 )
 EXPECTED_CUDA = {"linux": "12.8", "darwin": None}
+SCRUB_ROOT = REPO_ROOT / "envs" / "scrub"
+SCRUB_IMPORTS = ("flair", "torch", "transformers")
+
+
+def check_scrub_transformers(version: str) -> list[str]:
+    """Decision 22: the scrub environment exists because flair needs transformers < 5."""
+    return (
+        []
+        if Version(version).major < 5
+        else [f"transformers {version} in the scrub environment; flair needs < 5"]
+    )
 
 
 def expected_python(root: Path = REPO_ROOT) -> str:
@@ -150,29 +167,35 @@ def main(argv=None) -> int:
     ap.add_argument("--expect-python", default=os.environ.get("LEXHYBRID_EXPECT_PYTHON"))
     ap.add_argument("--no-lock", action="store_true", help="skip the uv.lock parity check")
     ap.add_argument("--allow-non-editable", action="store_true", help="for the wheel-install CI job")
+    ap.add_argument("--scrub", action="store_true", help="check the LER scrub environment (envs/scrub)")
     args = ap.parse_args(argv)
 
+    root = SCRUB_ROOT if args.scrub else REPO_ROOT
     problems: list[str] = []
-    expected = args.expect_python or expected_python()
+    expected = args.expect_python or expected_python(root)
     problems += check_python(expected)
     print(f"  python       {sys.version.split()[0]} (expected {expected}.x) at {sys.executable}")
 
     if not args.no_lock:
         try:
-            mismatches, missing = compare_installed(parse_export(uv_export()), installed_distributions())
+            mismatches, missing = compare_installed(parse_export(uv_export(root)), installed_distributions())
             problems += mismatches + [f"missing: {m}" for m in missing]
             print(f"  uv.lock      {len(mismatches)} version mismatch(es), {len(missing)} missing")
         except (FileNotFoundError, subprocess.CalledProcessError) as exc:
             problems.append(f"could not read the lock: {exc}")
 
-    for mod in KEY_IMPORTS:
+    for mod in SCRUB_IMPORTS if args.scrub else KEY_IMPORTS:
         try:
             m = importlib.import_module(mod)
             print(f"  import       {mod:<18} {getattr(m, '__version__', '?')}")
         except Exception as exc:  # noqa: BLE001
             problems.append(f"import {mod} failed: {exc}")
 
-    if not args.allow_non_editable:
+    if args.scrub:
+        problems += check_scrub_transformers(md.version("transformers"))
+        if importlib.util.find_spec("lexhybrid") is not None:
+            problems.append("lexhybrid is importable in the scrub environment; it must stay separate")
+    elif not args.allow_non_editable:
         problems += check_editable()
 
     try:
@@ -188,7 +211,12 @@ def main(argv=None) -> int:
         for p in problems:
             print(f"  - {p}")
         return 1
-    print("ENVIRONMENT OK: interpreter, locked versions, imports, editable install and torch build all match")
+    if args.scrub:
+        print("ENVIRONMENT OK (scrub): interpreter, locked versions, imports, transformers < 5, no lexhybrid")
+    else:
+        print(
+            "ENVIRONMENT OK: interpreter, locked versions, imports, editable install and torch build all match"
+        )
     return 0
 
 

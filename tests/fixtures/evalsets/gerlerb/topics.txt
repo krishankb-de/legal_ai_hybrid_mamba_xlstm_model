@@ -1,0 +1,4 @@
+qid	query
+206	Kann die Ablehnung der Annahme einer Verfassungsbeschwerde ohne Begründung erfolgen?
+207	Wann muss der Arbeitgeber den Betriebsrat bei einer neuen Zuordnung von Mitarbeitern zu einer Entgeltgruppe informieren?
+209	Unter welchen Bedingungen kann der Zeitraum zur Berechnung des Elterngeldes verlängert werden, wenn es zu einer krankheitsbedingten Arbeitsunfähigkeit durch Schwangerschaft kommt?

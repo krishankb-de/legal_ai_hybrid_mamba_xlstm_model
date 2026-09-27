@@ -459,3 +459,50 @@ def test_train_pretrain_script_runs_and_resumes(tmp_path, script):
     )
     with pytest.raises(FileNotFoundError):
         tp.run(_compose(*overrides, f"+resume_from_checkpoint={tmp_path / 'missing.ckpt'}"))
+
+
+def test_train_pretrain_runs_on_packed_shards(tmp_path, script):
+    """P3-V: the entry point trains on the packed-shard mixture (dataset=legal_smoke retargeted at
+    shards built here with a toy one-id-per-character tokenizer)."""
+    import json
+
+    from lexhybrid.data.corpus.collectors.fineweb2_de import parse_fineweb_row
+    from lexhybrid.data.corpus.collectors.oldp import parse_oldp_case
+    from lexhybrid.data.datasets import build_source_shards
+    from tests.conftest import REPO_ROOT
+
+    fixtures = REPO_ROOT / "tests" / "fixtures" / "collectors"
+    oldp = [
+        parse_oldp_case(json.loads(p.read_text())) for p in sorted((fixtures / "oldp").glob("case_*.json"))
+    ]
+    web = [parse_fineweb_row(r) for r in json.loads((fixtures / "fineweb2_de" / "rows.json").read_text())]
+    encode = lambda text: [min(ord(c), 1022) + 1 for c in text]  # noqa: E731 -- ids < 1024, EOS 0
+    for docs in (oldp, web):
+        build_source_shards(docs, encode, 0, 32, tmp_path / "shards", fraction=0.001, minimum=1)
+    tp = script("train_pretrain")
+    trainer = tp.run(
+        _compose(
+            "dataset=legal_smoke",
+            f"dataset.shards_root={tmp_path / 'shards'}",
+            "dataset.row_len=32",
+            "dataset.train_samples=8",
+            "dataset.batch_size=2",
+            "~dataset.sources",
+            "+dataset.sources={oldp:{group:legal},fineweb2_de:{group:general}}",
+            "model.vocab_size=1024",
+            "model.dim=32",
+            "model.num_layers=2",
+            "model.layer_pattern=[mamba3,mlstm]",
+            "model.num_heads=2",
+            "model.head_dim=16",
+            "model.mamba3_head_dim=16",
+            "model.mamba3_d_state=16",
+            "model.max_position_embeddings=64",
+            "model.tfla_impl=exact",
+            "model.mlstm_chunk_size=8",
+            "trainer=cpu_debug",
+            f"output_dir={tmp_path / 'out'}",
+            "+logger=false",
+        )  # fmt: skip
+    )
+    assert trainer.global_step == 2

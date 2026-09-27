@@ -198,12 +198,13 @@ def test_screen_arms_verify_reduced(script):
     assert arms.main(["verify", "--reduced"]) == 0
 
 
-def test_screen_arms_verify_full_reports_the_open_s5_band(script, capsys):
-    """Full size on `meta` with the bands: every arm passes except S5, whose pre-registered <= 1% band
-    does not hold (+2.36%, P2-W) -- a recorded negative that blocks preflight until decided."""
+def test_screen_arms_verify_full_passes_with_the_decided_s5_band(script, capsys):
+    """Full size on `meta` with the bands: every arm passes; S5 carries +2.36% as a stated difference
+    inside ±2.5% (user decision 2026-09-27, plan §14)."""
     arms = script("screen_arms")
-    problems = arms.verify(reduced=False, full=True)
-    assert problems == ["S5: non-embedding delta +2.36% outside the pre-registered band +-1%"]
+    assert arms.verify(reduced=False, full=True) == []
+    assert arms.ARMS["S5"].band_pct == 2.5
+    assert "S5: non-embedding 106,527,072 (+2.36%, band +-2.5%) ok" in capsys.readouterr().out
 
 
 def test_screen_arm_env_is_what_the_wrapper_evals(script):
@@ -235,3 +236,30 @@ def test_screen_arm_expect_tokens_catch_a_lever_that_did_not_arrive(script):
     assert (
         arms.check_tokens("S0", base.architecture_fingerprint())[-1] == "S0: ARCH shows forbidden 'attention'"
     )
+
+
+# -- tokenizer fertility (P3-D) -----------------------------------------------------------------
+
+
+def test_fertility_sampling_and_arithmetic(script):
+    """P3-D's method as pre-registered: whole documents until the word budget, documents over the cap
+    skipped; tokens/word per source and pooled word-weighted."""
+    from types import SimpleNamespace
+
+    mf = script("measure_fertility")
+    docs = [SimpleNamespace(text=" ".join(["w"] * n)) for n in (4, 100, 3, 5, 2)]
+    assert [len(d.text.split()) for d in mf.take(docs, words=8, max_doc_words=50)] == [4, 3, 5]
+    rows = mf.measure({"a": ["x y", "z"], "b": ["p q r s"]}, {"chars": lambda t: list(t.replace(" ", ""))})
+    assert [(r["source"], r["words"], r["tokens"], r["fertility"]) for r in rows] == [
+        ("a", 3, 3, 1.0),
+        ("b", 4, 4, 1.0),
+    ]
+    pooled = mf.pooled(rows, ("a", "b"), "chars")
+    assert (pooled["words"], pooled["tokens"], pooled["docs"]) == (7, 7, 3)
+
+
+def test_fertility_reads_every_collector_fixture_offline(script):
+    mf = script("measure_fertility")
+    texts = mf.fixture_texts()
+    assert set(texts) == set(mf.LEGAL)
+    assert all(texts[s] and all(t.strip() for t in texts[s]) for s in mf.LEGAL)

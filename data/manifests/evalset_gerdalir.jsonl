@@ -1,0 +1,21 @@
+{"info": {"eval_only": true, "licence": "MIT", "name": "gerdalir", "note": "queries and decisions from Open Legal Data; citations masked as [REF], dates as [DATE]", "research_only": false, "source": "https://huggingface.co/datasets/mteb/GerDaLIRSmall@b199f38", "task": "retrieval"}}
+{"id": "00000", "relevant": ["SOlJarKNHX"], "sha256": "9e1080a6672a06a934b056af4e1a97acfb57d5b040bc4e67657f7842a0cd6a16"}
+{"id": "00001", "relevant": ["iQ4h87ojuP"], "sha256": "b592ee95a98339cb52bb638b2c2449c796ffaadb93b6e094f248dbcb40f7974d"}
+{"id": "00002", "relevant": ["OLJV9vs0Lj"], "sha256": "c614ef733f53ac09b73f28c0f2b526ae3f158b316736d2ab8c6c4715df3f1c4c"}
+{"id": "00003", "relevant": ["3v8cpIfuZb"], "sha256": "e57559ea73b56e3863bc7ebf992c9375349d44834ca51ae85f2c32b54dc4fceb"}
+{"id": "00004", "relevant": ["aqQkSeIqWI"], "sha256": "98800c2c35502abf6a1cd1b3f803c5e1cf208ad14a26a2f1a15397a52beb2e13"}
+{"id": "00005", "relevant": ["SmeHv5ei29"], "sha256": "26129dfb0fe32082dabb2da275233295687ccdf9df6226c7227adbedbe8dc98f"}
+{"id": "00006", "relevant": ["WIlnoCqNl4"], "sha256": "c3f13cf67351efa5a62b1d26fb7c86d788a954d8177011005bf5298e0b6b6d04"}
+{"id": "00007", "relevant": ["FSOfjTwGkH"], "sha256": "9f272ba5a2df78694c2fd5cd813ba4abfe332e56b4c2eaa992bf7debefedad16"}
+{"id": "00008", "relevant": ["ehskDwswc3"], "sha256": "abb7c57934400e2b0d0b417070c0c4414574537b1f9a86ed4c6866787f5d3274"}
+{"id": "00009", "relevant": ["FSOfjTwGkH"], "sha256": "f68f06c808e68ac82a395e66689b4f557a8b5fd01ff187324fab2f0718b23950"}
+{"id": "00010", "relevant": ["GBGBiCG8zp"], "sha256": "9e860b08217cd04af48791df18196b3b038e9e1740b4f5ebf0b044712d35d38c"}
+{"id": "00011", "relevant": ["bR1xHgQMv8"], "sha256": "a2d5a4e8aeb41e38ef232b4f43762d555d8e01a36fef93d64db36acd5f6fa868"}
+{"id": "00012", "relevant": ["6p5tl5FtQ7"], "sha256": "83a9d69d08421f2685eba37116bc722b392fb4ad0b09db61b835ef61290052cf"}
+{"id": "00013", "relevant": ["ZBW9Ob1y4A", "vdwAU2SzDw"], "sha256": "7d84662ce16db44d3c7ff9104bf2a12d5001c806774390aa7c1dd07e1b564295"}
+{"id": "00014", "relevant": ["bdrKTO93ry"], "sha256": "17e4c049c5f43528ef5ad5045386be25b8cfc5dd451ccc3d40b709d4414af8f1"}
+{"id": "00015", "relevant": ["5rHhraHsUT"], "sha256": "8cba5275ec7cd0af9797933513dd77e9bb91fa5ca39a10865964017388ed196f"}
+{"id": "00016", "relevant": ["NcLl0Wn2RN"], "sha256": "31bdde36b0c5177ab4780136636bd40b91edaf527e679a3a633c9f88b3db59fd"}
+{"id": "00017", "relevant": ["XTsRzZCfGL", "XVKXSL9ngi"], "sha256": "33f603ec24d9a05af8724dd1c14643483eca9ba02a5273395faa0227b66cd2de"}
+{"id": "00018", "relevant": ["c0mjbslAAk"], "sha256": "24ac6b3d25ccbc05fac9c3fce2fa6fa5c5e79d8f52166deedf652e80a246ca56"}
+{"id": "00019", "relevant": ["UIFwra15oV"], "sha256": "8a3bf7c084fcae5c561d8ca7e549b5c05f03d9af7db5695427d69330d3c7a140"}
