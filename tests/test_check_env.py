@@ -5,7 +5,7 @@ import subprocess
 
 import pytest
 
-from tests.conftest import load_script
+from tests.conftest import REPO_ROOT, load_script
 
 CE = load_script("check_env")
 
@@ -107,3 +107,28 @@ def test_live_export_parses_under_force_color(monkeypatch):
     reqs = CE.parse_export(CE.uv_export())
     names = {r.name for r in reqs}
     assert {"torch", "numpy", "pytorch-lightning"} <= names
+
+
+# -- the scrub environment (decision 22, plan P3-R1) --------------------------------------------
+
+
+def test_scrub_environment_is_its_own_uv_project():
+    import tomllib
+
+    cfg = tomllib.loads((REPO_ROOT / "envs" / "scrub" / "pyproject.toml").read_text())
+    deps = cfg["project"]["dependencies"]
+    assert any(d.startswith("flair==") for d in deps) and "torch==2.11.0" in deps
+    assert not any(d.startswith(("lexhybrid", "transformers>=5")) for d in deps)
+    assert cfg["tool"]["uv"]["package"] is False
+    assert (REPO_ROOT / "envs" / "scrub" / "uv.lock").exists()
+    assert (REPO_ROOT / "envs" / "scrub" / ".python-version").read_text().strip() == "3.11"
+
+
+def test_scrub_check_bites_outside_the_scrub_environment(script, capsys):
+    """Run from the main environment, `--scrub` must fail: no flair, transformers 5, lexhybrid present."""
+    check_env = script("check_env")
+    assert check_env.check_scrub_transformers("4.57.6") == []
+    assert check_env.check_scrub_transformers("5.17.0") != []
+    assert check_env.main(["--scrub", "--no-lock"]) == 1
+    out = capsys.readouterr().out
+    assert "import flair failed" in out and "lexhybrid is importable in the scrub environment" in out

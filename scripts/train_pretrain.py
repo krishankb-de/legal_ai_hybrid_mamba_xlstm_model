@@ -97,10 +97,19 @@ def build_teacher(cfg: DictConfig):
 
 
 def build_dataloaders(cfg: DictConfig, vocab_size: int):
-    """Train/val loaders for the configured dataset; P3 adds packed parquet shards."""
+    """Train/val loaders: seeded synthetic rows, or the packed-shard mixture (P3-V)."""
     d = cfg.dataset
+    if d.name == "packed":
+        from lexhybrid.data.datasets import mixture_from_config
+
+        train, val = mixture_from_config(d, "train"), mixture_from_config(d, "val")
+        # The training order is the mixture's seeded schedule: no shuffling on top (resumable).
+        return (
+            DataLoader(train, batch_size=d.batch_size, shuffle=False, num_workers=d.num_workers),
+            DataLoader(val, batch_size=d.eval_batch_size, num_workers=d.num_workers),
+        )
     if d.name != "synthetic":
-        raise ValueError(f"dataset {d.name!r} is not available yet (P3 adds the packed shards)")
+        raise ValueError(f"unknown dataset {d.name!r} (synthetic or packed)")
     common = dict(
         row_len=d.row_len, vocab_size=vocab_size, min_doc_len=d.min_doc_len, max_doc_len=d.max_doc_len
     )

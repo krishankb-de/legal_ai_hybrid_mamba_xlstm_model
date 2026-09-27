@@ -1,0 +1,33 @@
+{
+ "date": "2026-09-16",
+ "reference": [
+  "1C_464/2026"
+ ],
+ "attachment": {
+  "content_type": "text/html; charset=UTF-8",
+  "language": "de",
+  "content_url": "https://entscheidsuche.ch/docs/CH_BGer/CH_BGer_001_1C-464-2026_2026-09-16.html",
+  "source": "446973/45/2805",
+  "content_length": 6630
+ },
+ "meta": {
+  "de": "Eidgenossenschaft Bundesgericht I. Öffentlich-rechtliche Abteilung",
+  "it": "Confederazione Tribunale federale I Corte di diritto pubblico",
+  "fr": "Conféderation Tribunal fédéral Ire Cour de droit public"
+ },
+ "scrapedate": "2026-09-25",
+ "hierarchy": [
+  "CH",
+  "CH_BGer",
+  "CH_BGer_001"
+ ],
+ "canton": "CH",
+ "language": "de",
+ "source": "446973/45/2805",
+ "id": "CH_BGer_001_1C-464-2026_2026-09-16",
+ "title": {
+  "de": "Bundesgericht I. Öffentlich-rechtliche Abteilung 16.09.2026 1C_464/2026",
+  "it": "Tribunale federale I Corte di diritto pubblico 16.09.2026 1C_464/2026",
+  "fr": "Tribunal fédéral Ire Cour de droit public 16.09.2026 1C_464/2026"
+ }
+}

@@ -1,0 +1,17 @@
+# The P3-Z smoke: a few hundred KB of scrubbed, packed documents from the P3 collections, trained
+# for two CPU steps (scripts/train_pretrain.py trainer=cpu_debug dataset=legal_smoke). Build first:
+#   .venv/bin/python scripts/build_shards.py --root data/shards/smoke --row-len 4096 \
+#       --val-fraction 0.1 --min-val-docs 2 --sources gii rii oldp eurlex ris fedlex bger dip fineweb2_de
+defaults:
+  - mixture_pretrain
+  - _self_
+
+shards_root: data/shards/smoke
+train_samples: 100
+val_fraction: 0.1
+min_val_docs: 2
+batch_size: 1
+eval_batch_size: 1
+num_workers: 0
+sources:
+  multilegalpile: {group: legal, weight: 0.0, arm: research}

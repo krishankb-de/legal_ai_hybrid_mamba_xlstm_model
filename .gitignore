@@ -28,6 +28,9 @@ data/raw/
 data/shards/
 data/hf/
 data/cache/
+data/evalsets/
+data/scrubbed/
+data/probes/
 
 # Run outputs and pulled cluster logs
 outputs/

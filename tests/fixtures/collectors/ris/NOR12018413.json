@@ -1,0 +1,68 @@
+{
+ "Data": {
+  "Metadaten": {
+   "Technisch": {
+    "ID": "NOR12018413",
+    "Applikation": "BrKons",
+    "Organ": "BKA (Bundeskanzleramt)",
+    "ImportTimestamp": {
+     "@xsi:nil": "true",
+     "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance"
+    }
+   },
+   "Allgemein": {
+    "Geaendert": "2015-08-07",
+    "DokumentUrl": "https://ogd.ris.bka.gv.at/eli/jgs/1811/946/P688/NOR12018413"
+   },
+   "Bundesrecht": {
+    "Kurztitel": "Allgemeines bürgerliches Gesetzbuch",
+    "Eli": "https://www.ris.bka.gv.at/eli/jgs/1811/946/P688/NOR12018413",
+    "BrKons": {
+     "Kundmachungsorgan": "JGS Nr. 946/1811",
+     "Typ": "BG",
+     "Dokumenttyp": "Paragraph",
+     "ArtikelParagraphAnlage": "§ 688",
+     "Paragraphnummer": "688",
+     "StammnormPublikationsorgan": "JGS Nr.",
+     "StammnormBgblnummer": "946/1811",
+     "Inkrafttretensdatum": "1812-01-01",
+     "Ausserkrafttretensdatum": "2016-12-31",
+     "Abkuerzung": "ABGB",
+     "Indizes": {
+      "item": "20/01 Allgemeines bürgerliches Gesetzbuch (ABGB)"
+     },
+     "Aenderung": "",
+     "Gesetzesnummer": "10001622",
+     "AlteDokumentnummer": "N2181110894Z",
+     "GesamteRechtsvorschriftUrl": "https://ogd.ris.bka.gv.at/GeltendeFassung.wxe?Abfrage=Bundesnormen&Gesetzesnummer=10001622"
+    }
+   }
+  },
+  "Dokumentliste": {
+   "ContentReference": {
+    "ContentType": "MainDocument",
+    "Name": "Hauptdokument",
+    "Urls": {
+     "ContentUrl": [
+      {
+       "DataType": "Xml",
+       "Url": "https://ogd.ris.bka.gv.at/Dokumente/Bundesnormen/NOR12018413/NOR12018413.xml"
+      },
+      {
+       "DataType": "Html",
+       "Url": "https://ogd.ris.bka.gv.at/Dokumente/Bundesnormen/NOR12018413/NOR12018413.html"
+      },
+      {
+       "DataType": "Rtf",
+       "Url": "https://ogd.ris.bka.gv.at/Dokumente/Bundesnormen/NOR12018413/NOR12018413.rtf"
+      },
+      {
+       "DataType": "Pdf",
+       "Url": "https://ogd.ris.bka.gv.at/Dokumente/Bundesnormen/NOR12018413/NOR12018413.pdf"
+      }
+     ]
+    }
+   }
+  }
+ }
+}

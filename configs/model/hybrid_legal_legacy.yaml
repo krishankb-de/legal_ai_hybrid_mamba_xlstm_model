@@ -54,9 +54,9 @@ num_heads: 12
 proj_factor: 2
 mlstm_gate_soft_cap: 15.0
 mlstm_input_gate_bias_init: -10.0
-mlstm_forget_gate_bias_init: 3.0  # the base's value. OPEN (P2-W note): the reference ran at an effective
-# 0.0, where the legacy TFLA clamp is active from step 0 (rel-err 0.88); at 3.0 it barely bites at init.
-# Choosing 0.0 would add a second lever to S5; decided with S5's parameter band.
+mlstm_forget_gate_bias_init: 3.0  # the base's value, decided 2026-09-27 (user, plan §14): S5's one lever
+# is the legacy operator; the reference's effective 0.0 came from defect 3 (an init bug), and at 0.0 the
+# mLSTM kernel falls onto its slow sequential path at chunk 128 (a second, confounding lever).
 mlstm_chunk_size: 128
 
 # Attention (12 heads x 64; KV cache in decode)

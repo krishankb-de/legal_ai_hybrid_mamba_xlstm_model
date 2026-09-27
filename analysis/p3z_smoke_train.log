@@ -1,0 +1,24 @@
+start 2026-09-27T19:10:40Z
+Seed set to 42
+[run_metadata] wrote outputs/p3z_smoke/run_metadata.json
+[2026-09-27 21:10:49,366][lexhybrid.models.hybrid_lm][INFO] - ARCH layers=[attentionx2, mamba3x7, mlstmx3] | norm_topology=hybrid | scan_impl=exact | tfla_impl=exact | dt_init=none | vocab=151936 | tied=True | mamba3(d_state=128, head_dim=64, ngroups=1, conv=True, trapezoid=False, rope=False, bc_bias=none, a_mode=static, mimo_rank=1, expand=2, chunk=128) | mlstm(chunk_size=128, forget_bias=3.0, fallback=error) | attn(rope_theta=500000, impl=auto, kv_cache=True) | params=220,753,720 | params_nonembed=104,066,872
+ARCH layers=[attentionx2, mamba3x7, mlstmx3] | norm_topology=hybrid | scan_impl=exact | tfla_impl=exact | dt_init=none | vocab=151936 | tied=True | mamba3(d_state=128, head_dim=64, ngroups=1, conv=True, trapezoid=False, rope=False, bc_bias=none, a_mode=static, mimo_rank=1, expand=2, chunk=128) | mlstm(chunk_size=128, forget_bias=3.0, fallback=error) | attn(rope_theta=500000, impl=auto, kv_cache=True) | params=220,753,720 | params_nonembed=104,066,872
+GPU available: True (mps), used: False
+TPU available: False, using: 0 TPU cores
+/Users/krishankumar.bhushan/Desktop/Projects/Legal AI Hybrid Model Mamba XLstm/.venv/lib/python3.11/site-packages/pytorch_lightning/trainer/setup.py:175: GPU available but not used. You can set it by doing `Trainer(accelerator='gpu')`.
+💡 Tip: For seamless cloud logging and experiment tracking, try installing [litlogger](https://pypi.org/project/litlogger/) to enable LitLogger, which logs metrics and artifacts automatically to the Lightning Experiments platform.
+`Trainer(limit_val_batches=1)` was configured so 1 batch will be used.
+`Trainer(val_check_interval=1)` was configured so validation will run after every batch.
+/Users/krishankumar.bhushan/Desktop/Projects/Legal AI Hybrid Model Mamba XLstm/.venv/lib/python3.11/site-packages/pytorch_lightning/utilities/_pytree.py:21: `isinstance(treespec, LeafSpec)` is deprecated, use `isinstance(treespec, TreeSpec) and treespec.is_leaf()` instead.
+/Users/krishankumar.bhushan/Desktop/Projects/Legal AI Hybrid Model Mamba XLstm/.venv/lib/python3.11/site-packages/pytorch_lightning/trainer/connectors/data_connector.py:434: The 'train_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=7` in the `DataLoader` to improve performance.
+/Users/krishankumar.bhushan/Desktop/Projects/Legal AI Hybrid Model Mamba XLstm/.venv/lib/python3.11/site-packages/pytorch_lightning/trainer/connectors/data_connector.py:434: The 'val_dataloader' does not have many workers which may be a bottleneck. Consider increasing the value of the `num_workers` argument` to `num_workers=7` in the `DataLoader` to improve performance.
+`Trainer.fit` stopped: `max_steps=2` reached.
+HF_HUB_OFFLINE=1 .venv/bin/python scripts/train_pretrain.py trainer=cpu_debug  95.41s user 52.25s system 93% cpu 2:37.90 total
+train_pretrain exit=0
+-- logged scalars (outputs/p3z_smoke/logs) --
+train/loss [(0, 12.1124), (1, 12.0651)]
+train/ce [(0, 12.1124), (1, 12.0651)]
+train/grad_norm [(0, 3.517), (1, 4.0859)]
+train/n_supervised_tokens [(0, 1773.0), (1, 1638.0)]
+val/loss [(0, 12.0509), (1, 12.0324)]
+val/perplexity [(0, 171245.0625), (1, 168110.7344)]

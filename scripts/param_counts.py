@@ -81,10 +81,12 @@ def render(rows: list[dict]) -> str:
         )
     lines += [
         "",
-        "Bands pre-registered in the plan (P2-W): Transformer within ±2.5% of the base; each screen variant",
-        "within ±3%; the legacy ablation within 1%. The legacy band does not hold for the 9 x mamba +",
-        "3 x mlstm shape of P2-V (see the table); it is recorded as a strict expected failure in",
-        "`tests/test_config_invariants.py` and waits for a user decision (P2 notes).",
+        "Bands (P2-W): Transformer within ±2.5% of the base; each screen variant within ±3%, its delta",
+        "reported. The legacy ablation (S5) was pre-registered at <= 1% but measures +2.36% for the",
+        "9 x mamba + 3 x mlstm shape; by the user's decision of 2026-09-27 (plan §14) it is reported as a",
+        "stated difference inside ±2.5%, not reshaped: S5 measures the old recipe, PPL/probe-only, and",
+        "the difference favours legacy, so a hybrid win is conservative and a legacy win inside the",
+        "margin is inconclusive.",
         "",
     ]
     return "\n".join(lines)

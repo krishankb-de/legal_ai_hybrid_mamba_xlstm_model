@@ -1,0 +1,79 @@
+{
+ "data": [
+  {
+   "paragraphs": [
+    {
+     "qas": [
+      {
+       "question": "Was ist mit der Prozeßbürgschaft im vorliegenden Beschluss passiert?",
+       "id": 118133,
+       "answers": [
+        {
+         "answer_id": 181385,
+         "document_id": 166976,
+         "question_id": 118133,
+         "text": "Prozeßbürgschaft Nr. 98003667 B/AV der Kredietbank-Bankverein AG über insgesamt 850.000,00 DM, die bisher zu Gunsten der Klägerin bestanden hat, erloschen ist",
+         "answer_start": 31,
+         "answer_category": null
+        }
+       ],
+       "is_impossible": false
+      }
+     ],
+     "context": "TenorEs wird festgestellt, daß Prozeßbürgschaft Nr. 98003667 B/AV der Kredietbank-Bankverein AG über insgesamt 850.000,00 DM, die bisher zu Gunsten der Klägerin bestanden hat, erloschen ist.1G r ü n d e2Nachdem die Klägerin mit Schriftsatz vom 15.3.1999 dem Senateine Einwilligungserklärung abgegeben hat, die inhaltlich Ziffer 1)des Senatsbeschlusses vom 26.2.1999 entspricht, ist - wie dies indem Senatsbeschluß unter II 2 (S.8) bereits angekündigt worden ist- auf den Antrag zu 2) der Beklagten vom 20.1.1999 auszusprechen,daß die Bürgschaft erloschen ist. Entgegen der Auffassung derKlägerin ist dieser Antrag durch die Einwilligungserklärung nichtgegenstandslos geworden (vgl. Stein-Jonas-Bork, ZPO, § 109 RZ22).3Dr.Schwippert Pietsch von Hellfeld4- 2 -",
+     "document_id": 166976
+    }
+   ]
+  },
+  {
+   "paragraphs": [
+    {
+     "qas": [
+      {
+       "question": "Wann kommt die Einstellung einer Zwangsvollstreckung bei Unterlassungsverfügungen in Frage?",
+       "id": 120711,
+       "answers": [
+        {
+         "answer_id": 184200,
+         "document_id": 167023,
+         "question_id": 120711,
+         "text": "Bei einer Unterlassungsverfügung, die ohne mündliche Verhandlung erlassen wurde, kommt eine Einstellung der Zwangsvollstreckung gem. §§ 924 Abs. 3 S. 2, 936, 707, 719 ZPO nur ausnahmsweise bei Vorliegen besonderer Umstände in Frage (vgl. Zöller-Vollkommer ZPO Kommentar 31. Aufl., § 924 Rn 13 mwN)",
+         "answer_start": 233,
+         "answer_category": null
+        }
+       ],
+       "is_impossible": false
+      }
+     ],
+     "context": "TenorDer Antrag mit Schriftsatz vom 07.03.2017, die Zwangsvollstreckung aus dem Beschluss vom 20.02.2017 einzustellen, wird zurückgewiesen.Gründe1Der Antrag auf einstweilige Einstellung der Zwangsvollstreckung ist zurückzuweisen. Bei einer Unterlassungsverfügung, die ohne mündliche Verhandlung erlassen wurde, kommt eine Einstellung der Zwangsvollstreckung gem. §§ 924 Abs. 3 S. 2, 936, 707, 719 ZPO nur ausnahmsweise bei Vorliegen besonderer Umstände in Frage (vgl. Zöller-Vollkommer ZPO Kommentar 31. Aufl., § 924 Rn 13 mwN). Solche besonderen Umstände hat die Antragsgegnerin nicht vorgetragen. Die insoweit erforderliche Abwägung der beiderseitigen Interessen fällt zu Lasten der Antragsgegnerin aus. Nach dem Vortrag der Antragsgegnerin ist nicht offensichtlich, dass die einstweilige Verfügung nach der mündlichen Verhandlung aufgrund der im Schriftsatz vom 07.03.2017 vorgebrachten Erwägungen aufzuheben wäre. Diese Entscheidung kann vielmehr erst nach Würdigung aller vorgelegten Mittel zur Glaubhaftmachung erfolgen und bleibt deshalb dem Schluss der mündlichen Verhandlung vorbehalten.",
+     "document_id": 167023
+    }
+   ]
+  },
+  {
+   "paragraphs": [
+    {
+     "qas": [
+      {
+       "question": "Ist eine Beschwerde durch die einstweilige Anordnung ergangen?",
+       "id": 121833,
+       "answers": [
+        {
+         "answer_id": 185520,
+         "document_id": 167070,
+         "question_id": 121833,
+         "text": "Die einstweilige Anordnung hat zu ergehen, da eine Verfassungsbeschwerde offensichtlich begründet wäre (vgl. BVerfGE 111, 147 ‹153>)",
+         "answer_start": 453,
+         "answer_category": null
+        }
+       ],
+       "is_impossible": false
+      }
+     ],
+     "context": "Tenor1. Die aufschiebende Wirkung der Klage der Antragsteller gegen den versammlungsrechtlichen Bescheid des Polizeipräsidiums Duisburg vom 30. Oktober 2013 - ZA 11 - 57.02.01 (181, 182/13) - hinsichtlich der Auflage unter Ziffer 1., wonach die angemeldeten Versammlungen nicht am 9. November 2013 durchgeführt werden dürfen, wird wiederhergestellt.2. Das Land Nordrhein-Westfalen hat den Antragstellern die notwendigen Auslagen zu erstatten.Gründe1Die einstweilige Anordnung hat zu ergehen, da eine Verfassungsbeschwerde offensichtlich begründet wäre (vgl. BVerfGE 111, 147 <153>). Zu Recht sehen die angegriffenen Entscheidungen in dem 9. November einen Tag mit wichtiger Symbolkraft, der sich mit dem Gedenken an die menschenverachtenden nationalsozialistischen Pogrome des 9. November 1938 verbindet. Demgegenüber stützen sich die angegriffenen Entscheidungen in konkret-tatsächlicher Hinsicht jedoch letztlich im Wesentlichen nur auf die Tatsache, dass die Antragstellerin zu 2) als eine dem rechten Spektrum zugerechnete Gruppierung in der Nähe zu umstrittenen Asylbewerberunterkünften Versammlungen unter dem Motto \"Kein Asyl in N. - Kein Asylantenheim ins St. B. Hospital\" beziehungsweise \"R. darf nicht Klein-Bukarest werden - Recht und Ordnung wieder herstellen\" abhalten will. Damit ist eine Art und Weise, die die Beurteilung einer Versammlung als Verstoß gegen die öffentliche Ordnung tragen könnte, nicht hinreichend dargetan.2Diese Entscheidung ist unanfechtbar.",
+     "document_id": 167070
+    }
+   ]
+  }
+ ]
+}

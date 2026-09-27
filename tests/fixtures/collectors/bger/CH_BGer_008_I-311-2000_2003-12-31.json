@@ -1,0 +1,33 @@
+{
+ "date": "2003-12-31",
+ "reference": [
+  "I_311/2000"
+ ],
+ "attachment": {
+  "content_type": "text/html; charset=UTF-8",
+  "language": "de",
+  "content_url": "https://entscheidsuche.ch/docs/CH_BGer/CH_BGer_008_I-311-2000_2003-12-31.html",
+  "source": "446973/45/2806",
+  "content_length": 12926
+ },
+ "meta": {
+  "de": "Eidgenossenschaft Bundesgericht III. Öffentlich-rechtliche Abteilung (I. Sozialrechtliche Abteilung)",
+  "it": "Confederazione Tribunale federale III Corte di diritto pubblico (I Corte di diritto sociale)",
+  "fr": "Conféderation Tribunal fédéral IIIe Cour de droit public (Ire Cour de droit social)"
+ },
+ "scrapedate": "2026-06-13",
+ "hierarchy": [
+  "CH",
+  "CH_BGer",
+  "CH_BGer_008"
+ ],
+ "canton": "CH",
+ "language": "de",
+ "source": "446973/45/2806",
+ "id": "CH_BGer_008_I-311-2000_2003-12-31",
+ "title": {
+  "de": "Bundesgericht III. Öffentlich-rechtliche Abteilung (I. Sozialrechtliche Abteilung) 31.12.2003 I_311/2000",
+  "it": "Tribunale federale III Corte di diritto pubblico (I Corte di diritto sociale) 31.12.2003 I_311/2000",
+  "fr": "Tribunal fédéral IIIe Cour de droit public (Ire Cour de droit social) 31.12.2003 I_311/2000"
+ }
+}

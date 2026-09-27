@@ -69,6 +69,7 @@ def test_lint_runs_every_static_tool(wf):
     text = steps_text(wf["jobs"]["lint"])
     for tool in (
         "uv lock --check",
+        "uv lock --check --project envs/scrub",
         "ruff check",
         "ruff format --check",
         "shellcheck",

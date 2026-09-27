@@ -1,0 +1,70 @@
+{
+ "Data": {
+  "Metadaten": {
+   "Technisch": {
+    "ID": "NOR40172917",
+    "Applikation": "BrKons",
+    "Organ": "BKA (Bundeskanzleramt)",
+    "ImportTimestamp": {
+     "@xsi:nil": "true",
+     "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance"
+    }
+   },
+   "Allgemein": {
+    "Veroeffentlicht": "2015-08-07",
+    "Geaendert": "2015-08-07",
+    "DokumentUrl": "https://ogd.ris.bka.gv.at/eli/jgs/1811/946/P688/NOR40172917"
+   },
+   "Bundesrecht": {
+    "Kurztitel": "Allgemeines bürgerliches Gesetzbuch",
+    "Eli": "https://www.ris.bka.gv.at/eli/jgs/1811/946/P688/NOR40172917",
+    "BrKons": {
+     "Kundmachungsorgan": "JGS Nr. 946/1811 zuletzt geändert durch BGBl. I Nr. 87/2015 ",
+     "Typ": "BG",
+     "Dokumenttyp": "Paragraph",
+     "ArtikelParagraphAnlage": "§ 688",
+     "Paragraphnummer": "688",
+     "StammnormPublikationsorgan": "JGS Nr.",
+     "StammnormBgblnummer": "946/1811",
+     "NovellenPublikationsorgan": "BGBl. I Nr.",
+     "NovellenBgblnummer": "87/2015",
+     "NovellenBeziehung": "zuletzt geändert durch",
+     "Inkrafttretensdatum": "2017-01-01",
+     "Abkuerzung": "ABGB",
+     "Indizes": {
+      "item": "20/01 Allgemeines bürgerliches Gesetzbuch (ABGB)"
+     },
+     "Aenderung": "",
+     "Gesetzesnummer": "10001622",
+     "GesamteRechtsvorschriftUrl": "https://ogd.ris.bka.gv.at/GeltendeFassung.wxe?Abfrage=Bundesnormen&Gesetzesnummer=10001622"
+    }
+   }
+  },
+  "Dokumentliste": {
+   "ContentReference": {
+    "ContentType": "MainDocument",
+    "Name": "Hauptdokument",
+    "Urls": {
+     "ContentUrl": [
+      {
+       "DataType": "Xml",
+       "Url": "https://ogd.ris.bka.gv.at/Dokumente/Bundesnormen/NOR40172917/NOR40172917.xml"
+      },
+      {
+       "DataType": "Html",
+       "Url": "https://ogd.ris.bka.gv.at/Dokumente/Bundesnormen/NOR40172917/NOR40172917.html"
+      },
+      {
+       "DataType": "Rtf",
+       "Url": "https://ogd.ris.bka.gv.at/Dokumente/Bundesnormen/NOR40172917/NOR40172917.rtf"
+      },
+      {
+       "DataType": "Pdf",
+       "Url": "https://ogd.ris.bka.gv.at/Dokumente/Bundesnormen/NOR40172917/NOR40172917.pdf"
+      }
+     ]
+    }
+   }
+  }
+ }
+}

@@ -1,12 +1,12 @@
 {
-  "current_phase": "P3",
-  "last_updated": "2026-09-27T17:44:11+02:00",
-  "status": "P2 complete 2026-09-27 (Opus 5.5): correctness fixes, KV-cache and one-pass decode, legal configs and screen arms; validate --full/--ci green (640 passed). Uncommitted on branch p1-faithful-port. Open: S5 band and forget-bias decision; linux_only checks await the next CI run.",
+  "current_phase": "P4",
+  "last_updated": "2026-09-27T21:16:47+02:00",
+  "status": "P3 complete 2026-09-27 (gate PASS: validate --full 817 passed; smoke shard trains 2 CPU steps; fertility Qwen3 2.280 tok/word, prediction refuted). P4 current: cluster bring-up. P3 to be committed and pushed on branch p3-data-pipeline (user: commit+push after each phase, check CI).",
   "plan_of_record": "LEGAL_BUILD_PLAN.md",
   "helper": "python3 scripts/plan_state.py <cmd> (stdlib only; the ONLY writer of LEGAL_BUILD_PLAN.md checkboxes and legal_build_state.json)",
   "scope": "Build lexhybrid: port the reference backbone/kernels/decode/tests (P1), fix 18 recorded defects and add legal decoder deltas (P2), data pipeline (P3), cluster + corpus + profiling (P4), pre-registered screen (P5), full backbone (P6), retrieval/renderer/verifier (P7), post-training (P8), evaluation (P9), release (P10); P11 optional. Local only, no git until the user writes 'git go'. Reference/ deleted at P1-Z by the user.",
   "blocked_on": null,
-  "next_action": "Ask the user to (a) decide S5 (report its +2.36% as delta-reported, or change its shape; forget bias 3.0 or 0.0) and (b) say whether to commit and push P2 so CI runs the linux_only checks; then start P3-A",
+  "next_action": "P3-M: collector DIP (Bundestag documentation API; Drucksachen, doc_type=parliament; check whether the public API key's terms allow corpus use and record it in the register), then P3-N FineWeb-2 deu_Latn. Ask the user first whether to commit/push the P3 collectors (A..L) as they stand.",
   "decisions": {
     "01_init_road": "From scratch first: Qwen3 tokenizer + logit-KL from an open Qwen3-*-Base teacher. Qwen3 conversion = P11, optional, on user instruction only. (user 2026-09-27)",
     "02_corpus": "Open-licensed sources PLUS a research-exception arm; every document carries licence + commercial_safe; research_only never enters a shippable arm. (user 2026-09-27)",
@@ -26,7 +26,10 @@
     "16_statistics": "2 seeds per screen arm, 3 for any claim; claim = paired mean > one baseline seed SD AND sign at >=2/3 seeds; bootstrap CIs (1000 resamples by question) beside, never instead",
     "17_legacy_operators": "only configs/model/hybrid_legal_legacy.yaml may set scan_impl/tfla_impl legacy; PPL/probe-only (no cached decode)",
     "18_environment": "uv project, one uv.lock (macOS arm64 + Linux x86_64); .python-version 3.11; torch==2.11.0 (PyPI on macOS, 2.11.0+cu128 from the PyTorch cu128 index on Linux; torch 2.12+ has no cu128 build); every env built with uv sync --locked and verified by scripts/check_env.py (user 2026-09-27)",
-    "19_ci": "GitHub Actions .github/workflows/ci.yml on every push/PR: lint, test (Linux, py3.11+3.12), hygiene (pushed tree), package; weekly network smoke + macOS clean install; GPU checks on the cluster; inert until the user pushes (user 2026-09-27)"
+    "19_ci": "GitHub Actions .github/workflows/ci.yml on every push/PR: lint, test (Linux, py3.11+3.12), hygiene (pushed tree), package; weekly network smoke + macOS clean install; GPU checks on the cluster; inert until the user pushes (user 2026-09-27)",
+    "s5_band": "+2.36% non-embedding is a stated difference inside +-2.5%, not reshaped; PPL/probe-only (user, 2026-09-27; plan decision 20)",
+    "s5_forget_bias": "3.0, the base's value; one lever per arm (user, 2026-09-27; plan decision 21)",
+    "ler_scrub_env": "flair/ner-german-legal in its own uv project envs/scrub/ (own lock); main env keeps transformers 5; fallback: a transformers-5-compatible model trained on German LER, evaluated on its test split first (user, 2026-09-27; plan decision 22)"
   },
   "pre_registered": {
     "rules": {
@@ -45,6 +48,10 @@
       "R12": "Every number in analysis/ carries a job id + log path; ARCH fingerprint at construction; run_metadata with .sync_stamp; tooling is not a tick",
       "R13": "Tests with the code: every code box ships its tests; marker taxonomy (plan 8.2); skips carry reasons; coverage floor never lowered without a note; flaky test = defect",
       "R14": "One gate, three venues: validate.sh --ci == CI test job selection; Mac-impossible checks run in CI or on the cluster (plan 8.3); red CI blocks the current box"
+    },
+    "P3": {
+      "fertility_prediction": "Qwen3 < 1.8 tokens/word on a 1M-word DACH legal sample; GPT-2 > 2.2 (analysis/tokenizer_fertility.md, method fixed before measuring, 2026-09-27)",
+      "written": "2026-09-27T19:49:22+02:00"
     }
   },
   "phase_order": [
@@ -364,9 +371,9 @@
         "fallback_record": "forget bias 0 at chunk 128: half-range 44.6 (predicted 44.4) -> TFLAFallbackError; forget bias 3.0: factorised, no error",
         "packed_tfla": "test_tfla_packed_equals_per_document green at 1e-6",
         "final_state": "test_ssd_final_state_matches_oracle green at L=1,63,64,65,200 with and without documents (1e-6)",
-        "flex_ci": "pending: linux_only test runs on the next CI push",
+        "flex_ci": "verified in CI run 36331125011 (Linux, py3.11 and py3.12): compiled flex forward == dense; CPU flex backward is unsupported in torch 2.11 and now refused up front (fix commit a89ccc2 after run 36330688065)",
         "band_legacy": "FAIL +2.36% vs <=1% (strict xfail; user decision)",
-        "compile_ci": "pending: linux_only test runs on the next CI push",
+        "compile_ci": "verified in CI run 36330688065 and 36331125011: test_compile_forward_chunk128 green on Inductor CPU",
         "gate": "validate.sh --full exit 0: 640 passed, 6 skipped with reasons (3 linux_only -> CI, 2 reference retired, 1 case-sensitive fs -> CI), 22 strict xfails (21 reference defects + the S5 band); --ci exit 0 with coverage 94.57% >= 90; 2026-09-27",
         "decode_identity": "tests/test_decoding.py green: cached == uncached in fp32 (greedy, sample, beam with EOS) and bf16 argmax identical at every decisive position, for hybrid, Transformer and the base pattern with attention",
         "param_table": "analysis/param_counts.md written and verified current"
@@ -375,115 +382,152 @@
     },
     "P3": {
       "title": "Data pipeline at smoke scale",
-      "status": "pending",
+      "status": "complete",
       "checkboxes": {
         "P3-A": {
-          "done": false,
+          "done": true,
           "desc": "`lexhybrid/data/schema.py`: `Document(id, source, jurisdiction, doc_type, licence, commercial_safe, valid_from, valid_to, citation_id, url, sha256, retrieved_at, text, sections: list[Section(label, absatz, satz_idx, r..."
         },
         "P3-B": {
-          "done": false,
+          "done": true,
           "desc": "`Docs/CORPUS_LICENCE_REGISTER.md` (one row per source: name, jurisdiction, doc types, licence, commercial-safe, gated?, URL, access method, notes) and `lexhybrid/data/corpus/licences.py` (`LICENCES` table, `is_commerc..."
         },
         "P3-C": {
-          "done": false,
+          "done": true,
           "desc": "`lexhybrid/data/tokenizer.py`: loads `Qwen/Qwen3-1.7B-Base`'s tokenizer, adds decision 7's specials, exposes `eos_id = 151643`, `pointer_ids()`; asserts `len(tokenizer) ≤ 151936`. Test: `tests/test_data.py::test_token..."
         },
         "P3-D": {
-          "done": false,
+          "done": true,
           "desc": "Fertility measurement (R4): write the prediction first into `analysis/tokenizer_fertility.md` (\"Qwen3 < 1.8 tokens/word on a 1M-word DACH legal sample; GPT-2 > 2.2\"), then `scripts/measure_fertility.py` over the P3-F...."
         },
         "P3-E": {
-          "done": false,
+          "done": true,
           "desc": "`lexhybrid/data/corpus/collectors/base.py`: `class Collector(Protocol): name, licence, jurisdiction; iter_documents(limit: int | None) -> Iterator[Document]`; shared `http_get` with retry/backoff and rate limit; `sha2..."
         },
+        "P3-E1": {
+          "done": true,
+          "desc": "Dependencies for P3 in a box of their own (CLAUDE.md rule m): `requests` declared as a direct dependency (it was transitive), `datasketch` for P3-S (pulls `scipy`); `uv lock`, `uv sync --locked`, `scripts/check_env.py..."
+        },
         "P3-F": {
-          "done": false,
+          "done": true,
           "desc": "Collector GII (gesetze-im-internet.de: federal statutes, XML, amtliches Werk §5 UrhG; captures `Stand` date, §, Absatz, Satz). 3 fixture records under `tests/fixtures/collectors/gii/`; offline parser test; `--limit 20..."
         },
         "P3-G": {
-          "done": false,
+          "done": true,
           "desc": "Collector RII (rechtsprechung-im-internet.de: federal court decisions; Tenor/Tatbestand/Gründe; Randnummern). Same acceptance as P3-F."
         },
         "P3-H": {
-          "done": false,
+          "done": true,
           "desc": "Collector OLDP (openlegaldata.io API, ODbL; court, date, ECLI). Same acceptance; `licence=ODbL-1.0`."
         },
         "P3-I": {
-          "done": false,
+          "done": true,
           "desc": "Collector EUR-Lex (German language, CC BY 4.0 reuse notice; CELEX id, Artikel). Same acceptance; `jurisdiction=EU`."
         },
         "P3-J": {
-          "done": false,
+          "done": true,
           "desc": "Collector RIS (Austrian Rechtsinformationssystem, CC BY 4.0; Bundesrecht + Judikatur; Inkrafttreten dates). Same acceptance; `jurisdiction=AT`."
         },
         "P3-K": {
-          "done": false,
+          "done": true,
           "desc": "Collector Fedlex (Swiss federal law, open; SR number, Artikel; versions). Same acceptance; `jurisdiction=CH`."
         },
         "P3-L": {
-          "done": false,
+          "done": true,
           "desc": "Collector BGer (Swiss Federal Supreme Court decisions; CC BY 4.0 as published; Erwägungen). Same acceptance; `jurisdiction=CH`."
         },
         "P3-M": {
-          "done": false,
+          "done": true,
           "desc": "Collector DIP (Bundestag documentation, open; Drucksachen). Same acceptance; `doc_type=parliament`."
         },
         "P3-N": {
-          "done": false,
+          "done": true,
           "desc": "Collector FineWeb-2 `deu_Latn` (HF `datasets` streaming, ODC-By 1.0; general-German replay). `--limit 20`; `doc_type=general`, `commercial_safe=true`."
         },
         "P3-O": {
-          "done": false,
+          "done": true,
           "desc": "Collector MultiLegalPile NC subsets (HF, gated; `research_only=true`, `commercial_safe=false`). If `HF_TOKEN` is unset locally, fixtures only and a note; P4-B supplies the cluster token."
         },
         "P3-P": {
-          "done": false,
+          "done": true,
           "desc": "Eval-set fetchers `lexhybrid/data/evalsets/{gerlerb,gerdalir}.py` (retrieval queries/qrels; eval only; licence recorded). `--limit 20` run; tests on fixtures."
         },
         "P3-Q": {
-          "done": false,
+          "done": true,
           "desc": "Eval-set fetchers `lexhybrid/data/evalsets/{legalquad,gerlayqa}.py` (QA; eval only; GerLayQA explicitly excluded from training). Same acceptance."
         },
+        "P3-R1": {
+          "done": true,
+          "desc": "Scrub environment in a box of its own (rule m; decision 22): `envs/scrub/` is a separate uv project (its own `pyproject.toml`, `.python-version` 3.11 and `uv.lock`) with `flair` for `flair/ner-german-legal`; `scripts/..."
+        },
         "P3-R": {
-          "done": false,
-          "desc": "`lexhybrid/data/corpus/scrub_ler.py`: German-LER scrub with `flair/ner-german-legal` (PER, RR, AN, STR → typed placeholders), licence of the model verified and written into the register, scrub log (`data/manifests/scr..."
+          "done": true,
+          "desc": "`lexhybrid/data/corpus/scrub_ler.py`: German-LER scrub with `flair/ner-german-legal` run by P3-R1's worker (PER, RR, AN, STR → typed placeholders), licence of the model verified and written into the register, scrub lo..."
         },
         "P3-S": {
-          "done": false,
+          "done": true,
           "desc": "`lexhybrid/data/corpus/dedup.py`: `datasketch` MinHash, 5-gram shingles, 128 permutations, Jaccard ≥ 0.8, exact-hash pre-pass. Test: `tests/test_data.py::test_dedup_catches_planted_near_duplicate`."
         },
         "P3-T": {
-          "done": false,
+          "done": true,
           "desc": "`lexhybrid/data/corpus/changelog.py`: provisions amended since a date (GII `Stand`, RIS Inkrafttreten, Fedlex versions) → `data/manifests/changelog.jsonl`; this is P9's currency subset. Test: `tests/test_data.py::test..."
         },
         "P3-U": {
-          "done": false,
+          "done": true,
           "desc": "`lexhybrid/data/packing.py`: EOS-delimited packing (`<|endoftext|>` after every document, `doc_ids` incremented after the EOS) into parquet shards with `input_ids`, `doc_ids`, `source`, `licence`, `commercial_safe` at..."
         },
         "P3-V": {
-          "done": false,
+          "done": true,
           "desc": "`lexhybrid/data/datasets.py`: by-document validation split (random 0.1%, minimum 2,000 documents, asserted), mixture yaml `configs/dataset/mixture_pretrain.yaml` (legal 70 / general 30 by tokens; per-source weights; a..."
         },
         "P3-W": {
-          "done": false,
+          "done": true,
           "desc": "Probes `lexhybrid/data/probes/{mqar,statute_recall}.py`: MQAR generator (reference `configs/dataset/mqar.yaml` semantics) and statute-recall (given a § in context, reproduce Absatz 2 verbatim; scored exact-match and c..."
         },
         "P3-X": {
-          "done": false,
+          "done": true,
           "desc": "Probe `lexhybrid/data/probes/multihop.py`: two-hop cross-reference questions built from statutes that cite another § (the answer needs both passages); 200 items from fixtures; scored by exact-match. Test: `tests/test_..."
         },
         "P3-Y": {
-          "done": false,
+          "done": true,
           "desc": "`lexhybrid/data/sft_format.py`: the RAG prompt as ONE document (no `<|endoftext|>` inside): `<|question|> … <|passage|><|c1|> sentence-numbered text … <|/passage|> … <|answer|>`; target sentences with `<|q|><|cK|><|sJ..."
         },
         "P3-Z": {
-          "done": false,
+          "done": true,
           "desc": "Gate: `bash scripts/validate.sh` exit 0; a 100-row 4,096 shard built from the fixtures round-trips through `hybrid_legal_base` on CPU (`scripts/train_pretrain.py trainer=cpu_debug dataset=legal_smoke trainer.max_steps..."
         }
       },
-      "evidence": {},
-      "verdict": null
+      "evidence": {
+        "validate": "exit 0, 809 passed, 2026-09-27",
+        "lock": "uv lock --check --project envs/scrub exit 0",
+        "live": "legalquad/gerlayqa --limit 20 exit 0",
+        "smoke": "GlG Art. 1-2 green",
+        "layouts": "232 decisions 2000-2026 parsed with E./Dispositiv/Schluss",
+        "terms": "DIP Nutzungsbedingungen 27.02.2023 read",
+        "token": "not needed (dataset not gated)",
+        "tokenizer": "Qwen3-1.7B-Base@ea980cb, len 151756",
+        "scrub_env": "check_env --scrub exit 0",
+        "fertility_qwen3": "2.280",
+        "fertility_gpt2": "2.872",
+        "qwen3": "2.280 tok/word (REFUTED < 1.8)",
+        "gpt2": "2.872 tok/word (CONFIRMED > 2.2)",
+        "log": "analysis/p3z_smoke_train.log",
+        "throughput": "0.074 docs/s BGer, 0.062 docs/s OLDP (Mac CPU)",
+        "model_licence": "none stated on the card",
+        "planted": "near-dup dropped; exact NC copy dropped, commercial copy kept",
+        "changelog": "20 changes since 2025-01-01 from 60 collected statutes",
+        "shards": "oldp scrubbed 20 docs, 92,055 real tokens: 4096 -> 23 rows, 8192 -> 12 rows (last row 1,943 real tokens)",
+        "split": "0.1%, min 2000, by document, before packing",
+        "probes": "MQAR + statute recall on any checkpoint",
+        "multihop": "200 items (after excluding ZGB final-title articles, whose numbers collide with the main ZGB): BGB 128, OR 18, DSGVO 14, DSA 12, RL 2019/771 7, KI-VO 6, RL 2011/83 4, Rom-II 4, Rom-I 4, ZGB 3",
+        "sft": "render/parse/encode round-trip",
+        "validate_full": "exit 0, 817 passed, 6 skipped, 21 xfailed, 2026-09-27",
+        "smoke_shard": "100 train rows (390,307 real tokens) + 30 val rows at 4,096 from 9 scrubbed commercial-safe sources (data/shards/smoke, build log data/cache/build_smoke_shards.log)",
+        "smoke_train": "train_pretrain trainer=cpu_debug dataset=legal_smoke trainer.max_steps=2: exit 0, hybrid_legal_base 220,753,720 params, train loss 12.1124 -> 12.0651, val loss 12.0509 -> 12.0324, 2:38 wall on the Mac CPU",
+        "fertility": "prediction + outcome in analysis/tokenizer_fertility.md (Qwen3 2.280 REFUTED < 1.8; GPT-2 2.872 CONFIRMED)",
+        "register": "a row for every collector (test_register_lists_every_collector_and_licence green)"
+      },
+      "verdict": "PASS: data pipeline at smoke scale -- 10 collectors, tokenizer, 4 eval sets, LER scrub (own env), dedup, changelog, packing, split, mixture/arms, 3 probes, SFT format; validate --full exit 0 (817 passed); 100-row 4,096 smoke shard trains 2 CPU steps (log analysis/p3z_smoke_train.log); fertility: Qwen3 2.280 tok/word (prediction < 1.8 refuted), GPT-2 2.872 (confirmed)"
     },
     "P4": {
       "title": "Cluster bring-up, corpus at scale, profiling",
@@ -1036,7 +1080,35 @@
         "P2-X",
         "P2-Y",
         "P2-Y1",
-        "P2-Z"
+        "P2-Z",
+        "P3-A",
+        "P3-B",
+        "P3-E1",
+        "P3-E",
+        "P3-F",
+        "P3-G",
+        "P3-H",
+        "P3-I",
+        "P3-J",
+        "P3-K",
+        "P3-L",
+        "P3-M",
+        "P3-N",
+        "P3-O",
+        "P3-C",
+        "P3-P",
+        "P3-Q",
+        "P3-R1",
+        "P3-D",
+        "P3-R",
+        "P3-S",
+        "P3-T",
+        "P3-U",
+        "P3-V",
+        "P3-W",
+        "P3-X",
+        "P3-Y",
+        "P3-Z"
       ],
       "jobs": []
     }
@@ -1131,7 +1203,52 @@
     "2026-09-27: P2-Y1: tests/test_gpu.py (cuda): flex vs dense on GPU (fp32/bf16), auto picks flex on CUDA, SDPA flash vs math in bf16, SSD and TFLA under bf16 autocast vs fp32 (packed), torch.compile vs eager at 1e-4 (TF32 off), cached greedy == uncached on GPU, slab-loss peak memory < half the materialised logits at the Qwen3 vocabulary. tests/test_multigpu.py (multigpu): 2-process NCCL DDP with find_unused_parameters=False and gradient_as_bucket_view=True on the legal base with MTP, two iterations, gradients identical across ranks. Both collect and skip with their reason on the Mac (10 skipped); NOT YET RUN on a GPU: first run is P4-J1 on the cluster.",
     "2026-09-27: P2-Z: gate passed. Open items handed to the user: (1) S5 legacy arm: pre-registered <=1% band fails (+2.36%) and its forget bias (3.0 vs the reference's effective 0.0) is undecided -- screen_arms verify --full exits 1 until decided; (2) linux_only checks (compiled flex, compile smoke) first run in CI on the next push; (3) GPU/multi-GPU tests first run at P4-J1; (4) the P3 loader must be resumable mid-epoch (Lightning warns on resume); (5) at chunk 128 exact TFLA needs mean forget gate > 0.535 per chunk and dimension, else tfla_fallback=error stops a run.",
     "2026-09-27: verdict P2: PASS: 18 defects fixed with tests; decoders cached == uncached (fp32) and bf16 argmax-identical incl. attention; packed TFLA == per-document at 1e-6; legal configs at the plan's predicted counts; open: S5 band/forget-bias decision, linux_only checks await CI, GPU tests await P4",
-    "2026-09-27: P2 complete -> current_phase P3"
+    "2026-09-27: P2 complete -> current_phase P3",
+    "2026-09-27: P3-A: lexhybrid/data/schema.py Document (id '<source>:<native>', source, jurisdiction DE/AT/CH/EU, doc_type, licence, commercial_safe, research_only (added: P3-O needs it; never commercial_safe), text, citation_id, url, valid_from/to ISO dates, retrieved_at, sha256 filled and checked, sections) and Section(label, absatz, satz_idx, randnummer, text); to_json/from_json; validation on construction; parse_citation for the statute and decision grammars. Docs/DOCUMENT_SCHEMA.md describes every field and both grammars.",
+    "2026-09-27: P3-B: Docs/CORPUS_LICENCE_REGISTER.md (a row per collector with licence, commercial-safe, gated, URL, access method, notes; eval sets and models listed; verified 2026-09-27 against the publishers' pages; 'to confirm' where a licence rests on statute only) and lexhybrid/data/corpus/licences.py (LICENCES: DE-UrhG-5, CH-URG-5, CC-BY-4.0, ODbL-1.0, ODC-By-1.0, CC-BY-NC(-SA)-4.0, unknown; require_known, is_commercial_safe, check_document) plus lexhybrid/data/corpus/build.py build_corpus(arm=commercial_safe|research), which raises on unknown/unregistered licences and on flags that overclaim. Findings: Multi Legal Pile is no longer gated on HF; the plan's 'BGer CC BY 4.0' was not found on the publisher's pages (Art. 5 URG applies).",
+    "2026-09-27: P3-E1: pyproject declares requests>=2.31 (direct now; version unchanged at 2.34.2) and datasketch>=1.6. Lock diff: +datasketch 2.0.0, +scipy 1.17.1 (py3.11) / 1.18.1 (py>=3.12); 102 packages. uv sync --locked, check_env green. flair deferred to P3-R (current flair needs transformers < 5).",
+    "2026-09-27: CI green on branch p2-correctness-decoding (run 36331125011, all 5 jobs). The first P2 run (36330688065) failed only test_flex_block_mask_equals_dense: torch 2.11 has no FlexAttention backward on CPU; fixed in a89ccc2 (forward-only CPU test, backward moved to the CUDA test, CPU training with attn_impl=flex refused with a clear error).",
+    "2026-09-27: P3-E: lexhybrid/data/corpus/collectors/base.py (Collector protocol: name, licence, jurisdiction, iter_documents(limit); http_get with a per-host RateLimiter, exponential backoff on 429/5xx and connection errors, Retry-After honoured, other 4xx fail at once, identifying User-Agent; licence_flags from the register; run_collector and cli: --limit N --out data/raw/<src> --manifest-dir) and lexhybrid/data/corpus/manifest.py (every field but the text, plus n_chars). Collectors separate a pure parse_* (fixture-tested) from fetching (network smoke). Tests: manifest roundtrip, retry/backoff/Retry-After, rate limiter, CLI end to end with a fake collector.",
+    "2026-09-27: P3-F: lexhybrid/data/corpus/collectors/gii.py: gii-toc.xml -> per-law xml.zip -> parse_gii_xml (one Document per provision; Absaetze as sections; DL lists rendered line by line; valid_from = date of the last amendment in the Stand comment, else the issue date; 'Verordnung' -> regulation; repealed provisions, headings and TOC skipped; core codes bgb, stgb, zpo, gg, hgb first). Fixtures: tests/fixtures/collectors/gii/{beurkg_excerpt,toc_excerpt}.xml cut from the live files. Live: --limit 20 exit 0 (BGB §1..§31a, Stand 2026-07-23, licence/jurisdiction/valid_from non-null); network smoke green locally.",
+    "2026-09-27: P3-G: lexhybrid/data/corpus/collectors/rii.py: rii-toc.xml (84,372 decisions, ~23 MB) -> per-decision zip -> parse_rii_xml (one Document per decision; RspDL entries as sections, 'Rn. N' where the dt carries rd_N, else the part name; Leitsatz/Tenor/Tatbestand/Entscheidungsgruende/Gruende/abweichende Meinung in order; citation '<court> <docket>'; valid_from = decision date; newest first). Fixtures: 3 real decisions (BGH IX ZB 72/08 Beschluss, BAG 3 AZR 158/22 Urteil with Leitsatz and 26 Rn., BAG 2 AZN 22/23) + a TOC excerpt. Live: --limit 20 exit 0 (newest BGH 5 StR decisions of 2026-09-08..18, 180k chars); network smoke green.",
+    "2026-09-27: P3-H: lexhybrid/data/corpus/collectors/oldp.py: /api/cases/ (ordering=-date) + /api/cases/<id>/ content (HTML, no API key) -> parse_oldp_case (one Document per case; paragraphs as sections under Tenor/Tatbestand/Gruende/Leitsatz headings; ODbL-1.0; decision date as valid_from); court_abbreviation maps full names to citation abbreviations incl. regional adjectives (1,116 of OLDP's 1,119 courts give a parseable citation); new stdlib htmltext.html_blocks shared with later collectors. Citation grammar widened to courts ending in GH and dockets with parentheses. Fixtures: 3 real cases (OLG Nuernberg, LG Stuttgart with ECLI, VG Bremen). Live: --limit 20 exit 0 (VG, OVG, BayVGH, OLG, LG; all citations parse); network smoke green.",
+    "2026-09-27: P3-I: lexhybrid/data/corpus/collectors/eurlex.py: German XHTML from the CELLAR repository by CELEX (eur-lex.europa.eu answers scripts with an empty 202 bot challenge, so it is only linked) -> parse_eurlex_xhtml (one Document per article; eli-subdivision art_N; paragraphs 00N.00K as 'Art. N Abs. K' sections; lettered points one line each; OJ date as valid_from; CC-BY-4.0; jurisdiction EU); act_code uses short names (DSGVO, DSA, KI-VO, Rom-I-VO, EuGVVO, ...) else 'VO (EU) YYYY/N' / 'RL (EU) YYYY/N'; seed list of 12 private-law acts. Fixture: GDPR Art. 1, 4, 6 excerpt. Live: --limit 20 exit 0 (DSGVO Art. 1..20); network smoke green on the Consumer Rights Directive.",
+    "2026-09-27: P3-J: lexhybrid/data/corpus/collectors/ris.py: OGD API v2.6 (CC BY 4.0, no registration). Bundesrecht BrKons -> one Document per norm VERSION (Inkrafttretensdatum/Ausserkrafttretensdatum as valid_from/valid_to, the P3-T input; Absaetze as sections, the first recognised after the paragraph symbol; list items fold into their Absatz); Judikatur Justiz full texts (Dokumenttyp.SucheInEntscheidungstexten) -> one Document per decision (Kopf/Spruch/Begruendung/Rechtliche Beurteilung sections; docket normalised to 'OGH 7 Ob 143/26v'). Fixtures: ABGB §688 expired and current versions, §1295 with two Absaetze, OGH 7 Ob 143/26v. Live: --limit 20 exit 0 (10 ABGB norms from §1, 10 OGH decisions to 2026-09-03; all citations parse); network smoke green.",
+    "2026-09-27: P3-K: lexhybrid/data/corpus/collectors/fedlex.py: SPARQL (JOLux) lists in-force acts by SR number and, per act, the German Akoma Ntoso XML consolidations applicable on as_of (default today; one act per query because an all-acts aggregate returned wrong maxima) -> parse_fedlex_xml (one Document per article; Absaetze as sections incl. 2bis and the superscript-numbered final-title markup; list items one per line; authorialNote footnotes never in the text; marginal titles as the first line; valid_from = latest 'in Kraft seit'/'mit Wirkung seit' date in the footnotes of the article or the headings above it, else the act's entry into force, capped at the version date -- per provision, for P3-T; repealed articles/Absaetze and single-amendment transitional provisions skipped; ZGB final title as 'ZGB SchlT Art. N'; acts without a usable abbreviation cited 'SR <number>'). Citation grammar widened (SR codes, SchlT, letter suffixes such as 334bis and Abs. 2bis) with tests. Fixtures: OR and ZGB excerpts (11 articles incl. repealed and skipped ones) + the real SPARQL version listing of SR 220. Live: --limit 20 exit 0 (ZGB Art. 1..19c, repealed Art. 10/15 skipped); network smoke green (GlG).",
+    "2026-09-27: P3-L: lexhybrid/data/corpus/collectors/bger.py: entscheidsuche.ch search API (_searchV2.php, Elasticsearch body by POST; German CH_BGer decisions newest first, search_after paging) + one HTML per decision (the 116 MB directory listing and 58 MB job reports are never fetched) -> parse_bger (one Document per decision 'BGer 4A_102/2026'; sections Kopf / Sachverhalt A.. / E. 4.4.2 (Erwaegungen, the Swiss citation unit) / Dispositiv Ziff. N / Schluss; bold numbers since ~2007 separate considerations from numbered quotations, older unmarked decisions use a successor rule (2.1 after 2, 3 after 2.4) and sequential operative items; heading forms of judgments, orders and the pre-2007 formula checked on 232 decisions from 2000-2026, all with considerations, operative part and closing). base.http_post added (same rate limit and retries as http_get, now sharing _with_retries). Licence CH-URG-5; the register row's access note updated; entscheidsuche.ch terms remain 'to confirm' before P4. Fixtures: 4A_102/2026 (facts, 4-level considerations, quoted clause '5. Honorar'), I_311/2000 (EVG 2003, no markup), 1C_464/2026 (short), 8C_466/2026 (order). Live: --limit 20 exit 0 (2026-09-10..16); network smoke green.",
+    "2026-09-27: Session stopped after P3-L at the CLAUDE.md session budget (11 ticks this session: P3-A,B,E1,E,F,G,H,I,J,K,L). Downloads so far in P3 exploration ~0.3 GB (incl. one 116 MB entscheidsuche directory listing and one 58 MB job report fetched by mistake while exploring; the collectors never fetch them).",
+    "2026-09-27: P3-L follow-up: BGer collector now skips decisions in entscheidsuche.ch's Blockliste.json (withdrawn from publication; 2 BGer entries today; fixture + test). Register row bger quotes the published terms (dataUsage page + API documentation 3.7.2022): any use allowed, moderate load, attribution, voluntary donation for commercial use; user confirmation of attribution/donation pending before P4.",
+    "2026-09-27: decision s5_band: +2.36% non-embedding is a stated difference inside +-2.5%, not reshaped; PPL/probe-only (user, 2026-09-27; plan decision 20)",
+    "2026-09-27: decision s5_forget_bias: 3.0, the base's value; one lever per arm (user, 2026-09-27; plan decision 21)",
+    "2026-09-27: decision ler_scrub_env: flair/ner-german-legal in its own uv project envs/scrub/ (own lock); main env keeps transformers 5; fallback: a transformers-5-compatible model trained on German LER, evaluated on its test split first (user, 2026-09-27; plan decision 22)",
+    "2026-09-27: User decisions 2026-09-27 applied: S5 band +2.36% delta reported inside +-2.5% (screen_arms band_pct 2.5, verify --full 0 problems; strict xfail replaced by test_legacy_delta_is_the_stated_difference; param_counts.md regenerated); S5 forget bias 3.0 (legacy yaml comment); scrub env decision 22 + box P3-R1. User also asked: commit+push after every phase and check CI, then continue.",
+    "2026-09-27: P3-M: lexhybrid/data/corpus/collectors/dip.py: DIP API drucksache-text (10 full texts per page, cursor paging; API key from DIP_API_KEY else the public key of the DIP help page, valid to end of May 2027; one request at a time, terms allow 25 concurrent) -> parse_dip_drucksache (one Document per printed paper, cited 'BT-Drs. 21/8109' / 'BR-Drs. 506/26' as the terms prescribe; paragraphs as sections under the bill/report headings, 'Zu Artikel 1 / Zu Nummer 1 (...)' keeps its article; the PDF text is cleaned: Vorabfassung watermark removed, printer boilerplate dropped, hyphenation and line breaks rejoined, short sentence-final lines end paragraphs except after abbreviations, paragraphs split by a page's footnotes rejoined; valid_from = paper date; doc_type parliament). Citation grammar: third kind 'parliament' (BT-Drs./BR-Drs./BT-PlPr./BR-PlPr. n/n [S. p]) + Docs/DOCUMENT_SCHEMA.md. Licence confirmed from DIP's terms of use (27.02.2023): API data usable 'umfassend in jeglicher Form', attribution 'Deutscher Bundestag/Bundesrat - DIP', commercial-use note (register row dip updated). Fixtures: BT-Drs. 21/8109 (bill, watermarks, footnotes), 21/8163 (committee report), BR-Drs. 506/26 (Bundesrat bill). Live: --limit 20 exit 0 (bills 2026-09-07..22); network smoke green.",
+    "2026-09-27: P3-N: lexhybrid/data/corpus/collectors/fineweb2_de.py: HuggingFaceFW/fineweb-2 config deu_Latn streamed with datasets (lazy import; only the rows read are fetched) -> parse_fineweb_row (one Document per page: doc_type general, jurisdiction DE, ODC-By-1.0 commercial_safe, no citation id, paragraphs as sections, valid_from = crawl date, id from the urn:uuid). Rows come oldest dump first; P4's at-scale job samples across dumps (noted in the module). Fixture: 3 real rows. Live: --limit 20 exit 0 (CC-MAIN-2013-20 pages, all general/commercial-safe); network smoke green (12 s).",
+    "2026-09-27: P3-O: lexhybrid/data/corpus/collectors/multilegalpile.py: joelniklaus/Multi_Legal_Pile German native files read at a pinned revision (911e1d2) through huggingface_hub's HfFileSystem + lzma, so only rows read are fetched (the case-law files are 0.8/1.3 GB; the dataset's loading script is unusable with datasets 5). Not gated: works without HF_TOKEN (the plan's 'fixtures only if no token' branch did not apply; P4-B's token is not needed for it). One Document per row (rows have only language/type/jurisdiction/text): id multilegalpile:<subset>:<row>, caselaw->decision, legislation->statute, Germany->DE, Switzerland->CH, valid_from None (no date in the data), licence CC-BY-NC-SA-4.0 => research_only=True, commercial_safe=False; build_corpus's commercial_safe arm refuses it (tested). Subsets: Swiss cantonal legislation (lexfind, no licence info), Swiss decisions (entscheidsuche), German OLDP statutes/decisions (overlap bger/oldp; P3-S keeps the commercial-safe copy). Fixture: 4 real rows. Live: --limit 20 exit 0 (5 per subset, all research-only); network smoke green.",
+    "2026-09-27: P3-C: lexhybrid/data/tokenizer.py: Qwen/Qwen3-1.7B-Base tokenizer at pinned revision ea980cb (Apache-2.0; 151,669 entries; EOS <|endoftext|> = 151,643, eos==pad) + decision 7's 87 specials via add_special_tokens(replace_extra_special_tokens=False) -> ids 151,669..151,755, len 151,756 <= 151,936 (ValueError otherwise); pointer_ids() by role (q, cite, passages c1..c16, sentences s1..s64, unanswerable, passage open/close, question, answer); encode_document() uses split_special_tokens so literal '<|endoftext|>'/'<|cite|>' in a document never become special ids (decode round-trips). Cache: data/hf/hub unless HF_HOME/HF_HUB_CACHE is set; CLI --download. Tests: test_tokenizer_special_list_is_decision_7 (offline), test_tokenizer_specials_fit_vocab (cached tokenizer; skips with the fetch command when absent, as in the CI main job), test_tokenizer_download_and_specials (network: fresh download, same checks) -- all green locally.",
+    "2026-09-27: pre-registered P3.fertility_prediction",
+    "2026-09-27: P3-D: prediction and method written into analysis/tokenizer_fertility.md before any fertility measurement (R4); sample = 8 legal collectors x >=125k words, words = whitespace tokens, pooled tokens/words.",
+    "2026-09-27: P3-I follow-up (found by the P3-D sample run): CELLAR answers 404 for 31993L0013 (Unfair Terms Directive, no German XHTML manifestation); EURLexCollector now skips an act it cannot fetch as XHTML with a stderr message instead of aborting (test_eurlex_collector_skips_an_act_without_german_xhtml). measure_fertility.py keeps per-source samples already collected (--recollect to redo).",
+    "2026-09-27: P3-J follow-up (found by the P3-D sample run): RIS norm NOR40246782 has Ausserkrafttretensdatum before Inkrafttretensdatum (a version replaced before it came into force); parse_ris_norm skips such versions instead of raising (test_ris_norm_version_that_never_applied_is_skipped).",
+    "2026-09-27: P3-P: lexhybrid/data/evalsets/{base,gerlerb,gerdalir}.py (records Query/Passage/QAItem, EvalSetInfo with licence/source/eval_only/research_only, writer to data/evalsets/<name>/ + data/manifests/evalset_<name>.jsonl with ids/hashes only, CLI). GerLeRB = German Legislative Retrieval Benchmark, identified: Zenodo 15745124 (2025-06-26, CC-BY-4.0; 367 questions, 367 judgements, 90,917 passages in the file vs 90,798 in the paper); passage ids '<n>_<GII slug>' map onto gii ids (gii_id) so P7 can score against our own index; questions generated with GPT-4.1 + expert-verified -> eval only (R10, noted in info). GerDaLIR from mteb/GerDaLIRSmall @ b199f38 (MIT; streamed via HfFileSystem, early stop so the 214 MB corpus is not read in a smoke). Fixtures: real excerpts (3 queries each). Live: --limit 20 exit 0 for both (20 queries / 18 and 21 passages); network smoke green. Register rows filled; data/evalsets/ git- and rsync-ignored.",
+    "2026-09-27: P3-Q: lexhybrid/data/evalsets/{legalquad,gerlayqa}.py. LegalQuAD from the authors' release Christoph911/AIKE2021_Appendix @ 6eed75f (SQuAD format, 200 questions over Open Legal Data decisions; licence: none stated by the authors, MTEB's copy declares CC-BY-4.0; 1 of 200 answers differs from its context by one character -- recorded). GerLayQA from trusthlt/eacl24-german-legal-questions @ cbc4659, evaluation split bgb_eval.json (2,154 items: question, lawyer answer, gold BGB paragraphs mapped to 'BGB §573b' citation ids, all 2,154 parse); licence: non-commercial scientific research only -> research_only + eval_only; the GPT-3.5 answers file is not used. Neither yields a corpus Document, so neither can reach a training shard. Live: --limit 20 exit 0 for both; network smoke green.",
+    "2026-09-27: P3-R1 (decision 22, rule m): envs/scrub/ is its own uv project (pyproject.toml, .python-version 3.11, uv.lock: flair 0.15.1, transformers 4.57.6, torch 2.11.0 / 2.11.0+cu128 on Linux from the same cu128 index, 102 packages; package=false). uv sync --locked --project envs/scrub builds envs/scrub/.venv (820 MB, git/rsync-ignored by the .venv/ rule); flair installed cleanly, so the fallback model was not needed. scripts/scrub_ner_worker.py runs there, imports nothing from lexhybrid (JSONL {id,text} in -> {id, entities:[[start,end,label,score]]} out, per line/chunk of <=200 whitespace tokens, Sentence(use_tokenizer=False) as the model card advises, offsets asserted); flair/ner-german-legal pinned at 69c73dd (model card example reproduced: 'W.' PER 0.9911, '§ 36 Abs. 7 IfSG.' GS 0.5353). check_env.py --scrub (interpreter, envs/scrub lock parity, flair/torch/transformers imports, transformers < 5, no lexhybrid) exits 0 in the scrub env and 1 from the main env (tested). validate.sh gate 1 and the CI lint job also run 'uv lock --check --project envs/scrub'. NOTE: the model weights are 1.48 GB (cached in data/hf), above P3's 1 GB download guideline -- accepted because the user chose flair (decision 22).",
+    "2026-09-27: P3-D (R4): prediction and method written into analysis/tokenizer_fertility.md before measuring (prereg P3.fertility_prediction; one refinement -- skip documents > 50,000 words -- added before any collection or measurement). scripts/measure_fertility.py: --collect samples the 8 legal collectors live (>= 125k whitespace words each, whole documents; RIS norms/decisions half and half) + FineWeb-2 as a general reference; measures Qwen3 (encode_document) and GPT-2 per source and pooled. RESULT (Mac, 2026-09-27, log analysis/tokenizer_fertility.log, manifest analysis/tokenizer_fertility_sample.jsonl): pooled legal 1,038,327 words / 4,803 docs: Qwen3 2.280 tokens/word -> prediction '< 1.8' REFUTED; GPT-2 2.872 -> '> 2.2' CONFIRMED; per source Qwen3 2.117 (Fedlex) .. 2.462 (BGer); FineWeb-2 general German 2.033. Outcome recorded beside the unchanged prediction, with licensed/not-licensed claims and limitations. Tests: test_fertility_sampling_and_arithmetic, test_fertility_reads_every_collector_fixture_offline. The run also found two collector defects, fixed with tests (EUR-Lex 404 act skipped; RIS never-applied versions skipped).",
+    "2026-09-27: P3-R: lexhybrid/data/corpus/scrub_ler.py (main env, never imports flair): entities from P3-R1's worker (envs/scrub, flair/ner-german-legal @ 69c73dd); tags PER/RR/AN/STR -> placeholders numbered per document per surface form ([PER_1], [RR_2], [AN_1], [STR_1]); tagged spans replaced exactly, untagged repeats of forms with >= 3 letters too (signature 'Der Präsident: Hurni' caught), shorter forms only where tagged (headings like 'A. Problem' survive); punctuation carried by whitespace tokens trimmed ('Haag,' -> 'Haag'; initials keep their period); sections scrubbed through their position in the text; sha256 recomputed. Scrub log data/manifests/scrub_<source>.jsonl: doc id, tag, placeholder, SHA-256 of the entity (never the text), offsets, score. Licence of the model verified: none stated on the model card (ships with Flair, MIT; LER data CC BY 4.0) -> register row; commercial-use statement to confirm before release. Throughput measured on the Mac CPU: 0.074 docs/s (BGer, 20 docs, 173k chars, 271 s) and 0.062 docs/s (OLDP, 20 docs, 279k chars, 321 s) -> at-scale scrub belongs on the cluster (P4). Real run: 144 entities in 20 BGer decisions (RR 80, PER 51, STR 11, AN 2), 56 in 20 OLDP decisions. Tests: test_scrub_replaces_person_names, _trims_the_punctuation_of_whitespace_tokens, _short_forms_are_replaced_only_where_tagged, _worker_tags_the_model_card_example (real worker; skips without envs/scrub + model).",
+    "2026-09-27: P3-S: lexhybrid/data/corpus/dedup.py: exact pre-pass on Document.sha256, then datasketch MinHash over lowercased word 5-gram shingles (texts under 5 words are one shingle), 128 permutations, MinHashLSH at Jaccard 0.8 with the candidate's MinHash estimate >= 0.8 required. Survivor rule fixed before comparing: visit commercial-safe first, research-only last, then source and id; the first copy of a group is kept -> a Multi Legal Pile copy of an OLDP decision is dropped and the commercial-safe copy stays; deterministic under input shuffles (tested). DedupLog names each dropped id, the kept id, kind (exact/near) and the estimate. Scope stated: training data only; provision versions collapse here, while the P7 retrieval index is built from the collected documents so every version stays retrievable. Test test_dedup_catches_planted_near_duplicate (planted 3-word edit of a 1,800-word decision: true Jaccard 0.98, estimate >= 0.8, dropped; exact research-only copy dropped even when first in the input) + test_dedup_shingles.",
+    "2026-09-27: P3-T: lexhybrid/data/corpus/changelog.py: changes_since(documents, since) lists every statute/regulation whose version date (valid_from) is on or after 'since', newest first, with the meaning of the date by source: RIS = the provision version's Inkrafttretensdatum (granularity provision) and the version it replaced linked as previous_id when the corpus holds it (valid_to before the new valid_from); Fedlex = the article's latest footnote in-force date (provision, conservative); GII = the law's Stand (granularity act: the provision may be unchanged). write_changelog -> data/manifests/changelog.jsonl (header line {since, changes}). CLI over data/raw: --since 2025-01-01 gives 20 changes from the 60 collected statutes. Test test_changelog_from_fixture_versions: ABGB §688 2017 version linked to its 1812 predecessor, OR Art. 40a (2022) and Art. 97 (2011) by their footnotes, BeurkG by its Stand, nothing older than the date, empty for a future date.",
+    "2026-09-27: P3-U: lexhybrid/data/packing.py: pack(documents of one source, encode, eos_id, row_len) -> rows: encode_document tokens + Qwen3 EOS 151,643 per document; doc_ids local per row from 0, stepping right after each EOS (the EOS belongs to its document; the P2 loss masks only the cross-boundary prediction); a document longer than the rest of a row carries on as the next row's document 0 (nothing dropped); the last row is EOS-padded, padding joins the last document, 'length' says how many tokens are real. write_shards -> parquet (input_ids/doc_ids int32 lists, length, source, licence, commercial_safe, research_only, documents = Document ids by local doc id), 1000 rows/shard; CLI --row-len 4096|8192 -> data/shards/<L>/<source>/. One source per shard (raises otherwise), so the mixture weights sources by drawing rows. Run on the 20 scrubbed OLDP decisions: 4096 -> 29 rows, 8192 -> 15 rows. Tests: test_packing_roundtrip_doc_ids (toy codec: boundaries exactly after EOS, token count conserved, spanning documents, padding, parquet round-trip decodes every document back), test_packing_keeps_one_source_per_pack, test_packing_with_the_qwen3_tokenizer (real tokenizer, exact decode).",
+    "2026-09-27: CORRECTION to the P3-U tick note: the row counts in it (29 at 4096, 15 at 8192) were written before the run finished and are wrong. Measured: the 20 scrubbed OLDP decisions pack into 92,055 real tokens = 23 rows at 4,096 and 12 rows at 8,192 (last row 1,943 real tokens). Evidence 'shards' holds the measured numbers.",
+    "2026-09-27: P3-V: lexhybrid/data/datasets.py: split_by_document (seeded hash of the id; max(ceil(0.1% of n), 2,000) documents, asserted; a corpus too small is a ValueError, not a smaller split) runs before packing; build_source_shards packs each side into <root>/<row_len>/<source>/{train,val}/ + meta.json (docs, rows, tokens, document ids per side, licences, commercial_safe = every row, research_only = any row, extra e.g. scrubbed). Mixture: groups legal 0.7 / general 0.3 by tokens (fixed-length rows => row shares), weights within a group (effective_weights renormalises); PackedMixture train = seeded precomputed schedule (same every run; resumes by 'start' offset; a source's rows in a seeded order reshuffled per wrap), val = every row once; labels past a row's length -100. Arms: commercial_safe admits only sources whose shards are commercial-safe and research-free (ValueError otherwise, never a silent drop) and checks every row it serves; research admits all. configs/dataset/mixture_pretrain.yaml (10 sources; multilegalpile 'arm: research') and legal_smoke.yaml (retargets the mixture at data/shards/smoke, 100 samples, CPU batch 1); scripts/build_shards.py (scrubbed documents per R11 -- refuses unscrubbed sources unless --allow-unscrubbed, recorded in meta; dedup over all sources; split; pack); scripts/train_pretrain.py builds loaders for dataset name 'packed' (no shuffle on top of the schedule). Tests: test_val_split_by_document, test_no_research_only_in_commercial_safe_shard (run by validate.sh's pytest gate), test_mixture_draws_the_configured_shares, tests/test_training.py::test_train_pretrain_runs_on_packed_shards (2 steps on toy shards).",
+    "2026-09-27: P3-W: lexhybrid/data/probes/mqar.py: MQAR with the reference configs/dataset/mqar.yaml semantics recovered from this session's record of the reference (vocab 8,192 split keys/values, 4 kv pairs, 4 queries, power-law gaps a=0.01, 2,048 context, seed 42; Zoology layout: pairs first, each query = key + value at a power-law gap); ids shifted into the ordinary Qwen3 vocabulary and filler drawn above the key/value ranges so filler never mimics a query; score() = argmax at the query-key positions, logits only there (head(backbone) at those rows, no (B,L,V)). lexhybrid/data/probes/statute_recall.py: item = provision + other provisions to the context budget + '<citation> Abs. 2 lautet:'; greedy decoding of exactly the target's token count (cached where supported, uncached for the legacy arm); exact match on whitespace-normalised strings and char-F1 = F1 of character-trigram multisets (single characters score unrelated German 0.74, above a half copy 0.66; trigrams 0.14 vs 0.66 -- measured on the GII sample). scripts/evaluate_probes.py: any checkpoint (Lightning or state dict via load_state_dict_guarded) or a random init; JSON with MQAR accuracy, EM, char-F1, context, ARCH. Smoke on hybrid_legal_base random init at context 512: runs in 16 s on CPU. Tests: test_mqar_generator_has_the_reference_semantics, test_mqar_score_counts_the_value_predictions (oracle 1.0 / off-by-one 0.0), test_statute_recall_items_need_the_context, test_evaluate_probes_runs_on_a_random_model.",
+    "2026-09-27: P3-X: lexhybrid/data/probes/multihop.py: item = provision A that refers to exactly one other provision B of the same act (single references '§ 280 Abs. 1', 'Art. 97', 'Artikel 6 Absatz 1'; references to another act -- a following abbreviation, 'der Richtlinie ...' -- excluded; lists and ranges '§§ 674, 729', 'Artikel 15 bis 22' count as several, so such an A is never used); question '<A> verweist auf eine andere Vorschrift. Wie lautet deren Überschrift?' does not name B; answer = B's printed title (GII/Fedlex/EUR-Lex; RIS left out: most provisions carry no title); A must not contain the answer; context = A, B and 2 same-act distractors in seeded order. score = exact match of the first line of a greedy continuation. evaluate_probes.py runs it with MQAR and statute recall. 200 items built from the P3 collections (BGB 117, OR 25, DSGVO 14, DSA 12, EU directives 11, ZGB 7, KI-VO 6, Rom-II 4, Rom-I 4) -> data/probes/multihop.jsonl; the fixtures alone hold 2 (hence a real BGB fixture of 9 provisions, tests/fixtures/probes/bgb_multihop.jsonl). Spot-checked against the statutes: §843->§760 'Vorauszahlung', §168->§167 'Erteilung der Vollmacht', DSGVO Art. 10->Art. 6, §630g->§811. Test test_multihop_items_need_two_passages (answer not in A, in B, gone when B is removed; question does not name B; one reference only).",
+    "2026-09-27: P3-X follow-up: ZGB final-title articles (ZGB SchlT Art. N) collided with ZGB Art. N in the multi-hop act index (same code, same number); they are now left out of the probe. Rebuilt set: 200 items, composition in evidence 'multihop' (BGB 128, OR 18, DSGVO 14, DSA 12, RL 2019/771 7, KI-VO 6, RL 2011/83 4, Rom-II 4, Rom-I 4, ZGB 3); the composition in the P3-X tick note is superseded.",
+    "2026-09-27: P3-Y: lexhybrid/data/sft_format.py: Example(question, passages[citation_id, sentences], answer segments Text/Quote/Cite; empty = unanswerable). The prompt is ONE document: '<|question|>...\\n' + per passage '<|passage|><|cK|><citation>\\n<|s1|>... <|sJ|>...<|/passage|>\\n' + '<|answer|>' (no <|endoftext|> inside); the target is free text with <|q|><|cK|><|sJ|> (quote sentence J of passage K verbatim; the P7 renderer substitutes it) and <|cite|><|cK|> pointers, or <|unanswerable|>, always ending in <|endoftext|>. validate: 1..16 passages, 1..64 sentences, pointers in range, no '<|' in content. render/parse round-trip (answerable and unanswerable); encode inserts special ids and tokenizes content with encode_document (content can never become a pointer), labels -100 over the prompt, doc_ids all 0, exactly one EOS at the end; decoding the ids gives back the rendered strings. split_sentences (German; not after Abs./Nr./numbers). Tests: test_sft_format_roundtrip (incl. 5 refused malformed examples), test_sft_encode_with_the_qwen3_tokenizer, test_sft_split_sentences.",
+    "2026-09-27: P3-Z dry run observation: in legal_smoke the tiny sources (gii, fedlex: one partial row each) are drawn as often as oldp at equal weights, so some steps supervise ~1,800 of 4,096 positions (the padding is masked, correctly). For P6 the mixture weights must be set against each source's actual size (tokens available), not left at 1.0, or small sources are up-sampled many times over.",
+    "2026-09-27: P3-Z gate: validate --full exit 0 (817 passed); the smoke shard round-trips through hybrid_legal_base on CPU (2 steps, exit 0, losses in the log); fertility file has prediction and outcome; register complete. Deviation stated: the 100-row 4,096 shard is built from the scrubbed P3 collections (data/scrubbed, the --limit 20 runs plus 14 Bundestag papers), not from the test fixtures alone, which pack into about 18 rows at 4,096. The two steps drew GII's and Fedlex's single partial rows (1,773 and 1,638 supervised tokens), see the P6 mixture-weight note.",
+    "2026-09-27: verdict P3: PASS: data pipeline at smoke scale -- 10 collectors, tokenizer, 4 eval sets, LER scrub (own env), dedup, changelog, packing, split, mixture/arms, 3 probes, SFT format; validate --full exit 0 (817 passed); 100-row 4,096 smoke shard trains 2 CPU steps (log analysis/p3z_smoke_train.log); fertility: Qwen3 2.280 tok/word (prediction < 1.8 refuted), GPT-2 2.872 (confirmed)",
+    "2026-09-27: P3 complete -> current_phase P4",
+    "2026-09-27: P3-R follow-up before the P3 push: the scrub log's entity hash is now HMAC-SHA256 under a local key (LEXHYBRID_SCRUB_KEY, else data/cache/scrub_hmac.key, created once, mode 600, git-ignored) instead of a plain SHA-256 -- the logs are versioned and pushed, and a plain hash of a name can be confirmed by anyone who guesses it (FineWeb pages name private persons). The 10 existing logs were migrated from their offsets: 782 rows, every old hash verified before being replaced (field entity_sha256 -> entity_hmac). test_scrub_replaces_person_names checks the keyed hash."
   ],
   "open_questions": []
 }

@@ -9,7 +9,7 @@
 #
 # Gates:
 #   0  plan/state consistent        python3 scripts/plan_state.py check
-#   1  environment == lock          uv lock --check; scripts/check_env.py
+#   1  environment == lock          uv lock --check (also envs/scrub); scripts/check_env.py
 #   2  static                       ruff check; ruff format --check; bash -n and shellcheck on *.sh
 #   3  model configs                scripts/check_configs.py (Hydra compose, operator pins, vocab)
 #   4  tests                        pytest with the mode's marker selection
@@ -68,6 +68,7 @@ run_gate "plan/state consistent" "$PYTHON" scripts/plan_state.py check
 echo; echo "-- Gate 1: environment --"
 if [[ -n "$UV" ]]; then
   run_gate "uv.lock matches pyproject.toml" "$UV" lock --check
+  run_gate "envs/scrub/uv.lock matches its pyproject.toml" "$UV" lock --check --project envs/scrub
 else
   fail "uv not found on PATH (the environment is defined by uv.lock)"
 fi

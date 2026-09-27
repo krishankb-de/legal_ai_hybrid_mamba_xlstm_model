@@ -1,0 +1,72 @@
+{
+ "Data": {
+  "Metadaten": {
+   "Technisch": {
+    "ID": "JJT_20260917_OGH0002_0070OB00143_26V0000_000",
+    "Applikation": "Justiz",
+    "Organ": "OGH",
+    "ImportTimestamp": {
+     "@xsi:nil": "true",
+     "@xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance"
+    }
+   },
+   "Allgemein": {
+    "Veroeffentlicht": "2026-09-24",
+    "Geaendert": "2026-09-24",
+    "DokumentUrl": "https://ogd.ris.bka.gv.at/Dokument.wxe?Abfrage=Justiz&Dokumentnummer=JJT_20260917_OGH0002_0070OB00143_26V0000_000"
+   },
+   "Judikatur": {
+    "Dokumenttyp": "Text",
+    "Geschaeftszahl": {
+     "item": "7Ob143/26v"
+    },
+    "Entscheidungsdatum": "2026-09-17",
+    "EuropeanCaseLawIdentifier": "ECLI:AT:OGH0002:2026:0070OB00143.26V.0917.000",
+    "Justiz": {
+     "Rechtsgebiete": {
+      "item": "Zivilrecht"
+     },
+     "Fachgebiete": {
+      "item": [
+       "Exekutionsrecht",
+       "Familienrecht (ohne Unterhalt)"
+      ]
+     },
+     "Entscheidungsart": "Zurückweisung mangels erheblicher Rechtsfrage",
+     "Gericht": "OGH",
+     "Textnummern": {
+      "item": "E148531"
+     }
+    },
+    "GesamteEntscheidungUrl": "https://ogd.ris.bka.gv.at/JustizEntscheidung.wxe?Abfrage=Justiz&Dokumentnummer=JJT_20260917_OGH0002_0070OB00143_26V0000_000&IncludeSelf=True",
+    "RechtssaetzeUrl": "https://ogd.ris.bka.gv.at/JustizEntscheidung.wxe?Abfrage=Justiz&Dokumentnummer=JJT_20260917_OGH0002_0070OB00143_26V0000_000&IncludeSelf=False"
+   }
+  },
+  "Dokumentliste": {
+   "ContentReference": {
+    "ContentType": "MainDocument",
+    "Name": "Hauptdokument",
+    "Urls": {
+     "ContentUrl": [
+      {
+       "DataType": "Xml",
+       "Url": "https://ogd.ris.bka.gv.at/Dokumente/Justiz/JJT_20260917_OGH0002_0070OB00143_26V0000_000/JJT_20260917_OGH0002_0070OB00143_26V0000_000.xml"
+      },
+      {
+       "DataType": "Html",
+       "Url": "https://ogd.ris.bka.gv.at/Dokumente/Justiz/JJT_20260917_OGH0002_0070OB00143_26V0000_000/JJT_20260917_OGH0002_0070OB00143_26V0000_000.html"
+      },
+      {
+       "DataType": "Rtf",
+       "Url": "https://ogd.ris.bka.gv.at/Dokumente/Justiz/JJT_20260917_OGH0002_0070OB00143_26V0000_000/JJT_20260917_OGH0002_0070OB00143_26V0000_000.rtf"
+      },
+      {
+       "DataType": "Pdf",
+       "Url": "https://ogd.ris.bka.gv.at/Dokumente/Justiz/JJT_20260917_OGH0002_0070OB00143_26V0000_000/JJT_20260917_OGH0002_0070OB00143_26V0000_000.pdf"
+      }
+     ]
+    }
+   }
+  }
+ }
+}

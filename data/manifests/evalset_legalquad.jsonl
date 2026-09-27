@@ -1,0 +1,21 @@
+{"info": {"eval_only": true, "licence": "none stated by the authors (MTEB's copy: CC-BY-4.0)", "name": "legalquad", "note": "200 questions with extractive answers over Open Legal Data decisions; one answer differs from its context by one character", "research_only": false, "source": "https://github.com/Christoph911/AIKE2021_Appendix@6eed75f", "task": "qa"}}
+{"gold": [], "id": "legalquad:106739", "sha256": "8b4247cad5af73715c1bda094e9c791ce45bd9e321a219ab810bb2aa9dcc5f93"}
+{"gold": [], "id": "legalquad:120341", "sha256": "01321c5707d8fa72e70ac1efbbc70575b691376c0cc185edba3d6cf4dc1ea3df"}
+{"gold": [], "id": "legalquad:106857", "sha256": "ebc5ec5616e1b6046b263d28848f0106ac41a01b7c1bec7b2b48590fcc9f086e"}
+{"gold": [], "id": "legalquad:114871", "sha256": "fd20a7705bc7bddcab5947716bcb3c79e74fe1309a3a1f6dfb42fde20799ffca"}
+{"gold": [], "id": "legalquad:106763", "sha256": "f36c20f9b82ba0abed82e2a6e20b7808ec3e99e5b36d348405e8a5e9fe991e8f"}
+{"gold": [], "id": "legalquad:106872", "sha256": "927f80b72e35f7ab2380a666ef381216b69ae38828db7bcc31558b64b617001e"}
+{"gold": [], "id": "legalquad:114909", "sha256": "df18bb75f5c13e84577877da7fb0f97849f88a0890f546e6266315ce006ac161"}
+{"gold": [], "id": "legalquad:106879", "sha256": "72232406e57c99f8e1370408d19bb755d60bb0e9f4f3dd8cab49a5d66e270a7b"}
+{"gold": [], "id": "legalquad:114881", "sha256": "04a3fb2990a68716d351876042daaf1905f1b28605af6acb9fd4eba59b0ea5b8"}
+{"gold": [], "id": "legalquad:120346", "sha256": "0e4160093c940a5d3219d579ea7b48c26f04ab0e166c99801d4e0dba4ebf9485"}
+{"gold": [], "id": "legalquad:114887", "sha256": "e393614d65170e131a79c85ebc938302f98f85cb3cbf043cbb3b795f282e46c1"}
+{"gold": [], "id": "legalquad:114914", "sha256": "5158eda58288f6417c1c1a68b40f8947e31e7369f6067e8b7bb291ece7311a08"}
+{"gold": [], "id": "legalquad:114904", "sha256": "abba20bd9972c22f32f28e899fe633fbf89d645ff83c926723550c08f0916f9c"}
+{"gold": [], "id": "legalquad:118131", "sha256": "a8f0a89ffb185ddeebd47cfbe440c01941d040c3304cb142c506c24ffa0f47d1"}
+{"gold": [], "id": "legalquad:118160", "sha256": "8acaecad4821f9fd1604de8e50d8358295c70a3bbefbacf594bc3dfe6e5dd3d1"}
+{"gold": [], "id": "legalquad:118207", "sha256": "ca503d5e0a8306ec0e6d424474efa54ecb332e09b097218ff3c6fa619e6bcaad"}
+{"gold": [], "id": "legalquad:119078", "sha256": "307078f4ff4e4f407c093a0f1c6e5319e1ae070a138d536f03e55b6ffdda356e"}
+{"gold": [], "id": "legalquad:119083", "sha256": "3370e53d78aa2e1bb0b8593e6bc0e42177f58bcabf4ef05a2378fe2577c78303"}
+{"gold": [], "id": "legalquad:120337", "sha256": "51996d8b6f8f24f6a760bca1f6c7cac52649c0ebe57303988e79e6c8e27dd54c"}
+{"gold": [], "id": "legalquad:120354", "sha256": "c6681d0e4469265ed8b4b11656e427912169cd495078c481b849aa19b290a7d2"}
