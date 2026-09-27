@@ -3,7 +3,8 @@
 Each fixture in ``tests/fixtures/reference_parity/`` was produced by the REFERENCE code
 (``scripts/dump_reference_parity.py``): a state dict, a packed input with document ids, and the
 outputs. Here the state dict is loaded strictly into the NEW block or model and every output must
-agree to 1e-6 in fp32; cached beam search must produce the identical tokens. P2 fixes defects on
+agree to 1e-6 in fp32 (whole-model logits to 5e-6, see ``MODEL_TOL``); cached beam search must
+produce the identical tokens. P2 fixes defects on
 paths these fixtures pin; a fix that moves one of them updates the fixture in the same box, with a
 note saying why.
 """
@@ -20,6 +21,10 @@ from tests.conftest import REPO_ROOT
 
 FIXTURES = REPO_ROOT / "tests" / "fixtures" / "reference_parity"
 TOL = 1e-6
+# Whole-model outputs (4 blocks, MLPs, LM head) carry cross-platform fp32 BLAS differences: the
+# fixtures were generated on macOS arm64, and on Linux x86_64 the logits differ by up to 1.4e-6
+# (CI run 36322991795) while every block still agrees to 1e-6. A port error moves logits by 1e-3+.
+MODEL_TOL = 5e-6
 BLOCKS = {"mamba3": Mamba3Block, "mlstm": mLSTMBlock, "attention": AttentionBlock, "mamba": MambaBlock}
 
 
@@ -75,10 +80,10 @@ def test_model_matches_the_reference(index):
     with torch.no_grad():
         with_doc = model(case["input_ids"], labels=case["input_ids"], doc_ids=case["doc_ids"])
         without_doc = model(case["input_ids"], labels=case["input_ids"])
-    assert (with_doc.logits - case["logits_doc"]).abs().max().item() <= TOL
-    assert (without_doc.logits - case["logits_nodoc"]).abs().max().item() <= TOL
-    assert abs(with_doc.loss.item() - case["loss_doc"].item()) <= TOL
-    assert abs(without_doc.loss.item() - case["loss_nodoc"].item()) <= TOL
+    assert (with_doc.logits - case["logits_doc"]).abs().max().item() <= MODEL_TOL
+    assert (without_doc.logits - case["logits_nodoc"]).abs().max().item() <= MODEL_TOL
+    assert abs(with_doc.loss.item() - case["loss_doc"].item()) <= MODEL_TOL
+    assert abs(without_doc.loss.item() - case["loss_nodoc"].item()) <= MODEL_TOL
     if case["beam_tokens"] is not None:
         tokens = model.beam_search_cached(case["beam_prompt"], beam_size=3, max_new_tokens=10)
         assert torch.equal(tokens, case["beam_tokens"])

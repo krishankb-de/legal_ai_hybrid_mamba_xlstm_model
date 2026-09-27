@@ -1,6 +1,6 @@
 {
   "current_phase": "P2",
-  "last_updated": "2026-09-27T15:28:24+02:00",
+  "last_updated": "2026-09-27T15:42:54+02:00",
   "status": "P1 complete 2026-09-27 (Opus 5.5): faithful port, parity green, CI configured; Reference/ deleted. P2 (correctness fixes, decoder deltas, legal configs) is next.",
   "plan_of_record": "LEGAL_BUILD_PLAN.md",
   "helper": "python3 scripts/plan_state.py <cmd> (stdlib only; the ONLY writer of LEGAL_BUILD_PLAN.md checkboxes and legal_build_state.json)",
@@ -220,7 +220,7 @@
         },
         "P1-Y": {
           "done": true,
-          "desc": "`tests/test_reference_parity.py`: loads each fixture's `state_dict` into the NEW block or model (strict), runs fp32 forward with and without `doc_ids` (and `step` where the block has one), asserts `max|Δ| ≤ 1e-6` and ..."
+          "desc": "`tests/test_reference_parity.py`: loads each fixture's `state_dict` into the NEW block or model (strict), runs fp32 forward with and without `doc_ids` (and `step` where the block has one), asserts `max|Δ| ≤ 1e-6` for ..."
         },
         "P1-Z": {
           "done": true,
