@@ -1,9 +1,11 @@
 """``HybridBlock``: pre-norm -> mixer -> residual, then the MLP, for every mixer type.
 
-Ported from the reference with the sLSTM branch removed. Two behaviours are kept on purpose for
-the P1 parity fixtures and fixed in P2-A: the ``mlstm`` allow-list does not strip the ``mlstm_``
-prefix, so ``mlstm_gate_soft_cap`` and friends never reach the mixer (defect 2); and Mamba-3 reads
-the shared ``expand_factor`` (defect 4).
+Ported from the reference with the sLSTM branch removed. P2-A fixed two dispatch defects: the
+``mlstm_*`` config keys now reach ``mLSTMBlock`` with their prefix stripped (defect 2: the reference
+filtered on the unprefixed names, so ``mlstm_gate_soft_cap`` and friends silently fell back to the
+block defaults), and Mamba-3 reads ``mamba3_expand_factor`` rather than the Mamba-1 ``expand_factor``
+(defect 4). For both prefixed mixers a prefixed key always wins over an unprefixed one of the same
+name, whatever order the keys arrive in.
 """
 
 import functools
@@ -20,6 +22,15 @@ from lexhybrid.layers.mlstm_block import mLSTMBlock
 from lexhybrid.layers.normalization import RMSNorm
 
 
+def _signature_params(cls) -> frozenset:
+    params = inspect.signature(cls.__init__).parameters
+    return frozenset(
+        name
+        for name, p in params.items()
+        if name not in ("self", "dim") and p.kind is not inspect.Parameter.VAR_KEYWORD
+    )
+
+
 @functools.lru_cache(maxsize=1)
 def _mamba3_params() -> frozenset:
     """The ``mamba3_*`` options this dispatcher forwards, read off the block's signature.
@@ -28,12 +39,23 @@ def _mamba3_params() -> frozenset:
     ``theta_max``, so its screen could only run the block default. Adding a parameter to the block
     is enough to make it reachable from ``HybridConfig``.
     """
-    params = inspect.signature(Mamba3Block.__init__).parameters
-    return frozenset(
-        name
-        for name, p in params.items()
-        if name not in ("self", "dim") and p.kind is not inspect.Parameter.VAR_KEYWORD
-    )
+    return _signature_params(Mamba3Block)
+
+
+@functools.lru_cache(maxsize=1)
+def _mlstm_params() -> frozenset:
+    """Every ``mLSTMBlock`` parameter, read off its signature like ``_mamba3_params``."""
+    return _signature_params(mLSTMBlock)
+
+
+def _prefixed_kwargs(layer_kwargs: dict, prefix: str, accepted: frozenset, shared: frozenset) -> dict:
+    """Kwargs for a prefixed mixer: ``shared`` unprefixed names first, then ``prefix``-stripped
+    names on top, so ``mamba3_head_dim`` beats the mLSTM ``head_dim`` regardless of key order."""
+    out = {k: v for k, v in layer_kwargs.items() if k in shared and k in accepted}
+    for key, value in layer_kwargs.items():
+        if key.startswith(prefix) and key[len(prefix) :] in accepted:
+            out[key[len(prefix) :]] = value
+    return out
 
 
 _MAMBA_PARAMS = frozenset(
@@ -51,21 +73,23 @@ _MAMBA_PARAMS = frozenset(
         "dt_max",
     }
 )
-# Defect 2 (kept for P1 parity): unprefixed names, so the `mlstm_*` config keys never match.
-_MLSTM_PARAMS = frozenset(
-    {
-        "head_dim",
-        "num_heads",
-        "tfla_impl",
-        "proj_factor",
-        "gate_soft_cap",
-        "input_gate_bias_init",
-        "forget_gate_bias_init",
-        "use_hybrid_norm",
-    }
+# Unprefixed config fields each prefixed mixer takes as they are. Everything else it needs arrives
+# under its prefix (`mamba3_*`, `mlstm_*`). Mamba-3 shares only the HybridNorm switch: the Mamba-1
+# names it once read (`expand_factor`, `conv_size`, `dt_min`, `dt_max`) all have `mamba3_` forms.
+_MAMBA3_SHARED = frozenset({"use_hybrid_norm"})
+_MLSTM_SHARED = frozenset(
+    {"head_dim", "num_heads", "tfla_impl", "tfla_fallback", "proj_factor", "use_hybrid_norm"}
 )
 _ATTENTION_PARAMS = frozenset(
-    {"num_heads", "head_dim", "attn_dropout", "rope_theta", "max_position_embeddings", "use_hybrid_norm"}
+    {
+        "num_heads",
+        "head_dim",
+        "attn_dropout",
+        "rope_theta",
+        "max_position_embeddings",
+        "use_hybrid_norm",
+        "attn_impl",
+    }
 )
 
 
@@ -115,7 +139,7 @@ class HybridBlock(nn.Module):
         # quietly, because the flat bag deliberately carries every mixer's fields.
         known = {
             "mamba3_": _mamba3_params(),
-            "mlstm_": frozenset({"gate_soft_cap", "input_gate_bias_init", "forget_gate_bias_init"}),
+            "mlstm_": _mlstm_params() - _MLSTM_SHARED,
         }
         for key in layer_kwargs:
             for prefix, names in known.items():
@@ -130,21 +154,14 @@ class HybridBlock(nn.Module):
             self.mixer = MambaBlock(dim, **filtered)
         elif self.layer_type == "mamba3":
             # `mamba3_*` keys are stripped so the block's signature stays readable and does not
-            # collide with the Mamba-1 names. Keys are processed in dataclass order, so the
-            # `mamba3_` form of conv_size/dt_min/dt_max wins over the Mamba-1 one.
-            mamba3_params = _mamba3_params()
-            renamed = {}
-            for key, value in layer_kwargs.items():
-                stripped = key[len("mamba3_") :] if key.startswith("mamba3_") else key
-                if stripped in mamba3_params:
-                    renamed[stripped] = value
-            # `head_dim` is shared with mLSTM in the flat bag; the mamba3_ form wins.
-            if "mamba3_head_dim" in layer_kwargs:
-                renamed["head_dim"] = layer_kwargs["mamba3_head_dim"]
-            self.mixer = Mamba3Block(dim, **renamed)
+            # collide with the Mamba-1 names in the flat bag.
+            self.mixer = Mamba3Block(
+                dim, **_prefixed_kwargs(layer_kwargs, "mamba3_", _mamba3_params(), _MAMBA3_SHARED)
+            )
         elif self.layer_type == "mlstm":
-            filtered = {k: v for k, v in layer_kwargs.items() if k in _MLSTM_PARAMS}
-            self.mixer = mLSTMBlock(dim, **filtered)
+            self.mixer = mLSTMBlock(
+                dim, **_prefixed_kwargs(layer_kwargs, "mlstm_", _mlstm_params(), _MLSTM_SHARED)
+            )
         elif self.layer_type == "attention":
             # `head_dim`/`num_heads` are shared with mLSTM on purpose: the matched Transformer reuses
             # the hybrid's head geometry.
@@ -194,12 +211,12 @@ class HybridBlock(nn.Module):
                 x = residual + x
         return x
 
-    def allocate_inference_cache(self, batch_size, device=None, dtype=torch.float32):
-        """Per-layer decode state, or None if this mixer has no O(1) step."""
+    def allocate_inference_cache(self, batch_size, device=None, dtype=torch.float32, max_seq_len=None):
+        """Per-layer decode state, or None if this mixer has no step (Mamba-1)."""
         allocate = getattr(self.mixer, "allocate_inference_cache", None)
         if allocate is None:
             return None
-        return allocate(batch_size, device=device, dtype=dtype)
+        return allocate(batch_size, device=device, dtype=dtype, max_seq_len=max_seq_len)
 
     def step(self, x_t: torch.Tensor, cache) -> torch.Tensor:
         """One token through mixer + MLP with residuals, mirroring ``forward``'s topology exactly."""

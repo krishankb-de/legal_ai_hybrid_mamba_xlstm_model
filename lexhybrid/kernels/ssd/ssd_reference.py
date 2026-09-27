@@ -86,16 +86,18 @@ def ssd_sequential_reference(
     coeff: torch.Tensor | None = None,
     extra_terms: Sequence[tuple[torch.Tensor, torch.Tensor, torch.Tensor]] | None = None,
     dtype: torch.dtype = torch.float64,
-) -> torch.Tensor:
+    return_final_state: bool = False,
+):
     """Ground-truth SSD scan: a plain loop, in float64 by default.
 
     Args:
         doc_ids: optional (batch, seqlen) document ids; the state is reset wherever the id changes.
         coeff: state-input coefficient, defaulting to ``dt``.
         extra_terms: additional ``(coefficient, B, x)`` triples summed into the state.
+        return_final_state: also return the state after the last token.
 
     Returns:
-        (batch, seqlen, nheads, headdim)
+        (batch, seqlen, nheads, headdim), or ``(y, final_state)`` with ``return_final_state``.
     """
     x, dt, A, B, C = (t.to(dtype) for t in (x, dt, A, B, C))
     D = None if D is None else D.to(dtype)
@@ -124,4 +126,5 @@ def ssd_sequential_reference(
         if D is not None:
             y_t = y_t + D.view(1, -1, 1) * x[:, t]
         ys.append(y_t)
-    return torch.stack(ys, dim=1)
+    out = torch.stack(ys, dim=1)
+    return (out, state) if return_final_state else out

@@ -38,6 +38,19 @@ def cumulative_angles(
     Returns:
         (batch, seqlen, n_angles) angles in [0, 2pi), in ``theta``'s dtype.
     """
+    return cumulative_angles_fp64(dt, theta, doc_ids).to(theta.dtype)
+
+
+def cumulative_angles_fp64(
+    dt: torch.Tensor,
+    theta: torch.Tensor,
+    doc_ids: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """``cumulative_angles`` before the final cast: float64, wrapped to [0, 2pi).
+
+    Exposed for the decode cache (P2-F): ``Mamba3Block.step`` continues the accumulation in float64
+    from the last position's angle, exactly as the chunked path accumulates.
+    """
     step = dt.double() * theta.double()
     if doc_ids is None:
         angles = step.cumsum(dim=1)
@@ -51,7 +64,7 @@ def cumulative_angles(
         baseline = torch.where(starts.unsqueeze(-1), before, torch.zeros_like(before))
         angles = total - _segment_baseline(baseline, starts)
     # Wrapping is exact for rotations and keeps sin/cos away from large arguments.
-    return torch.remainder(angles, TWO_PI).to(theta.dtype)
+    return torch.remainder(angles, TWO_PI)
 
 
 def _segment_baseline(baseline: torch.Tensor, starts: torch.Tensor) -> torch.Tensor:

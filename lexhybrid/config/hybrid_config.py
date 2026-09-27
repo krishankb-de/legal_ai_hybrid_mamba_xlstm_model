@@ -47,11 +47,18 @@ class HybridConfig:
     dt_min: float = 1e-3
     dt_max: float = 1e-1
     tfla_impl: str = "legacy"  # "legacy" | "exact" -- the mLSTM counterpart (M1-H)
+    # What exact TFLA does when a chunk's log-decay is too wide for the fp32 factorisation
+    # (defect 9, P2-C): "error" (default: the model must be configured so the fast path holds) or
+    # "sequential" (exact, slow).
+    tfla_fallback: str = "error"
 
     # Mamba-3 (M2). Every flag defaults to the Mamba-2 reduction, so a `mamba3` layer built from
     # defaults is exactly Mamba-2 SSD and each arm moves one variable.
     mamba3_d_state: int = 128
     mamba3_head_dim: int = 64
+    # Mamba-3's own inner expansion (defect 4, P2-A): it used to read the Mamba-1 `expand_factor`,
+    # so widening the legacy mixer silently widened every Mamba-3 layer too.
+    mamba3_expand_factor: int = 2
     mamba3_ngroups: int = 1  # >1 leaves the parameter-matched regime
     mamba3_chunk_size: int = 64
     mamba3_use_conv: bool = True
@@ -82,11 +89,22 @@ class HybridConfig:
     proj_factor: int = 2
     mlstm_gate_soft_cap: float = 15.0
     mlstm_input_gate_bias_init: float = -10.0
-    mlstm_forget_gate_bias_init: float = 0.0
+    # 3.0 (P2-C, decision 10): f = sigmoid(3) = 0.95 at init keeps exact TFLA factorised at chunk
+    # 128 (half-range 3.1). The reference's 0.0 gave f = 0.5 and half-range 44.4 > 40, i.e. the slow
+    # fallback from step 0 -- invisible until P2-B, because the model init zeroed the bias anyway.
+    mlstm_forget_gate_bias_init: float = 3.0
+    # TFLA chunk length (defect 9, P2-A/P2-C): the reference picked 32/64/128 from the sequence
+    # length inside the kernel, so the trained operator changed with the row length.
+    mlstm_chunk_size: int = 128
 
     # Attention parameters
     attn_dropout: float = 0.0
-    rope_theta: float = 10000.0
+    # 500,000 (P2-H, decision 10). The reference's 10,000 is a Llama-1 setting: its slowest RoPE
+    # frequency completes a turn in ~63K tokens and separates distant offsets poorly at 8K+ rows.
+    rope_theta: float = 500000.0
+    # Packed-row attention kernel (P2-J): "flex" (FlexAttention block mask from doc_ids), "sdpa"
+    # (dense (B,1,L,L) mask), "auto" (flex on CUDA, dense on CPU).
+    attn_impl: str = "auto"
 
     # Shared parameters
     norm_type: str = "rms"
@@ -102,8 +120,15 @@ class HybridConfig:
     dropout: float = 0.1
     initializer_range: float = 0.02
 
-    # Output head
-    tie_word_embeddings: bool = False
+    # Output head. Tied by default (P2-M, decision 10): at the Qwen3 vocabulary the untied head is
+    # another 116.7M parameters, more than the whole non-embedding backbone.
+    tie_word_embeddings: bool = True
+
+    # Multi-token prediction (P2-S, screen arm S4): mtp_n tokens predicted per position; 1 is off.
+    # mtp_n = 2 adds one sequential depth (DeepSeek-V3 style) sharing the embedding and the head.
+    mtp_n: int = 1
+    mtp_loss_weight: float = 0.3
+    mtp_layer_type: str = "mamba3"
 
     # Memory optimisation
     use_gradient_checkpointing: bool = False
@@ -134,6 +159,10 @@ class HybridConfig:
             raise ValueError(f"scan_impl must be 'legacy' or 'exact', got {self.scan_impl!r}")
         if self.tfla_impl not in ("legacy", "exact"):
             raise ValueError(f"tfla_impl must be 'legacy' or 'exact', got {self.tfla_impl!r}")
+        if self.attn_impl not in ("auto", "sdpa", "flex"):
+            raise ValueError(f"attn_impl must be 'auto', 'sdpa' or 'flex', got {self.attn_impl!r}")
+        if self.tfla_fallback not in ("error", "sequential"):
+            raise ValueError(f"tfla_fallback must be 'error' or 'sequential', got {self.tfla_fallback!r}")
         if self.mamba3_bc_bias not in ("none", "zero_init", "one_init"):
             raise ValueError(
                 f"mamba3_bc_bias must be 'none', 'zero_init' or 'one_init', got {self.mamba3_bc_bias!r}"
@@ -144,6 +173,15 @@ class HybridConfig:
             )
         if self.dt_init_strategy not in ("none", "mamba"):
             raise ValueError(f"dt_init_strategy must be 'none' or 'mamba', got {self.dt_init_strategy!r}")
+        if int(self.mtp_n) < 1:
+            raise ValueError(f"mtp_n must be >= 1 (1 = off), got {self.mtp_n!r}")
+        if self.mtp_layer_type not in VALID_LAYER_TYPES:
+            raise ValueError(
+                f"mtp_layer_type must be one of {VALID_LAYER_TYPES}, got {self.mtp_layer_type!r}"
+            )
+        for name in ("mamba3_expand_factor", "mlstm_chunk_size", "mamba3_chunk_size"):
+            if int(getattr(self, name)) < 1:
+                raise ValueError(f"{name} must be >= 1, got {getattr(self, name)!r}")
 
     def get_layer_config(self, layer_idx: int) -> dict:
         """The per-mixer arguments for layer ``layer_idx`` (a readable summary; not used to build)."""
@@ -176,17 +214,18 @@ class HybridConfig:
                     if name.startswith("mamba3_")
                 }
             )
-            base_config["expand_factor"] = self.expand_factor
         elif layer_type == "mlstm":
             base_config.update(
                 {
                     "head_dim": self.head_dim,
                     "num_heads": self.num_heads,
                     "tfla_impl": self.tfla_impl,
+                    "tfla_fallback": self.tfla_fallback,
                     "proj_factor": self.proj_factor,
                     "gate_soft_cap": self.mlstm_gate_soft_cap,
                     "input_gate_bias_init": self.mlstm_input_gate_bias_init,
                     "forget_gate_bias_init": self.mlstm_forget_gate_bias_init,
+                    "chunk_size": self.mlstm_chunk_size,
                 }
             )
         elif layer_type == "attention":
@@ -196,6 +235,7 @@ class HybridConfig:
                     "head_dim": self.head_dim,
                     "attn_dropout": self.attn_dropout,
                     "rope_theta": self.rope_theta,
+                    "attn_impl": self.attn_impl,
                     "max_position_embeddings": self.max_position_embeddings,
                 }
             )

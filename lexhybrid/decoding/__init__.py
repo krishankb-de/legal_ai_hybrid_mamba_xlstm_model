@@ -1,5 +1,29 @@
-"""Decoding: uncached references and (from P2) cached greedy/sample/beam with EOS and pointers."""
+"""Decoding: uncached references and cached greedy/sample/beam with EOS and pointer constraints."""
 
-from lexhybrid.decoding.generate import beam_search_uncached
+from lexhybrid.decoding.generate import (
+    apply_repetition_penalty,
+    beam_search,
+    beam_search_cached,
+    beam_search_uncached,
+    best_of_n,
+    filter_logits,
+    generated_tokens,
+    greedy,
+    greedy_cached,
+    sample,
+    sample_cached,
+)
 
-__all__ = ["beam_search_uncached"]
+__all__ = [
+    "apply_repetition_penalty",
+    "beam_search",
+    "beam_search_cached",
+    "beam_search_uncached",
+    "best_of_n",
+    "filter_logits",
+    "generated_tokens",
+    "greedy",
+    "greedy_cached",
+    "sample",
+    "sample_cached",
+]

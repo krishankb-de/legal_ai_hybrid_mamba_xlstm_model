@@ -1,0 +1,85 @@
+# Screen arm S0 (plan P5): no attention -- the base's two attention layers (3, 9) become Mamba-3.
+# One lever: attention count. Not parameter-matched: +2.8% non-embedding (an attention block is
+# 1.47M smaller than a Mamba-3 block); the delta is reported in every table (R3).
+model_type: lexhybrid
+
+vocab_size: 151936  # Qwen3 tokenizer, padded (decision 6)
+dim: 768
+num_layers: 12
+#               0       1       2       3       4      5      6      7       8       9       10      11
+layer_pattern: [mamba3, mamba3, mamba3, mamba3, mlstm, mlstm, mlstm, mamba3, mamba3, mamba3, mamba3, mamba3]
+
+# Operators, pinned explicitly (R8): the shipping ones.
+scan_impl: exact
+tfla_impl: exact
+tfla_fallback: error  # the factorised TFLA path must hold at init (forget bias 3.0, chunk 128)
+
+# Mamba-1 fields: no mamba layers here; declared so every yaml has the same schema.
+state_size: 16
+conv_size: 4
+expand_factor: 2
+dt_rank: null
+use_fast_path: true
+dt_init_strategy: none
+dt_min: 1.0e-3
+dt_max: 1.0e-1
+
+# Mamba-3: every flag at the Mamba-2 reduction (the reference's winning A2 recipe); arms move one.
+mamba3_d_state: 128
+mamba3_head_dim: 64
+mamba3_expand_factor: 2
+mamba3_ngroups: 1
+mamba3_chunk_size: 128
+mamba3_use_conv: true
+mamba3_conv_size: 4
+mamba3_use_trapezoid: false
+mamba3_use_rope: false
+mamba3_rope_fraction: 0.5
+mamba3_theta_max: 1.0
+mamba3_dt_min: 1.0e-3
+mamba3_dt_max: 1.0e-1
+mamba3_dt_init_floor: 1.0e-4
+mamba3_bc_bias: none
+mamba3_mimo_rank: 1
+mamba3_a_mode: static
+mamba3_a_floor: 1.0e-4
+mamba3_dt_limit: 1.0
+mamba3_use_outproj_norm: false
+
+# mLSTM (12 heads x 64)
+head_dim: 64
+num_heads: 12
+proj_factor: 2
+mlstm_gate_soft_cap: 15.0
+mlstm_input_gate_bias_init: -10.0
+mlstm_forget_gate_bias_init: 3.0  # f = 0.95 at init: TFLA half-range 3.1 at chunk 128 (P2-C)
+mlstm_chunk_size: 128
+
+# Attention (12 heads x 64; KV cache in decode)
+attn_dropout: 0.0
+rope_theta: 500000.0
+attn_impl: auto  # flex block mask on GPU for packed rows
+
+# Multi-token prediction: off in the base; arm S4 turns it on (P2-W hybrid_legal_mtp.yaml)
+mtp_n: 1
+mtp_loss_weight: 0.3
+mtp_layer_type: mamba3
+
+# Shared
+norm_type: rms
+norm_topology: hybrid
+use_mlp: true
+mlp_ratio: 4.0
+max_position_embeddings: 8192
+dropout: 0.0
+initializer_range: 0.02
+tie_word_embeddings: true
+use_gradient_checkpointing: false
+
+# Optimisation (read by scripts/train_pretrain.py; the matched Transformer uses the same values)
+learning_rate: 4.0e-4
+weight_decay: 0.1
+warmup_steps: 2000
+scheduler: wsd
+beta2_schedule: false
+gradient_clip_val: 1.0

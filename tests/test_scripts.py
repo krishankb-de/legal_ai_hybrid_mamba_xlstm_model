@@ -185,3 +185,53 @@ def test_analyze_generation_diversity(script, tmp_path):
     res = mod.analyse("generated (model)", mod.read_lines(str(hyps)))
     assert res["duplicate_clusters"] == 2 and res["pct_in_duplicate_cluster"] == pytest.approx(100.0)
     assert mod.main(["--hyps", str(hyps), "--output", str(tmp_path / "d.md")]) == 0
+
+
+# -- screen arms (P2-X) ---------------------------------------------------------------------
+
+
+def test_screen_arms_verify_reduced(script):
+    """P2-X: every arm builds through HybridConfig.from_hydra at reduced width, runs a packed
+    forward/backward, and shows its expected ARCH tokens (and none of its forbidden ones)."""
+    arms = script("screen_arms")
+    assert set(arms.ARMS) == {"S0", "S1", "S2", "S3", "S4", "S5", "S6"}
+    assert arms.main(["verify", "--reduced"]) == 0
+
+
+def test_screen_arms_verify_full_reports_the_open_s5_band(script, capsys):
+    """Full size on `meta` with the bands: every arm passes except S5, whose pre-registered <= 1% band
+    does not hold (+2.36%, P2-W) -- a recorded negative that blocks preflight until decided."""
+    arms = script("screen_arms")
+    problems = arms.verify(reduced=False, full=True)
+    assert problems == ["S5: non-embedding delta +2.36% outside the pre-registered band +-1%"]
+
+
+def test_screen_arm_env_is_what_the_wrapper_evals(script):
+    import shlex
+
+    arms = script("screen_arms")
+    env = dict(line.removeprefix("export ").split("=", 1) for line in arms.env_lines("S6-s43"))
+    assert env["SEED"] == "43" and env["EXPERIMENT"] == "screen_S6_s43" and env["SAVE_TOP_K"] == "0"
+    overrides = shlex.split(shlex.split(env["EXTRA_OVERRIDES"])[0])
+    assert "distill.alpha=0.0" in overrides and "trainer.max_steps=12000" in overrides
+    assert "callbacks.checkpoint.save_top_k=0" in overrides
+    assert arms.env_lines("S1") == arms.env_lines("S1-s42")
+    with pytest.raises(KeyError):
+        arms.env_lines("S9-s42")
+    with pytest.raises(ValueError):
+        arms.env_lines("S1-s7")
+
+
+def test_screen_arm_expect_tokens_catch_a_lever_that_did_not_arrive(script):
+    """The FM5 defence: if an arm's lever never reaches the model, its ARCH line lacks the token."""
+    arms = script("screen_arms")
+    import torch
+
+    from lexhybrid import HybridLanguageModel
+
+    with torch.device("meta"):
+        base = HybridLanguageModel(arms.build_config("S1"))
+    assert arms.check_tokens("S3", base.architecture_fingerprint()) == ["S3: ARCH lacks 'mamba3(d_state=64'"]
+    assert (
+        arms.check_tokens("S0", base.architecture_fingerprint())[-1] == "S0: ARCH shows forbidden 'attention'"
+    )

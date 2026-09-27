@@ -19,14 +19,19 @@ Shapes follow ``ssd_reference``:
     C   (batch, seqlen, ngroups, dstate)
     D   (nheads,) or None
 
-P1 port: unchanged apart from the ``doc_ids`` name. The padding-segment id (``seg.max() + 1``,
-a host sync) and the unreturned final state are recorded defect 7, fixed in P2-F.
+P2-F (defect 7): padding joins the last real document instead of a fresh segment id (which cost
+a ``.item()`` host sync and made the state after a partial last chunk come back as zero), and
+``return_final_state`` hands back the fp32 state after the last token -- what ``ssd_step``
+continues from, so a forward pass can fill the decode cache. P2-E (defect 16): the carried state
+is fp32 by declaration.
 """
 
 from collections.abc import Sequence
 
 import torch
 import torch.nn.functional as F
+
+from lexhybrid.kernels.segments import pad_segments, segment_ids
 
 Term = tuple[torch.Tensor, torch.Tensor, torch.Tensor]  # (coefficient, B, x)
 
@@ -48,18 +53,8 @@ def segsum(v: torch.Tensor) -> torch.Tensor:
 
 
 def _segment_ids(doc_ids: torch.Tensor | None, batch: int, seqlen: int, device: torch.device) -> torch.Tensor:
-    """Monotone segment index per position; positions sharing a value share a document.
-
-    Document resets are applied as *boolean* masks rather than by folding a large negative number
-    into the log-decay. The sentinel trick is tempting and wrong: adding -1e30 to a cumulative sum
-    annihilates the finite part, so ``A_cum[end] - A_cum[t]`` comes back as exactly 0 and every
-    within-document decay is destroyed along with the cross-document one.
-    """
-    if doc_ids is None:
-        return torch.zeros(batch, seqlen, dtype=torch.long, device=device)
-    starts = torch.zeros_like(doc_ids, dtype=torch.long)
-    starts[:, 1:] = (doc_ids[:, 1:] != doc_ids[:, :-1]).long()
-    return starts.cumsum(dim=1)
+    """Monotone segment index per position (see ``lexhybrid.kernels.segments``)."""
+    return segment_ids(doc_ids, batch, seqlen, device)
 
 
 def ssd_chunked_scan(
@@ -73,7 +68,8 @@ def ssd_chunked_scan(
     doc_ids: torch.Tensor | None = None,
     coeff: torch.Tensor | None = None,
     extra_terms: Sequence[Term] | None = None,
-) -> torch.Tensor:
+    return_final_state: bool = False,
+):
     """Chunk-parallel SSD scan.
 
         h_t = exp(dt_t A) h_{t-1} + sum_terms coeff_t (B_t x_t^T)
@@ -87,9 +83,11 @@ def ssd_chunked_scan(
             scales the input by ``gamma = lambda * dt`` while the decay stays ``exp(dt A)``.
         extra_terms: additional ``(coefficient, B, x)`` triples summed into the state -- how the
             trapezoidal rule's ``beta * B_{t-1} x_{t-1}`` term is added without a second scan.
+        return_final_state: also return the fp32 state after the last token,
+            (batch, nheads, headdim, dstate).
 
     Returns:
-        (batch, seqlen, nheads, headdim)
+        (batch, seqlen, nheads, headdim), or ``(y, final_state)`` with ``return_final_state``.
     """
     batch, seqlen, nheads, headdim = x.shape
     ngroups, dstate = B.shape[-2], B.shape[-1]
@@ -106,8 +104,9 @@ def ssd_chunked_scan(
     if pad:
         dA = F.pad(dA, (0, 0, 0, pad))
         C = F.pad(C, (0, 0, 0, 0, 0, pad))
-        # Padding gets its own segment id so it can never mix with real tokens.
-        seg = F.pad(seg, (0, pad), value=int(seg.max().item()) + 1)
+        # Padding has zero decay and zero input, so it joins the last real document: the state that
+        # reaches the end of the padded row is then the state after the last real token.
+        seg = pad_segments(seg, pad)
         terms = [
             (F.pad(co, (0, 0, 0, pad)), F.pad(bb, (0, 0, 0, 0, 0, pad)), F.pad(xx, (0, 0, 0, 0, 0, pad)))
             for co, bb, xx in terms
@@ -159,7 +158,9 @@ def ssd_chunked_scan(
         )
 
     # --- inter-chunk: carry the state across chunks (nc sequential steps) --------------------
-    state = torch.zeros(batch, nheads, headdim, dstate, device=x.device, dtype=x.dtype)
+    # fp32 by declaration (defect 16, P2-E): the reference allocated it in the activation dtype and
+    # it became fp32 only because the first decay multiplication promoted it.
+    state = torch.zeros(batch, nheads, headdim, dstate, device=x.device, dtype=torch.float32)
     C_h = C_c.repeat_interleave(rep, dim=3)  # (batch, nc, cs, nheads, dstate)
     offsets = []
     for ci in range(nc):
@@ -186,4 +187,5 @@ def ssd_chunked_scan(
         y = y + D.view(1, 1, -1, 1) * (F.pad(x, (0, 0, 0, 0, 0, pad)) if pad else x)
     # Return in the dtype we were handed: the fp32 decay factors and fp32 `D` promote `y`.
     y = y.to(cdtype)
-    return y[:, :seqlen] if pad else y
+    y = y[:, :seqlen] if pad else y
+    return (y, state) if return_final_state else y

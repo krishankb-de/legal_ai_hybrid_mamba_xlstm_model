@@ -96,7 +96,12 @@ def test_arch_fingerprint_tokens():
         "trapezoid=False",
         "rope=False",
         "scan_impl=legacy",
+        "vocab=256",
+        "tied=False",  # the reference replica keeps the reference's untied head (exact counts)
+        "expand=2",
+        "mlstm(chunk_size=128, forget_bias=0.0, fallback=error)",
         "params=",
+        "params_nonembed=",
     ):
         assert token in fp, f"fingerprint is missing {token!r}: {fp}"
     assert "mamba3(" not in tiny(["attention"]).architecture_fingerprint()
@@ -195,10 +200,16 @@ def test_dt_proj_bias_is_zeroed_by_model_init():
     assert torch.equal(mixer.dt_proj.bias, torch.zeros_like(mixer.dt_proj.bias))
 
 
-def test_mlstm_gate_bias_is_zeroed_by_model_init_defect_3():
-    """Pins recorded defect 3 until P2-B fixes it: the model's weight pass zeroes the gate biases."""
-    mixer = next(la for la in tiny(["mlstm"]).layers).mixer
-    assert torch.equal(mixer.i_gate_proj.bias, torch.zeros_like(mixer.i_gate_proj.bias))
+@pytest.mark.parametrize("forget_bias", [0.0, 3.0])
+def test_mlstm_gate_bias_survives_model_init(forget_bias):
+    """Defect 3 (P2-B): the model's weight pass zeroed both gate biases; `post_model_init` restores
+    the -10 input bias and the configured forget bias inside the built model."""
+    model = tiny(["mlstm", "mamba3"], mlstm_forget_gate_bias_init=forget_bias)
+    mixer = model.layers[0].mixer
+    assert torch.all(mixer.i_gate_proj.bias == -10.0)
+    assert torch.all(mixer.f_gate_proj.bias == forget_bias)
+    # The weight pass still owns every other Linear bias: the output gate starts at zero.
+    assert torch.equal(mixer.o_gate_proj.bias, torch.zeros_like(mixer.o_gate_proj.bias))
 
 
 def test_hybrid_bc_keeps_bc_norms_but_drops_dt_norm():
@@ -246,6 +257,117 @@ def test_every_layer_type_runs_in_both_dtypes(dtype):
     assert out.dtype is dtype and torch.isfinite(out).all()
 
 
+def test_loss_masks_boundary_keeps_eos():
+    """Defect 6 (P2-L): a document's last token (its EOS) does not predict the next document's
+    first; the EOS itself stays a target; a row that starts mid-document needs no mask at its start;
+    -100 labels are ignored; `n_supervised_tokens` counts what entered the loss."""
+    import torch.nn.functional as F
+
+    model = tiny(["mamba3", "attention"], dropout=0.0).eval()
+    eos = 3
+    ids = torch.randint(4, 128, (2, 16))
+    ids[0, 6] = eos  # document 0 of row 0 ends at position 6
+    doc = torch.tensor([[0] * 7 + [1] * 9, [5] * 10 + [6] * 6])  # row 1 starts mid-document 5
+    labels = ids.clone()
+    labels[1, 12] = -100
+    with torch.no_grad():
+        out = model(ids, labels=labels, doc_ids=doc)
+    targets = labels[:, 1:].clone()
+    targets[0, 6] = -100  # EOS(6) -> first token of doc 1: masked
+    targets[1, 9] = -100  # last of doc 5 -> first of doc 6: masked
+    want = F.cross_entropy(out.logits[:, :-1].reshape(-1, 128), targets.reshape(-1), ignore_index=-100)
+    assert torch.allclose(out.loss, want, atol=1e-6)
+    assert out.n_supervised_tokens.item() == 2 * 15 - 3
+    assert targets[0, 5] == eos, "the EOS stays a target, predicted from inside its document"
+    with torch.no_grad():
+        unmasked = model(ids, labels=labels)
+    assert unmasked.n_supervised_tokens.item() == 2 * 15 - 1 and not torch.allclose(unmasked.loss, out.loss)
+
+
+def test_loss_with_nothing_supervised_is_zero_not_nan():
+    model = tiny(["mamba3"]).eval()
+    ids = torch.randint(0, 128, (1, 8))
+    with torch.no_grad():
+        out = model(ids, labels=torch.full_like(ids, -100))
+    assert out.loss.item() == 0.0 and out.n_supervised_tokens.item() == 0
+
+
+def test_param_counts_tied_untied():
+    """Defect 17 and decision 11 (P2-M): init then tie; `non_embedding = total - embedding - (lm_head if
+    untied)`, so tying changes the total but never the non-embedding count; both are in the ARCH line."""
+    untied = tiny(["mamba3", "mlstm", "attention"], tie_word_embeddings=False)
+    tied = tiny(["mamba3", "mlstm", "attention"], tie_word_embeddings=True)
+    emb = untied.embeddings.token_embedding.weight.numel()
+    assert untied.get_num_params(False) == sum(p.numel() for p in untied.parameters())
+    assert untied.get_num_params(False) - tied.get_num_params(False) == emb  # the head, counted once
+    assert untied.get_num_params(True) == untied.get_num_params(False) - 2 * emb
+    assert tied.get_num_params(True) == tied.get_num_params(False) - emb
+    assert tied.get_num_params(True) == untied.get_num_params(True)
+    # Init then tie: under the same seed the tied matrix is the embedding's own draw. Tying first
+    # (the reference) overwrote it with the lm_head's draw.
+    assert torch.equal(tied.embeddings.token_embedding.weight, untied.embeddings.token_embedding.weight)
+    assert not torch.equal(tied.lm_head.weight, untied.lm_head.weight)
+    fp = tied.architecture_fingerprint()
+    assert f"params={tied.get_num_params(False):,}" in fp
+    assert f"params_nonembed={tied.get_num_params(True):,}" in fp and "tied=True" in fp
+
+
+def test_mtp_head_off_is_bit_identical():
+    """P2-S: at mtp_n = 1 nothing is built -- the other MTP settings are inert -- and turning MTP on
+    leaves every main-model weight and the main logits bit-identical (the head is built last)."""
+    pattern = ["mamba3", "mlstm", "attention"]
+    off = tiny(pattern, dropout=0.0).eval()
+    off_other = tiny(pattern, dropout=0.0, mtp_loss_weight=0.9, mtp_layer_type="attention").eval()
+    on = tiny(pattern, dropout=0.0, mtp_n=2).eval()
+    assert off.mtp_head is None and not any("mtp" in k for k in off.state_dict())
+    ids = torch.randint(0, 128, (2, 24))
+    with torch.no_grad():
+        a, b, c = (m(ids, labels=ids) for m in (off, off_other, on))
+    assert torch.equal(a.logits, b.logits) and torch.equal(a.loss, b.loss) and a.mtp_loss is None
+    for name, tensor in off.state_dict().items():
+        assert torch.equal(tensor, on.state_dict()[name]), name
+    assert torch.equal(a.logits, c.logits)
+    assert torch.allclose(c.loss, a.loss + 0.3 * c.mtp_loss, atol=1e-6)
+    assert on.get_num_params(False) > off.get_num_params(False) and "mtp(n=2" in on.architecture_fingerprint()
+
+
+def test_mtp_loss_backward():
+    """Two MTP depths train: every parameter (main and MTP) receives a gradient, packed documents
+    included, and a zero weight gives back exactly the language-model loss."""
+    model = tiny(["mamba3", "attention"], dropout=0.0, mtp_n=3, mtp_loss_weight=0.5, tfla_impl="exact")
+    ids = torch.randint(0, 128, (2, 40))
+    doc = torch.zeros(2, 40, dtype=torch.long)
+    doc[:, 17:] = 1
+    out = model(ids, labels=ids, doc_ids=doc)
+    assert torch.isfinite(out.mtp_loss) and out.mtp_loss > 0
+    out.loss.backward()
+    missing = [n for n, p in model.named_parameters() if p.requires_grad and p.grad is None]
+    assert not missing, f"no gradient: {missing[:5]}"
+    assert len(model.mtp_head.depths) == 2
+    model.config.mtp_loss_weight = 0.0
+    off = tiny(["mamba3", "attention"], dropout=0.0, tfla_impl="exact")
+    off.load_state_dict({k: v for k, v in model.state_dict().items() if not k.startswith("mtp_head.")})
+    with torch.no_grad():
+        zero = model(ids, labels=ids, doc_ids=doc)
+        base = off(ids, labels=ids, doc_ids=doc)
+    assert torch.allclose(zero.loss, base.loss, atol=1e-6) and zero.mtp_loss > 0
+
+
+def test_mtp_masks_targets_across_documents():
+    """Depth k supervises position i only if i and i + k + 1 share a document."""
+    from lexhybrid.kernels.segments import segment_ids
+
+    doc = torch.tensor([[0, 0, 0, 1, 1, 1, 1]])
+    seg = segment_ids(doc, 1, 7, doc.device)
+    k, length = 1, 7 - 2
+    keep = seg[:, k + 1 : k + 1 + length] == seg[:, :length]
+    assert keep.tolist() == [[True, False, False, True, True]]
+
+
+def test_tie_word_embeddings_defaults_to_true():
+    assert HybridConfig().tie_word_embeddings is True
+
+
 def test_tied_embeddings_share_one_tensor():
     model = tiny(["mamba3"], tie_word_embeddings=True)
     assert model.lm_head.weight is model.embeddings.token_embedding.weight
@@ -268,3 +390,40 @@ def test_gradient_checkpointing_matches_the_plain_forward():
     model.config.use_gradient_checkpointing = False
     loss_plain = model(ids, labels=ids).loss
     assert torch.allclose(loss_ckpt, loss_plain, atol=1e-6)
+
+
+@pytest.mark.linux_only
+@pytest.mark.slow
+def test_compile_forward_chunk128(monkeypatch):
+    """P2-Y: hybrid_legal_base at reduced width -- chunk 128 for both Mamba-3 and mLSTM, packed rows
+    -- compiled on the Inductor CPU backend (gcc; runs in CI, the CUDA variant runs in P4-J1) equals
+    eager at 1e-4, and exact TFLA stays on its factorised path: the sequential fallback is spied
+    and tfla_fallback is "error", so either path would fail the test."""
+    import lexhybrid.kernels.tfla.tfla_interface as tfla
+
+    def fallback_taken(*args, **kwargs):
+        raise AssertionError("exact TFLA took the sequential fallback")
+
+    monkeypatch.setattr(tfla, "_intra_chunk_sequential", fallback_taken)
+    torch.manual_seed(0)
+    cfg = load_model_config(
+        "hybrid_legal_base",
+        dim=64,
+        num_heads=2,
+        head_dim=32,
+        mamba3_head_dim=32,
+        vocab_size=512,
+        max_position_embeddings=512,
+    )
+    assert (cfg.mlstm_chunk_size, cfg.mamba3_chunk_size, cfg.tfla_fallback) == (128, 128, "error")
+    model = HybridLanguageModel(cfg).eval()
+    ids = torch.randint(0, 512, (2, 256))
+    doc = torch.zeros(2, 256, dtype=torch.long)
+    doc[0, 100:] = 1
+    doc[1, 128:] = 1  # a boundary exactly on the chunk edge
+    with torch.no_grad():
+        eager = model(ids, doc_ids=doc).logits
+        torch._dynamo.reset()
+        compiled = torch.compile(model, dynamic=False)
+        got = compiled(ids, doc_ids=doc).logits
+    assert torch.allclose(got, eager, atol=1e-4), f"compile drift {(got - eager).abs().max():.3e}"
