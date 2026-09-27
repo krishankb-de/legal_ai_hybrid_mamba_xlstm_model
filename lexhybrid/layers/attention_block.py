@@ -255,11 +255,18 @@ class AttentionBlock(nn.Module):
         return self.out_proj(attn)
 
     def _packed_impl(self, q: torch.Tensor, dropout_p: float) -> str:
-        """Which kernel a packed row uses. FlexAttention has no attention dropout."""
+        """Which kernel a packed row uses. FlexAttention has no attention dropout, and in torch 2.11 no
+        backward pass on CPU (CI run 36330688065): a CPU training step with ``flex`` is refused here,
+        before it could fail inside autograd; ``auto`` never picks flex on a CPU."""
         if self.attn_impl == "flex":
             if dropout_p > 0:
                 raise ValueError(
                     "attn_impl='flex' has no attention dropout; set attn_dropout 0 or use 'sdpa'"
+                )
+            if not q.is_cuda and torch.is_grad_enabled() and q.requires_grad:
+                raise NotImplementedError(
+                    "FlexAttention has no CPU backward in this torch version; train on CPU with "
+                    "attn_impl 'sdpa' or 'auto' (flex runs forward-only on CPU)"
                 )
             return "flex"
         if self.attn_impl == "auto" and q.is_cuda and dropout_p == 0:

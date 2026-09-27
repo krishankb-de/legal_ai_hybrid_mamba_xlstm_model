@@ -37,10 +37,13 @@ def test_flex_block_mask_equals_dense_on_gpu(dtype):
     flex.load_state_dict(dense.state_dict())
     x = torch.randn(2, 2048, 256, device="cuda", dtype=dtype)
     ids = _packed_doc_ids(2, 2048, "cuda")
-    with torch.no_grad():
-        want, got = dense(x, doc_ids=ids).float(), flex(x, doc_ids=ids).float()
+    want, got = dense(x, doc_ids=ids), flex(x, doc_ids=ids)
     tol = 1e-4 if dtype is torch.float32 else 3e-2
-    assert (got - want).abs().max() / want.abs().max() < tol
+    assert (got.float() - want.float()).abs().max() / want.float().abs().max() < tol
+    # Backward too: the CPU variant cannot check it (no FlexAttention backward on CPU).
+    g_want = torch.autograd.grad(want.float().square().sum(), dense.qkv_proj.weight)[0]
+    g_got = torch.autograd.grad(got.float().square().sum(), flex.qkv_proj.weight)[0]
+    assert (g_got.float() - g_want.float()).abs().max() / g_want.float().abs().max() < 10 * tol
 
 
 def test_attn_impl_auto_takes_flex_on_gpu():

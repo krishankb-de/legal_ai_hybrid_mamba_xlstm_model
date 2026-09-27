@@ -559,20 +559,30 @@ def test_attn_impl_auto_keeps_the_dense_mask_on_cpu():
 
 @pytest.mark.linux_only
 def test_flex_block_mask_equals_dense():
-    """Defect 18 (P2-J): the compiled FlexAttention path (Inductor CPU; the CUDA variant is in
-    tests/test_gpu.py) equals the dense-mask path for packed rows, forward and backward."""
+    """Defect 18 (P2-J): the compiled FlexAttention path on Inductor CPU equals the dense-mask path
+    for packed rows. Forward only: torch 2.11 has no FlexAttention backward on CPU (CI run
+    36330688065); the backward check is the CUDA variant in tests/test_gpu.py."""
     torch.manual_seed(0)
-    dense = AttentionBlock(dim=64, num_heads=4, attn_impl="sdpa")
-    flex = AttentionBlock(dim=64, num_heads=4, attn_impl="flex")
+    dense = AttentionBlock(dim=64, num_heads=4, attn_impl="sdpa").eval()
+    flex = AttentionBlock(dim=64, num_heads=4, attn_impl="flex").eval()
     flex.load_state_dict(dense.state_dict())
-    x = torch.randn(2, 100, 64, requires_grad=True)
+    x = torch.randn(2, 100, 64)
     ids = _packed_doc_ids(2, 100)
-    out_dense = dense(x, doc_ids=ids)
-    out_flex = flex(x, doc_ids=ids)
+    with torch.no_grad():
+        out_dense = dense(x, doc_ids=ids)
+        out_flex = flex(x, doc_ids=ids)
     assert torch.allclose(out_flex, out_dense, atol=1e-5), f"max abs {(out_flex - out_dense).abs().max():.3e}"
-    g_dense = torch.autograd.grad(out_dense.square().sum(), dense.qkv_proj.weight)[0]
-    g_flex = torch.autograd.grad(out_flex.square().sum(), flex.qkv_proj.weight)[0]
-    assert torch.allclose(g_flex, g_dense, atol=1e-4)
+
+
+def test_flex_refuses_a_cpu_training_step():
+    """A CPU training step with attn_impl='flex' fails fast with the fix in its message, instead of
+    deep inside autograd; `auto` keeps CPU training on the dense mask."""
+    flex = AttentionBlock(dim=64, num_heads=4, attn_impl="flex")
+    x = torch.randn(1, 16, 64, requires_grad=True)
+    with pytest.raises(NotImplementedError, match="no CPU backward"):
+        flex(x, doc_ids=_packed_doc_ids(1, 16))
+    auto = AttentionBlock(dim=64, num_heads=4)
+    auto(x, doc_ids=_packed_doc_ids(1, 16)).sum().backward()
 
 
 def test_doc_boundary_mask_shape_and_values():
