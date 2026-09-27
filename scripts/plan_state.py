@@ -337,6 +337,9 @@ def cmd_tick(args, state) -> int:
     )
     if not args.undo:
         _current_session(state)["ticked"].extend(args.ids)
+        blocked = state.get("blocked_on")
+        if blocked and blocked.get("box") in args.ids:  # ticking the blocked box resolves the block
+            state["blocked_on"] = None
     save_state(state)
     noop = set(args.ids) - set(changed)
     print(f"{verb}: {', '.join(args.ids)}" + (f"  (no-op for {sorted(noop)})" if noop else ""))

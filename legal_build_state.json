@@ -1,12 +1,12 @@
 {
   "current_phase": "P4",
-  "last_updated": "2026-09-27T21:35:56+02:00",
+  "last_updated": "2026-09-27T23:18:10+02:00",
   "status": "P3 complete 2026-09-27 (gate PASS: validate --full 817 passed; smoke shard trains 2 CPU steps; fertility Qwen3 2.280 tok/word, prediction refuted). P4 current: cluster bring-up. P3 to be committed and pushed on branch p3-data-pipeline (user: commit+push after each phase, check CI).",
   "plan_of_record": "LEGAL_BUILD_PLAN.md",
   "helper": "python3 scripts/plan_state.py <cmd> (stdlib only; the ONLY writer of LEGAL_BUILD_PLAN.md checkboxes and legal_build_state.json)",
   "scope": "Build lexhybrid: port the reference backbone/kernels/decode/tests (P1), fix 18 recorded defects and add legal decoder deltas (P2), data pipeline (P3), cluster + corpus + profiling (P4), pre-registered screen (P5), full backbone (P6), retrieval/renderer/verifier (P7), post-training (P8), evaluation (P9), release (P10); P11 optional. Local only, no git until the user writes 'git go'. Reference/ deleted at P1-Z by the user.",
   "blocked_on": null,
-  "next_action": "P3-M: collector DIP (Bundestag documentation API; Drucksachen, doc_type=parliament; check whether the public API key's terms allow corpus use and record it in the register), then P3-N FineWeb-2 deu_Latn. Ask the user first whether to commit/push the P3 collectors (A..L) as they stand.",
+  "next_action": "P4-I: scripts/slurm/preflight.sh (CPU: screen_arms.py verify --full; pytest -m 'not cuda and not slow and not reference'; ARCH line per arm) + test; validate; sync; sbatch; job add; stop.",
   "decisions": {
     "01_init_road": "From scratch first: Qwen3 tokenizer + logit-KL from an open Qwen3-*-Base teacher. Qwen3 conversion = P11, optional, on user instruction only. (user 2026-09-27)",
     "02_corpus": "Open-licensed sources PLUS a research-exception arm; every document carries licence + commercial_safe; research_only never enters a shippable arm. (user 2026-09-27)",
@@ -531,38 +531,38 @@
     },
     "P4": {
       "title": "Cluster bring-up, corpus at scale, profiling",
-      "status": "pending",
+      "status": "in_progress",
       "checkboxes": {
         "P4-A": {
-          "done": false,
+          "done": true,
           "desc": "USER ACTION — copy `scripts/slurm/cluster.env.example` to `scripts/slurm/cluster.env` (gitignored) and fill `CLUSTER_HOST` (ssh alias), `CLUSTER_REPO=/sc/home/<user>/lexhybrid`, `SCRATCH_ROOT=/sc/scratch/<user>/lexhyb..."
         },
         "P4-B": {
-          "done": false,
+          "done": true,
           "desc": "USER ACTION — accept the MultiLegalPile terms on huggingface.co and place the token at `~/.hf_token` (mode 600) on the cluster; jobs export `HF_TOKEN=$(cat ~/.hf_token)` when the file exists."
         },
         "P4-C": {
-          "done": false,
+          "done": true,
           "desc": "USER ACTION — confirm scratch quota: paste `df -h /sc/scratch/$USER` and `du -sh $HOME` outputs; the plan needs ≥ 300 GB scratch free."
         },
         "P4-D": {
-          "done": false,
+          "done": true,
           "desc": "`scripts/sync_to_cluster.sh` (`rsync -az --delete --exclude-from=.rsync-exclude ./ $CLUSTER_HOST:$CLUSTER_REPO/`; writes `.sync_stamp` = ISO date + tree hash before syncing) and `scripts/sync_from_cluster.sh <subdir>`..."
         },
         "P4-E": {
-          "done": false,
+          "done": true,
           "desc": "`scripts/slurm/setup_env.sh` (port map §11: CPU job, `--exclude=ga03`, installs `uv` if missing, `uv sync --locked` — torch `2.11.0+cu128` comes from the lock — then `scripts/check_env.py`) submitted with `sbatch`; re..."
         },
         "P4-F": {
-          "done": false,
+          "done": true,
           "desc": "Verdict on the sbatch env job: pull the log; `check_env.py` must report Python 3.11, `torch 2.11.0+cu128`, CUDA 12.8 and every package equal to `uv.lock`; record its summary in evidence (the lock is the pin, so no sep..."
         },
         "P4-G": {
-          "done": false,
+          "done": true,
           "desc": "`scripts/slurm/fetch_hf.sh` (CPU job, `HF_HUB_OFFLINE=0`, downloads `Qwen/Qwen3-1.7B-Base`, `Qwen/Qwen3-8B-Base`, `Qwen/Qwen3-0.6B-Base`, `flair/ner-german-legal`, `BAAI/bge-m3`, `BAAI/bge-reranker-v2-m3`, the NLI mod..."
         },
         "P4-H": {
-          "done": false,
+          "done": true,
           "desc": "Verdict on the sbatch fetch job: `du -sh $HF_HOME/hub` recorded; every model directory present."
         },
         "P4-I": {
@@ -642,7 +642,32 @@
           "desc": "Gate: P4-F, P4-J, P4-J2, P4-J4, P4-S verdicts green; `analysis/corpus_manifest.md` and `analysis/profile_results.md` written with job ids; `decisions.teacher` recorded; `bash scripts/validate.sh` exit 0; `python3 scri..."
         }
       },
-      "evidence": {},
+      "evidence": {
+        "cluster_host": "hpi-hpc",
+        "ssh_true": "exit 0 (BatchMode, 2026-09-27)",
+        "P4-A_user_confirmed": "P4-A is done",
+        "hf_token": "~/.hf_token on cluster, user-placed 2026-09-27",
+        "P4-B_user_confirmed": "P4-B is done",
+        "scratch_avail": "311T (hpifs00, 27% used)",
+        "home": "101G/200G",
+        "date": "2026-09-27",
+        "P4-C_user_confirmed": "P4-C is confirmed as tested",
+        "validate": "exit 0, 848 passed, 2026-09-27",
+        "sync_stamp": "2026-09-27T20:58:14Z b708e84f…b57f",
+        "first_sync": "300 files 10.8MB to hpi-hpc:/sc/home/krishankumar.bhushan/lexhybrid",
+        "ls_slurm": ".gitkeep cluster.env.example (no wrappers yet; first is P4-E setup_env.sh)",
+        "job": "2588687",
+        "log": "cluster/logs/fetch_hf_2588687.log",
+        "state": "COMPLETED 0:0, 00:02:03",
+        "python": "3.11.15",
+        "torch": "2.11.0+cu128",
+        "cuda": "12.8",
+        "lock": "0 mismatches, 0 missing",
+        "check_env": "ENVIRONMENT OK",
+        "shellcheck": "clean (uvx shellcheck-py)",
+        "hf_hub": "27G",
+        "models": "Qwen3-8B 16G @49e3418; Qwen3-1.7B 3.3G @ea980cb (pinned); Qwen3-0.6B 1.2G @da87bfb; flair 1.4G @69c73dd (pinned); bge-m3 2.2G @5617a9f; bge-reranker-v2-m3 2.2G @953dc6f; mDeBERTa-nli 1.1G @b5113eb"
+      },
       "verdict": null
     },
     "P5": {
@@ -998,7 +1023,26 @@
       "verdict": null
     }
   },
-  "jobs": {},
+  "jobs": {
+    "2588677": {
+      "phase": "P4",
+      "box": "P4-F",
+      "arm": "setup_env",
+      "submitted": "2026-09-27T22:58:23+02:00",
+      "status": "COMPLETED",
+      "log": "logs/setup_env_2588677.log",
+      "last_checked": "2026-09-27T23:04:50+02:00"
+    },
+    "2588687": {
+      "phase": "P4",
+      "box": "P4-H",
+      "arm": "fetch_hf",
+      "submitted": "2026-09-27T23:09:50+02:00",
+      "status": "COMPLETED",
+      "log": "logs/fetch_hf_2588687.log",
+      "last_checked": "2026-09-27T23:18:10+02:00"
+    }
+  },
   "artifacts": {},
   "sessions": [
     {
@@ -1108,9 +1152,20 @@
         "P3-W",
         "P3-X",
         "P3-Y",
-        "P3-Z"
+        "P3-Z",
+        "P4-A",
+        "P4-B",
+        "P4-C",
+        "P4-D",
+        "P4-E",
+        "P4-F",
+        "P4-G",
+        "P4-H"
       ],
-      "jobs": []
+      "jobs": [
+        "2588677",
+        "2588687"
+      ]
     }
   ],
   "notes": [
@@ -1249,7 +1304,33 @@
     "2026-09-27: verdict P3: PASS: data pipeline at smoke scale -- 10 collectors, tokenizer, 4 eval sets, LER scrub (own env), dedup, changelog, packing, split, mixture/arms, 3 probes, SFT format; validate --full exit 0 (817 passed); 100-row 4,096 smoke shard trains 2 CPU steps (log analysis/p3z_smoke_train.log); fertility: Qwen3 2.280 tok/word (prediction < 1.8 refuted), GPT-2 2.872 (confirmed)",
     "2026-09-27: P3 complete -> current_phase P4",
     "2026-09-27: P3-R follow-up before the P3 push: the scrub log's entity hash is now HMAC-SHA256 under a local key (LEXHYBRID_SCRUB_KEY, else data/cache/scrub_hmac.key, created once, mode 600, git-ignored) instead of a plain SHA-256 -- the logs are versioned and pushed, and a plain hash of a name can be confirmed by anyone who guesses it (FineWeb pages name private persons). The 10 existing logs were migrated from their offsets: 782 rows, every old hash verified before being replaced (field entity_sha256 -> entity_hmac). test_scrub_replaces_person_names checks the keyed hash.",
-    "2026-09-27: CI run 36343838171 (commit eca59fb, branch p3-data-pipeline) FAILED: coverage 88.95% < fail_under 90 on Linux 3.11 and 3.12; every other job green. Reproduced locally with HF_HUB_CACHE=HF_HOME=/nonexistent (89%): the collectors' network loops, the eval-set fetchers and the tokenizer glue ran only in network smokes. Fix: tests/test_collect_offline.py (a fake web per collector: GII core-codes-first + limit, RII newest-first, OLDP paging with the http next link, RIS half-and-half, Fedlex acts listed only after the seeds, BGer search_after + Blockliste skip, DIP cursor, FineWeb/MLP rows; eval-set fetch + cli; changelog/packing/scrub entry points; tokenizer EOS/vocab checks and --download); the real scrub-worker test passes --cache-dir. validate.sh --ci exit 0 without the model cache: 839 passed, coverage 94.71%. The floor was not changed."
+    "2026-09-27: CI run 36343838171 (commit eca59fb, branch p3-data-pipeline) FAILED: coverage 88.95% < fail_under 90 on Linux 3.11 and 3.12; every other job green. Reproduced locally with HF_HUB_CACHE=HF_HOME=/nonexistent (89%): the collectors' network loops, the eval-set fetchers and the tokenizer glue ran only in network smokes. Fix: tests/test_collect_offline.py (a fake web per collector: GII core-codes-first + limit, RII newest-first, OLDP paging with the http next link, RIS half-and-half, Fedlex acts listed only after the seeds, BGer search_after + Blockliste skip, DIP cursor, FineWeb/MLP rows; eval-set fetch + cli; changelog/packing/scrub entry points; tokenizer EOS/vocab checks and --download); the real scrub-worker test passes --cache-dir. validate.sh --ci exit 0 without the model cache: 839 passed, coverage 94.71%. The floor was not changed.",
+    "2026-09-27: BLOCKED on P4-A: USER ACTION: cp scripts/slurm/cluster.env.example scripts/slurm/cluster.env, fill CLUSTER_HOST/CLUSTER_REPO/SCRATCH_ROOT, confirm ssh $CLUSTER_HOST true exits 0",
+    "2026-09-27: P4-A: scripts/slurm/cluster.env.example was missing (plan assumed it); created it (CLUSTER_HOST, CLUSTER_REPO, SCRATCH_ROOT). Waiting on user.",
+    "2026-09-27: P4-A/C facts (2026-09-27): CLUSTER_HOST=hpi-hpc (login lx01.hpc.sci.hpi.de, user krishankumar.bhushan); cluster.env filled; ssh true exit 0 (BatchMode). Home /sc/home quota 200 GiB, 100.7 GiB used -> venv only, uv cache + HF_HOME on scratch. /sc/scratch GPFS 311T free, no per-user quota, not backed up, may be deleted without warning when full. Global scratch only on nodes with feature GLB_SCRATCH -> every wrapper touching SCRATCH_ROOT needs --constraint=GLB_SCRATCH (add to P4-V test_slurm_wrappers checks). aisc-* partitions preemptible (aisc-batch 7d, aisc-shortrun 1h); account 'aisc' membership unverified.",
+    "2026-09-27: BLOCKED on P4-A: USER ACTION: confirm cluster.env values (hpi-hpc, /sc/home/krishankumar.bhushan/lexhybrid, /sc/scratch/krishankumar.bhushan/lexhybrid); ssh true already exit 0",
+    "2026-09-27: User 2026-09-27: no lexhybrid dir exists on the cluster yet (no clone, by design: rule f). CLUSTER_REPO and SCRATCH_ROOT are created in P4-D: ssh mkdir -p both, then first rsync.",
+    "2026-09-27: ticked P4-A",
+    "2026-09-27: ticked P4-B",
+    "2026-09-27: P4-C measured 2026-09-27 via ssh hpi-hpc: df -h /sc/scratch/$USER -> hpifs00 420T size, 110T used, 311T avail (27%); du -sh $HOME -> 101G /sc/home/krishankumar.bhushan (quota 200 GiB). >= 300 GB scratch: yes.",
+    "2026-09-27: BLOCKED on P4-C: USER ACTION: confirm measured quota (scratch 311T avail, home 101G/200G)",
+    "2026-09-27: ticked P4-C",
+    "2026-09-27: ticked P4-D",
+    "2026-09-27: P4-D: sync_to_cluster.sh (--dry-run; stamp via run_metadata.tree_hash; ssh mkdir -p CLUSTER_REPO SCRATCH_ROOT; rsync -az --delete) + sync_from_cluster.sh (logs|analysis only, no --delete) + tests/test_sync_scripts.py (fake ssh/rsync). .rsync-exclude += graphify-out/. .venv rebuilt with uv sync --locked (check_env OK). shellcheck not installed on Mac (validate WARN; CI runs it).",
+    "2026-09-27: User 2026-09-27: sacctmgr assoc -> accounts aisc, default (no partition restriction). --account=aisc OK.",
+    "2026-09-27: ticked P4-E",
+    "2026-09-27: submitted job 2588677 (P4-F setup_env)",
+    "2026-09-27: P4-E: scripts/slurm/setup_env.sh (aisc-batch/aisc, exclude ga03, constraint GLB_SCRATCH, UV_CACHE_DIR on scratch, UV_LINK_MODE=copy) + tests/test_slurm_wrappers.py (header/body checks for every wrapper; P4-V extends). Submitted job 2588677.",
+    "2026-09-27: job 2588677 -> COMPLETED",
+    "2026-09-27: ticked P4-F",
+    "2026-09-27: P4-F: setup_env job 2588677 on gx17v1 (x86_64, GLB_SCRATCH constraint scheduled fine, started within minutes). MaxRSS 14.1 GB of the 16G --mem: uv install near the limit -> raise setup_env.sh --mem to 32G before any rerun. Cluster .venv adds ~5 GB to home (100.7 -> 106 GiB of 200). gx17v1 is on the GPU-job exclude list (faulty GPU) but fine for CPU jobs.",
+    "2026-09-27: unblocked (P4-C)",
+    "2026-09-27: ticked P4-G",
+    "2026-09-27: submitted job 2588687 (P4-H fetch_hf)",
+    "2026-09-27: P4-G: fetch_hf.sh (CPU, GLB_SCRATCH, HF_HOME=$SCRATCH_ROOT/.hf, token from ~/.hf_token, requeue+append; 7 models incl. decision-14 NLI mDeBERTa; Qwen3-1.7B and flair pinned via tokenizer.py / scrub_ner_worker.py, others main; onnx excluded). setup_env.sh --mem 16G->32G. plan_state.py: tick now clears blocked_on when the blocked box is ticked (+test). SC2029 disabled in sync_to_cluster.sh (intended client-side expansion). Job 2588687 submitted.",
+    "2026-09-27: job 2588687 -> COMPLETED",
+    "2026-09-27: ticked P4-H",
+    "2026-09-27: P4-H: all 7 snapshots present, hub 27G (du -shL per snapshot; the log's per-model du showed only symlink dirs because hf 1.x stores weights in hub/blobs -> fetch_hf.sh now uses du -shL). Record the resolved main commits above as the pins for later loaders."
   ],
   "open_questions": []
 }

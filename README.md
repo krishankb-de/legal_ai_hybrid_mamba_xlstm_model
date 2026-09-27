@@ -1,6 +1,6 @@
 # lexhybrid — a DACH legal, citation-faithful, retrieval-gated hybrid Mamba-3 / xLSTM decoder
 
-**Status: P0–P3 complete, 93/194 checkboxes; current phase P4.**
+**Status: P0–P3 complete, 101/194 checkboxes; current phase P4.**
 
 This repository is being built phase by phase from `LEGAL_BUILD_PLAN.md`. It ports the backbone, kernels, decode cache, packing, tests and measurement discipline of a finished medical research codebase (hybrid Mamba-3 + mLSTM + attention, PyTorch Lightning + Hydra, measured on the HPI aisc H100 cluster) into a production-grade package for German / Austrian / Swiss / EU law, and replaces everything domain-specific: tokenizer, teacher, corpus, targets, decode loop, sequence length.
 
@@ -49,7 +49,7 @@ Commits and pushes are the maintainer's decision; every push runs `.github/workf
 | P1 | Bootstrap and faithful port | ✅ 31/31 |
 | P2 | Correctness fixes, decoder deltas, legal configs | ✅ 27/27 |
 | P3 | Data pipeline at smoke scale | ✅ 28/28 |
-| P4 | Cluster bring-up, corpus at scale, profiling | ⬜ 0/27 |
+| P4 | Cluster bring-up, corpus at scale, profiling | 🔄 8/27 |
 | P5 | Pre-registered screen | ⬜ 0/10 |
 | P6 | Full backbone pretraining | ⬜ 0/15 |
 | P7 | Retrieval, renderer, verifier | ⬜ 0/13 |

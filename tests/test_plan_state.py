@@ -164,6 +164,16 @@ def test_block_decision_prereg_set_and_verdict(tmp_path):
     assert helper(repo, "set", "phase_order", "x").returncode == 1
 
 
+def test_ticking_the_blocked_box_clears_the_block(tmp_path):
+    repo = make_repo(tmp_path)
+    helper(repo, "init")
+    helper(repo, "block", "P0-Z", "waiting for the user")
+    assert helper(repo, "tick", "P0-A").returncode == 0
+    assert state(repo)["blocked_on"]["box"] == "P0-Z", "another box's tick must not clear the block"
+    assert helper(repo, "tick", "P0-Z").returncode == 0
+    assert state(repo)["blocked_on"] is None
+
+
 @pytest.mark.parametrize(
     "mutation,needle",
     [
