@@ -1,0 +1,23 @@
+# One H100 (aisc), bf16 mixed precision. Used by the P5 screen arms.
+# val_every_opt_steps counts OPTIMIZER steps; the entry point converts it to Lightning's
+# val_check_interval (which counts micro-batches) as val_every_opt_steps * accumulate_grad_batches.
+accelerator: gpu
+devices: 1
+precision: bf16-mixed
+strategy: auto
+# The reference's distill script read `compile`, so this key was never honoured there (defect 12).
+# P4-Q decides whether compiled training is adopted; until then it stays off.
+compile_model: false
+max_epochs: -1
+max_steps: 12000
+val_every_opt_steps: 4000
+check_val_every_n_epoch: null
+log_every_n_steps: 25
+accumulate_grad_batches: 1
+enable_checkpointing: true
+default_root_dir: ${output_dir}
+enable_progress_bar: true
+enable_model_summary: true
+num_sanity_val_steps: 2
+limit_train_batches: 1.0
+limit_val_batches: 1.0

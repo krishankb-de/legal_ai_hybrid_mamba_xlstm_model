@@ -1,0 +1,70 @@
+# lexhybrid — what never enters the repository (Docs/REFERENCE_PORT_MAP.md §12).
+
+# Python and build
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# Environments
+.venv/
+.venv-vllm/
+venv/
+env/
+
+# The medical reference codebase: read-only, deleted at P1-Z, never committed
+Reference/
+
+# Weights and data (small test fixtures are allowed further down)
+*.pth
+*.pt
+*.ckpt
+*.safetensors
+*.parquet
+*.hdf5
+*.h5
+data/raw/
+data/shards/
+data/hf/
+data/cache/
+
+# Run outputs and pulled cluster logs
+outputs/
+checkpoints/
+logs/
+cluster/
+wandb/
+lightning_logs/
+.hydra/
+multirun/
+
+# Test and tool caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+junit*.xml
+htmlcov/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local, user-specific
+.sync_stamp
+scripts/slurm/cluster.env
+
+# Markdown is denied by default and allowed by name, so stray notes never get committed.
+*.md
+!README.md
+!CLAUDE.md
+!LEGAL_BUILD_PLAN.md
+!Docs/*.md
+!analysis/*.md
+!analysis/**/*.md
+
+# Allowed exceptions
+!tests/fixtures/**
+!data/manifests/**

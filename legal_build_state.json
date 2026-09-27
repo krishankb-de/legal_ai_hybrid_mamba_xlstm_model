@@ -1,0 +1,1065 @@
+{
+  "current_phase": "P2",
+  "last_updated": "2026-09-27T15:28:24+02:00",
+  "status": "P1 complete 2026-09-27 (Opus 5.5): faithful port, parity green, CI configured; Reference/ deleted. P2 (correctness fixes, decoder deltas, legal configs) is next.",
+  "plan_of_record": "LEGAL_BUILD_PLAN.md",
+  "helper": "python3 scripts/plan_state.py <cmd> (stdlib only; the ONLY writer of LEGAL_BUILD_PLAN.md checkboxes and legal_build_state.json)",
+  "scope": "Build lexhybrid: port the reference backbone/kernels/decode/tests (P1), fix 18 recorded defects and add legal decoder deltas (P2), data pipeline (P3), cluster + corpus + profiling (P4), pre-registered screen (P5), full backbone (P6), retrieval/renderer/verifier (P7), post-training (P8), evaluation (P9), release (P10); P11 optional. Local only, no git until the user writes 'git go'. Reference/ deleted at P1-Z by the user.",
+  "blocked_on": null,
+  "next_action": "Wait for the user's 'delete reference'; then rm -rf Reference/, run bash scripts/validate.sh --full (reference tests skip with their reason), tick P1-Z --user-confirmed '<their words>', then plan_state.py next",
+  "decisions": {
+    "01_init_road": "From scratch first: Qwen3 tokenizer + logit-KL from an open Qwen3-*-Base teacher. Qwen3 conversion = P11, optional, on user instruction only. (user 2026-09-27)",
+    "02_corpus": "Open-licensed sources PLUS a research-exception arm; every document carries licence + commercial_safe; research_only never enters a shippable arm. (user 2026-09-27)",
+    "03_gpus": "1 H100 per screen arm; 4 H100 DDP for full backbone and SFT runs. (user 2026-09-27)",
+    "04_reference_deletion": "P1-Z, after the port gate passes, user-confirmed. (user 2026-09-27)",
+    "05_package": "lexhybrid; Python>=3.11; torch>=2.5; pytorch_lightning>=2.4; Hydra; editable install; no sys.path shims",
+    "06_tokenizer_eos": "Qwen3 tokenizer (Qwen/Qwen3-1.7B-Base); EOS = Qwen3 <|endoftext|> id 151643; student vocab_size 151936",
+    "07_special_tokens": "SFT-only, never in KD: <|q|>, <|cite|>, <|c1|>..<|c16|>, <|s1|>..<|s64|>, <|unanswerable|>, <|passage|>, <|/passage|>, <|question|>, <|answer|> (87 <= 267 free ids)",
+    "08_teacher": "Qwen/Qwen3-1.7B-Base by default; Qwen/Qwen3-8B-Base only if P4-U measures peak <= 70 GB at 4096 rows on 4xH100 and step time <= 1.6x",
+    "09_kd_loss": "online; (1-a)CE + a*T^2*KL(teacher_T || student_T), a=0.5, T=2; per 512-token slab under checkpointing; teacher gets per-document position_ids + block-diagonal mask; doc-boundary label mask applies to KL",
+    "10_model": "12 layers, dim 768, 12 heads, pattern M3 M3 M3 A L L L M3 M3 A M3 M3, norm_topology hybrid, tfla_impl exact, d_state 128, mamba3_chunk_size 128, mlstm_chunk_size 128, mlstm_forget_gate_bias_init 3.0, rope_theta 500000, dropout 0.0, tied embeddings, max_position_embeddings 8192",
+    "11_param_counting": "non_embedding = total - embedding - (lm_head if untied); both counts always reported; base = 104.1M non-embedding / 220.8M total; never called 150M",
+    "12_seq_lengths": "screens 2048-token rows; main pretraining 4096; long-context stage 8192; 32K/128K numbers are efficiency-only",
+    "13_corpus_tooling": "LER scrub flair/ner-german-legal (PER/RR/AN/STR); dedup datasketch MinHash 5-gram/128 perms/Jaccard>=0.8; replay FineWeb-2 deu_Latn (ODC-By)",
+    "14_retrieval_verifier": "bm25s + BAAI/bge-m3 + RRF + BAAI/bge-reranker-v2-m3; NLI MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7, threshold pre-registered before calibration",
+    "15_ceilings": "gpt-oss-120b with the same passages (Qwen3-235B does not fit 4x80 GB) or skipped and said so; frontier API only as an optional USER ACTION, never training data",
+    "16_statistics": "2 seeds per screen arm, 3 for any claim; claim = paired mean > one baseline seed SD AND sign at >=2/3 seeds; bootstrap CIs (1000 resamples by question) beside, never instead",
+    "17_legacy_operators": "only configs/model/hybrid_legal_legacy.yaml may set scan_impl/tfla_impl legacy; PPL/probe-only (no cached decode)",
+    "18_environment": "uv project, one uv.lock (macOS arm64 + Linux x86_64); .python-version 3.11; torch==2.11.0 (PyPI on macOS, 2.11.0+cu128 from the PyTorch cu128 index on Linux; torch 2.12+ has no cu128 build); every env built with uv sync --locked and verified by scripts/check_env.py (user 2026-09-27)",
+    "19_ci": "GitHub Actions .github/workflows/ci.yml on every push/PR: lint, test (Linux, py3.11+3.12), hygiene (pushed tree), package; weekly network smoke + macOS clean install; GPU checks on the cluster; inert until the user pushes (user 2026-09-27)"
+  },
+  "pre_registered": {
+    "rules": {
+      "R1": "Equivalence: operator changes pass fp64 oracle <=1e-6 and model-logit gate <=1e-4 before ticking",
+      "written": "2026-09-27T13:36:18+02:00",
+      "R2": "Memory: no change regresses inference memory parity with FlashAttention at 16K (ref 7.09 vs 7.15 GB)",
+      "R3": "One lever per arm; non-parameter-matched arms carry their delta in every table",
+      "R4": "Predict first: italic prediction + bar written before submission; RESULTS reports prediction -> outcome incl. wrong ones",
+      "R5": "Seed band before claim: 2 seeds screens, 3 for claims; decision 16 verbatim; no t-test on 2 dof",
+      "R6": "Checkpoint budget: SAVE_TOP_K=0 on arms, 1+last on pipeline inputs; outputs/ on SCRATCH_ROOT; du before every submission",
+      "R7": "One compiler cache per measured point; one shape per process; effective_chunk_size read back",
+      "R8": "No legacy operators outside hybrid_legal_legacy.yaml; every recurrent yaml pins tfla_impl (and scan_impl when it has mamba layers)",
+      "R9": "Licence discipline: licence/jurisdiction/commercial_safe on every doc; unknown licence refused; research_only never in a commercial_safe shard; no research_only checkpoint leaves the cluster",
+      "R10": "Never train on GPT/Claude/Gemini API outputs; synthetic data from open-weight teachers only",
+      "R11": "LER scrub before pretraining and before any index build; verifier rejects PER-naming answers; 'who was the party' is a refusal",
+      "R12": "Every number in analysis/ carries a job id + log path; ARCH fingerprint at construction; run_metadata with .sync_stamp; tooling is not a tick",
+      "R13": "Tests with the code: every code box ships its tests; marker taxonomy (plan 8.2); skips carry reasons; coverage floor never lowered without a note; flaky test = defect",
+      "R14": "One gate, three venues: validate.sh --ci == CI test job selection; Mac-impossible checks run in CI or on the cluster (plan 8.3); red CI blocks the current box"
+    }
+  },
+  "phase_order": [
+    "P0",
+    "P1",
+    "P2",
+    "P3",
+    "P4",
+    "P5",
+    "P6",
+    "P7",
+    "P8",
+    "P9",
+    "P10",
+    "P11"
+  ],
+  "phases": {
+    "P0": {
+      "title": "Plan of record",
+      "status": "complete",
+      "checkboxes": {
+        "P0-A": {
+          "done": true,
+          "desc": "Write `LEGAL_BUILD_PLAN.md` (this file) in the helper's grammar: `### Pn — title`, `- [ ] Pn-X` boxes, one `Gate:` per phase, `Pn-Z` gate boxes, italic predictions in measurement phases."
+        },
+        "P0-B": {
+          "done": true,
+          "desc": "Write `scripts/plan_state.py` (stdlib only) with `init|sync|resume|section|tick|note|next-action|phase|next|block|unblock|job|artifact|evidence|verdict|show|session-end|check|readme` and the tick guards (phase, USER A..."
+        },
+        "P0-C": {
+          "done": true,
+          "desc": "Write `CLAUDE.md` (≤ 120 lines): bootstrap command, awk fallback, rules (a)–(j), command table, hostname rule."
+        },
+        "P0-D": {
+          "done": true,
+          "desc": "Write `Docs/REFERENCE_PORT_MAP.md`: source → destination for every module, verbatim signatures, the 18 defects with line references, SLURM headers, env block, WSD formula, ARCH format, oracle-test structure, validate ..."
+        },
+        "P0-E": {
+          "done": true,
+          "desc": "Write `Docs/analysis_TEMPLATE.md` and `README.md`."
+        },
+        "P0-F": {
+          "done": true,
+          "desc": "`python3 scripts/plan_state.py init` creates `legal_build_state.json`; fill `decisions`, `pre_registered.rules`, `scope`, `status`, `next_action`; `current_phase = P1`."
+        },
+        "P0-Z": {
+          "done": true,
+          "desc": "Gate: `python3 scripts/plan_state.py check` exits 0; `show` lists P0 complete and P1..P11 pending; nothing under `Reference/` modified; no `.git`; no GPU, ssh or cluster action; no downloads."
+        }
+      },
+      "evidence": {},
+      "verdict": null
+    },
+    "P1": {
+      "title": "Bootstrap and faithful port",
+      "status": "complete",
+      "checkboxes": {
+        "P1-A": {
+          "done": true,
+          "desc": "`pyproject.toml` as a uv project (decision 18): package `lexhybrid`, `requires-python >= 3.11`; dependencies `torch==2.11.0`, `pytorch-lightning>=2.4`, `hydra-core`, `omegaconf`, `transformers`, `datasets`, `einops`, ..."
+        },
+        "P1-B": {
+          "done": true,
+          "desc": "`.venv` via `uv sync --locked` (uv fetches CPython 3.11 when the Mac has none). Verify: `.venv/bin/python -c \"import sys, torch; print(sys.version, torch.__version__)\"` prints 3.11.x and 2.11.0; `lexhybrid` imports fr..."
+        },
+        "P1-C": {
+          "done": true,
+          "desc": "`lexhybrid/config/hybrid_config.py` ← `hybrid_xmamba/models/configuration_hybrid.py` (port map §1): drop `slstm_*`, `pooling_strategy`, `bidirectional_encode`, `proj_head_dropout`, `use_cache`, `use_tfla`; keep everyt..."
+        },
+        "P1-D": {
+          "done": true,
+          "desc": "`lexhybrid/layers/normalization.py` (`RMSNorm` exactly as the reference, no upcast yet) and `lexhybrid/layers/activations.py` (`exponential_activation`, `silu_activation`) ← port map §2. Test: `tests/test_layers.py::t..."
+        },
+        "P1-E": {
+          "done": true,
+          "desc": "`lexhybrid/layers/rotary.py` ← `hybrid_xmamba/layers/rotary.py` (`cumulative_angles`, `_segment_baseline`, `apply_rotary`; `cu_seqlens → doc_ids`). Test: `tests/test_layers.py::test_cumulative_angles_restart_per_docum..."
+        },
+        "P1-F": {
+          "done": true,
+          "desc": "`lexhybrid/kernels/ssd/{ssd_interface,ssd_reference}.py` ← `hybrid_xmamba/kernels/ssd/` (port map §3), verbatim apart from `doc_ids`; export `segsum, ssd_chunked_scan, ssd_step, ssd_sequential_reference`. Test: `tests..."
+        },
+        "P1-G": {
+          "done": true,
+          "desc": "`lexhybrid/kernels/tfla/{tfla_interface,tfla_reference}.py` ← `hybrid_xmamba/kernels/tfla/tfla_interface.py` plus the fp64 `sequential_mlstm_fp64` oracle moved out of the reference tests into `tfla_reference.py` (port..."
+        },
+        "P1-H": {
+          "done": true,
+          "desc": "`lexhybrid/kernels/selective_scan/scan_interface.py` ← `hybrid_xmamba/kernels/selective_scan/scan_interface.py` (`selective_scan`, `selective_scan_parallel`, `selective_scan_exact`, fp64 reference). Test: `tests/test_..."
+        },
+        "P1-I": {
+          "done": true,
+          "desc": "`lexhybrid/layers/mamba3_block.py` ← `hybrid_xmamba/layers/mamba3_block.py` (port map §5) unchanged apart from `doc_ids`. Test: `tests/test_layers.py::test_mamba3_step_reproduces_the_chunked_forward` (from the referen..."
+        },
+        "P1-J": {
+          "done": true,
+          "desc": "`lexhybrid/layers/mlstm_block.py` ← `hybrid_xmamba/layers/mlstm_block.py` (port map §6) with `_slow_forward` and `use_tfla` removed (gate 3 of validate must run the shipping operator), `_forward_segmented` kept for no..."
+        },
+        "P1-K": {
+          "done": true,
+          "desc": "`lexhybrid/layers/attention_block.py` ← `hybrid_xmamba/layers/attention_block.py` (port map §7) unchanged. Test: `tests/test_layers.py::test_attention_is_causal_and_blocks_cross_document`."
+        },
+        "P1-L": {
+          "done": true,
+          "desc": "`lexhybrid/layers/mamba_block.py` ← `hybrid_xmamba/layers/mamba_block.py` (legacy Mamba-1, `scan_impl` legacy/exact, `post_model_init`, `_forward_segmented`). Test: `tests/test_layers.py::test_mamba1_forward_backward`."
+        },
+        "P1-M": {
+          "done": true,
+          "desc": "`lexhybrid/layers/hybrid_block.py` ← `hybrid_xmamba/layers/hybrid_block.py` (port map §8) with the `slstm` branch removed and `_mamba3_params()` kept; the `mlstm` allow-list bug is preserved for parity (fixed in P2-A)..."
+        },
+        "P1-N": {
+          "done": true,
+          "desc": "`lexhybrid/models/hybrid_lm.py` ← `hybrid_xmamba/models/hybrid_lm.py` lines 1–600 (port map §9): `CausalLMOutput`, `HybridEmbedding`, `HybridLanguageModel` with `forward`, `architecture_fingerprint`, `_init_weights`, ..."
+        },
+        "P1-O": {
+          "done": true,
+          "desc": "`lexhybrid/training/{optimizer,schedulers,metrics}.py` ← `hybrid_xmamba/training/` (`get_parameter_groups`, `configure_optimizer`, `wsd_factor`, `WSDScheduler`, `beta2_for_step`, `apply_beta2_schedule`, `compute_perpl..."
+        },
+        "P1-P": {
+          "done": true,
+          "desc": "`lexhybrid/training/callbacks.py` (`SignalCheckpointCallback` ← `signal_callbacks.py`) and `lexhybrid/training/lightning_module.py` (`HybridLightningModule` ← lines 19–283 of the reference module: `training_step`, `va..."
+        },
+        "P1-Q": {
+          "done": true,
+          "desc": "`lexhybrid/utils/run_metadata.py` (fields of the reference minus `git_*`, plus `sync_stamp` read from `.sync_stamp` if present and `tree_hash` computed over `lexhybrid/ configs/ scripts/`) and `lexhybrid/utils/checkpo..."
+        },
+        "P1-R": {
+          "done": true,
+          "desc": "`scripts/evaluate_lm.py` ← reference (perplexity, bits-per-token, throughput ladder, peak memory; uses `load_state_dict_guarded`; `--dataset` takes a packed parquet shard path instead of `wikitext|pubmed`) and `script..."
+        },
+        "P1-S": {
+          "done": true,
+          "desc": "`scripts/performance_profile.py` ← reference (`--sweep --backward --per-layer --decode --attn-backend --chunk-size --compile --dtype`, median timing, OOM rows, log-log exponent fit, `effective_chunk_size` read back) a..."
+        },
+        "P1-T": {
+          "done": true,
+          "desc": "`lexhybrid/eval/text_metrics.py` ← `rouge_l_score`, `corpus_bleu` from the dropped `scripts/evaluate_report_generation.py` (verbatim, stdlib only); `scripts/bootstrap_compare.py` ← reference, importing them from there..."
+        },
+        "P1-U": {
+          "done": true,
+          "desc": "`tests/test_numerics_fp64.py` complete (port map §10): `DELTAS`, `CHUNKS`, `TOL = 1e-6`, `_xfail_if(strict=True)`, CPU-collected, never CUDA-gated; covers SSD (contiguous, boundary mid-chunk, boundary on edge, multipl..."
+        },
+        "P1-V": {
+          "done": true,
+          "desc": "`configs/config.yaml` (defaults model/dataset/trainer/callbacks/distill: null; `seed: 42`; `output_dir: ${oc.env:SCRATCH_ROOT,.}/outputs/${experiment_name}`), `configs/callbacks/default.yaml`, `configs/trainer/{cpu_de..."
+        },
+        "P1-W": {
+          "done": true,
+          "desc": "`scripts/validate.sh` (port map §13; modes: default, `--full`, `--ci`): gate 0 `python3 scripts/plan_state.py check`; gate 1 environment (`uv lock --check`, `scripts/check_env.py`); gate 2 static (`ruff check`, `ruff ..."
+        },
+        "P1-W1": {
+          "done": true,
+          "desc": "`scripts/check_env.py`: interpreter equals `.python-version` (or `--expect-python`), every installed distribution equals its `uv.lock` pin for this platform (via `uv export --frozen`), key imports and versions, `lexhy..."
+        },
+        "P1-W2": {
+          "done": true,
+          "desc": "`scripts/check_repo_hygiene.py`: local mode walks the tree minus `.gitignore` (via `pathspec`), `--ci` walks the checkout (= the pushed tree); fails on files > 5 MB, checkpoints/data outside `tests/fixtures/`, a `Refe..."
+        },
+        "P1-W3": {
+          "done": true,
+          "desc": "`.github/workflows/ci.yml` per §8.4: jobs `lint`, `test` (Python 3.11 and 3.12), `hygiene`, `package` on every push and pull request; `macos` and `network` on the weekly schedule and manual dispatch; `astral-sh/setup-..."
+        },
+        "P1-W4": {
+          "done": true,
+          "desc": "`tests/test_ci_workflow.py`: the workflow triggers on push and pull request, every job installs with `uv sync --locked` and never `pip install`, the `test` matrix contains the `.python-version` interpreter, the `test`..."
+        },
+        "P1-W5": {
+          "done": true,
+          "desc": "Coverage floor: run `bash scripts/validate.sh --full --coverage`, record the measured `lexhybrid/` line coverage in the note, set `[tool.coverage.report] fail_under` to it rounded down to the nearest 5. Verify: `bash ..."
+        },
+        "P1-X": {
+          "done": true,
+          "desc": "`scripts/dump_reference_parity.py`: imports `Reference/hybrid_model_mamba_xlstm/hybrid_xmamba` by path; for each of `mamba3`, `mlstm`, `attention`, `mamba` builds the reference block at dim 64 (`d_state 16`, `head_dim..."
+        },
+        "P1-Y": {
+          "done": true,
+          "desc": "`tests/test_reference_parity.py`: loads each fixture's `state_dict` into the NEW block or model (strict), runs fp32 forward with and without `doc_ids` (and `step` where the block has one), asserts `max|Δ| ≤ 1e-6` and ..."
+        },
+        "P1-Z": {
+          "done": true,
+          "desc": "USER ACTION — delete `Reference/`. The model prints the three preconditions (P1-Y green, `validate.sh` exit 0, `test_port_map.py` green) and stops with: \"P1 gate passed; reply 'delete reference' to proceed.\" The user ..."
+        }
+      },
+      "evidence": {
+        "validate": "--full exit 0, 442 passed, 2 skipped with reasons, 21 strict xfails, 2026-09-27",
+        "env": "uv lock --check OK (99 packages); check_env OK: Python 3.11.16, torch 2.11.0, every package = uv.lock; lexhybrid editable, imports from /tmp",
+        "port": "config, 8 layer files, SSD/TFLA/selective-scan kernels, HybridLanguageModel, ARCH fingerprint, beam_search_uncached ported with renames only (doc_ids); defects kept for parity",
+        "oracles": "test_numerics_fp64: all pass or strict-xfail (legacy divide-and-clamp M1 cases)",
+        "scripts": "evaluate_lm (parquet shards, refuses mismatched checkpoint), verify_handoff, performance_profile, check_operator_equivalence (R1 1e-4 on CPU), bootstrap_compare (text + metric modes), analyze_generation_diversity; all CPU-tested",
+        "ref_param_counts": "ref_hybrid_m3 184,192,200 and ref_transformer 183,386,880, exact (test_config_invariants, slow)",
+        "validate_ci": "--ci exit 0 locally: coverage 94.51% >= fail_under 90",
+        "actionlint": "actionlint .github/workflows/ci.yml exit 0",
+        "coverage": "lexhybrid/ 94.51% (1,772/1,875 lines) on macOS arm64; fail_under = 90",
+        "parity": "5 fixtures (mamba3 3 cases, mlstm 3, attention 2, mamba 2, model 2); every block within 1e-6 with and without doc_ids and in step; model logits/loss match, cached beam tokens identical; dump --check reproduces the fixtures",
+        "port_map": "tests/test_port_map.py 13 passed (38 rows, 77 destinations, 52 sources present); tests/test_plan_references.py 40 passed",
+        "rsync": "tests/test_rsync_rules.py 12 passed: fixtures sync, Reference/.venv/outputs/logs/.git/cluster.env excluded, --delete keeps cluster-owned paths (openrsync on macOS)",
+        "package": "CI package job simulated in a scratch venv: uv build, locked deps without the project, wheel via uv pip --no-deps, 42 modules import from site-packages, smoke passes; tests/test_packaging.py pins wheel and sdist contents",
+        "gate": "validate.sh --full exit 0 after deletion: 440 passed, 4 skipped with reasons (2 reference tests, Linux-only, case-sensitive fs), 21 strict xfails; test_reference_parity green on 5 fixtures; test_port_map green; actionlint exit 0; Reference/ gone (9.4 MB, rm -rf on the user's instruction)",
+        "P1-Z_user_confirmed": "proceed further , commit and push it and go ahead and delete reference"
+      },
+      "verdict": "PASS: faithful port; parity within 1e-6 on 5 fixtures, beam tokens identical; validate --full and --ci green; Reference/ deleted at the user's instruction"
+    },
+    "P2": {
+      "title": "Correctness fixes, decoder deltas, legal configs",
+      "status": "pending",
+      "checkboxes": {
+        "P2-A": {
+          "done": false,
+          "desc": "Config plumbing: `HybridBlock` strips the `mlstm_` prefix like `mamba3_` (defect 2) so `mlstm_gate_soft_cap`, `mlstm_input_gate_bias_init`, `mlstm_forget_gate_bias_init`, `mlstm_chunk_size` reach `mLSTMBlock`; add `ma..."
+        },
+        "P2-B": {
+          "done": false,
+          "desc": "`mLSTMBlock.post_model_init()` re-applies the gate-bias inits after `_init_weights` (defect 3); `HybridLanguageModel` calls it. Test: `tests/test_models.py::test_mlstm_gate_bias_survives_model_init` (i bias −10, f bia..."
+        },
+        "P2-C": {
+          "done": false,
+          "desc": "TFLA: `apply_tfla(..., chunk_size)` takes the size from the block (defect 9); delete the dead `m_state` block; make the `_EXP_SAFE` fallback a config-time choice (`tfla_fallback: \"error\"|\"sequential\"`, default `error`..."
+        },
+        "P2-D": {
+          "done": false,
+          "desc": "TFLA boundary masks inside the kernel (defect 15): apply `same` to the intra-chunk scores, gate the carried numerator/denominator with `carry_ok`, gate the chunk-end state with `end_ok` (mirroring `ssd_interface.py`),..."
+        },
+        "P2-E": {
+          "done": false,
+          "desc": "dtype: `RMSNorm` computes in fp32 and casts back (defect 10); `ssd_chunked_scan` allocates `state` in fp32 explicitly (defect 16); `mLSTMBlock.step` keeps `C`, `n` in fp32 like `Mamba3Block.step`. Tests: `tests/test_n..."
+        },
+        "P2-F": {
+          "done": false,
+          "desc": "`ssd_chunked_scan` returns `(y, final_state)` with `seg` padded by the last real id and the `.item()` sync removed (defect 7); `Mamba3Block.forward(x, cache, doc_ids)` writes `ssm_state`, `conv_state` (last `conv_size..."
+        },
+        "P2-G": {
+          "done": false,
+          "desc": "TFLA returns `(h, C_final, n_final)`; `mLSTMBlock.forward` writes `C`, `n`, `seen` when `cache is not None`. Test: `tests/test_layers.py::test_mlstm_forward_then_step_equals_step_only`."
+        },
+        "P2-H": {
+          "done": false,
+          "desc": "`AttentionBlock`: per-document RoPE positions from `doc_ids` (restart at each boundary), `_rope_tables` rebuilt with `self.rope_theta` (defect 8), config default `rope_theta 500000`. Test: `tests/test_layers.py::test_..."
+        },
+        "P2-I": {
+          "done": false,
+          "desc": "`AttentionBlock.step(x_t, cache)` + `allocate_inference_cache(batch, device, dtype, max_seq_len)` with `{\"k\": (B,H,Lmax,Dh), \"v\": (B,H,Lmax,Dh), \"seen\": int}`; RoPE at position `seen`; attend over `[:seen+1]`; `suppor..."
+        },
+        "P2-J": {
+          "done": false,
+          "desc": "Packed training attention via `torch.nn.attention.flex_attention` with a block mask from `doc_ids` (defect 18); dense-mask path kept as the CPU/reference fallback. Test: `tests/test_layers.py::test_flex_block_mask_equ..."
+        },
+        "P2-K": {
+          "done": false,
+          "desc": "One-pass `HybridLanguageModel.prefill(hidden, caches)` = each layer's forward with its cache, then `lm_head(final_norm(hidden[:, -1]))`. Tests: `tests/test_decoding.py::test_prefill_equals_uncached[fp32 logits 1e-5; b..."
+        },
+        "P2-L": {
+          "done": false,
+          "desc": "Loss mask at document boundaries (defect 6): `shift_labels[doc_ids[:,1:] != doc_ids[:,:-1]] = -100`, EOS supervised, `n_supervised_tokens` logged. Test: `tests/test_models.py::test_loss_masks_boundary_keeps_eos` (row ..."
+        },
+        "P2-M": {
+          "done": false,
+          "desc": "Init then tie (defect 17): `_init_weights` runs before tying; `tie_word_embeddings` default `True`; `get_num_params(non_embedding=True)` = total − embedding − (lm_head if untied); fingerprint prints `params=` and `par..."
+        },
+        "P2-N": {
+          "done": false,
+          "desc": "`lexhybrid/decoding/generate.py`: uncached reference `greedy`, `sample`, `beam_search` with EOS termination and repetition penalty (the reference tested its cached beam against a dropped script; this is the new refere..."
+        },
+        "P2-O": {
+          "done": false,
+          "desc": "Cached `greedy_cached`/`sample_cached` with EOS stop, repetition penalty, `max_new_tokens`, batch > 1 with per-row finished flags. Test: `tests/test_decoding.py::test_cached_greedy_equals_uncached`."
+        },
+        "P2-P": {
+          "done": false,
+          "desc": "`beam_search_cached` with EOS handling (finished hypotheses kept and length-normalised), `length_penalty` applied, `reorder_cache` over attention caches (defect 11). Test: `tests/test_decoding.py::test_cached_beam_equ..."
+        },
+        "P2-Q": {
+          "done": false,
+          "desc": "`lexhybrid/decoding/pointer_constraints.py`: `SpecialTokens` registry (decision 7 names) and a `PointerFSM` that, given the retrieved set `{(c, [s...])}`, masks `<|cK|>` ids not retrieved and `<|sJ|>` ids not in the c..."
+        },
+        "P2-R": {
+          "done": false,
+          "desc": "`best_of_n(model, prompt, n, scorer)` hook in `decoding/generate.py` (n cached samples, returns the scorer's argmax; the P7 verifier is the scorer). Test: `tests/test_decoding.py::test_best_of_n_picks_scorer_max`."
+        },
+        "P2-S": {
+          "done": false,
+          "desc": "`lexhybrid/models/mtp_head.py`: multi-token-prediction head (`mtp_n=2`, `mtp_loss_weight`, off by default), sharing the tied embedding. Test: `tests/test_models.py::test_mtp_head_off_is_bit_identical` and `::test_mtp_..."
+        },
+        "P2-T": {
+          "done": false,
+          "desc": "`lexhybrid/training/distill.py`: `slab_ce_kl(hidden, labels, teacher_hidden, lm_head, teacher_lm_head, alpha, T, slab=512)` under `torch.utils.checkpoint` (never materialises `(B,L,V)`); `teacher_forward_packed(teache..."
+        },
+        "P2-U": {
+          "done": false,
+          "desc": "Lightning module for pretraining (`PretrainLightningModule`): CE + optional KL, WSD, β2 anneal, manual clip, `compile_model` key honoured, NaN guard that skips the optimizer step instead of returning a leaf tensor, DD..."
+        },
+        "P2-V": {
+          "done": false,
+          "desc": "`configs/model/hybrid_legal_base.yaml` (decision 10; declares every flag so overrides can name them), `configs/model/transformer_legal_base.yaml` (15 attention layers, `pre_rms`, same LR/warmup/clip; delta stated in a..."
+        },
+        "P2-W": {
+          "done": false,
+          "desc": "Screen variants `hybrid_legal_attn0.yaml` (9×M3+3×L), `hybrid_legal_attn4.yaml` (5×M3+4×A+3×L, positions 3,6,9,11), `hybrid_legal_ds64.yaml`, `hybrid_legal_mtp.yaml`; `tests/test_config_invariants.py::test_param_bands..."
+        },
+        "P2-X": {
+          "done": false,
+          "desc": "`scripts/screen_arms.py`: `Arm(config, overrides, seed, isolates, expect, walltime)` table for S0–S6 (§P5), `list|env|verify [--full]`; `verify` builds each arm through `HybridConfig.from_hydra` and asserts its `expec..."
+        },
+        "P2-Y": {
+          "done": false,
+          "desc": "`torch.compile` smoke: `tests/test_models.py::test_compile_forward_chunk128` compiles `hybrid_legal_base` at reduced size on the Inductor CPU backend and asserts logits equal eager at 1e-4 and the TFLA fast path is ta..."
+        },
+        "P2-Y1": {
+          "done": false,
+          "desc": "`tests/test_gpu.py` (marked `cuda`: SDPA flash vs math in bf16, flex vs dense on GPU, SSD/TFLA bf16-autocast vs fp32, `torch.compile` vs eager at 1e-4, cached decode on GPU, peak-memory sanity) and `tests/test_multigp..."
+        },
+        "P2-Z": {
+          "done": false,
+          "desc": "Gate: `bash scripts/validate.sh` exit 0; `tests/test_decoding.py` green (cached = uncached in fp32, argmax-identical in bf16, all three families incl. attention); `tests/test_numerics_fp64.py::test_tfla_packed_equals_..."
+        }
+      },
+      "evidence": {},
+      "verdict": null
+    },
+    "P3": {
+      "title": "Data pipeline at smoke scale",
+      "status": "pending",
+      "checkboxes": {
+        "P3-A": {
+          "done": false,
+          "desc": "`lexhybrid/data/schema.py`: `Document(id, source, jurisdiction, doc_type, licence, commercial_safe, valid_from, valid_to, citation_id, url, sha256, retrieved_at, text, sections: list[Section(label, absatz, satz_idx, r..."
+        },
+        "P3-B": {
+          "done": false,
+          "desc": "`Docs/CORPUS_LICENCE_REGISTER.md` (one row per source: name, jurisdiction, doc types, licence, commercial-safe, gated?, URL, access method, notes) and `lexhybrid/data/corpus/licences.py` (`LICENCES` table, `is_commerc..."
+        },
+        "P3-C": {
+          "done": false,
+          "desc": "`lexhybrid/data/tokenizer.py`: loads `Qwen/Qwen3-1.7B-Base`'s tokenizer, adds decision 7's specials, exposes `eos_id = 151643`, `pointer_ids()`; asserts `len(tokenizer) ≤ 151936`. Test: `tests/test_data.py::test_token..."
+        },
+        "P3-D": {
+          "done": false,
+          "desc": "Fertility measurement (R4): write the prediction first into `analysis/tokenizer_fertility.md` (\"Qwen3 < 1.8 tokens/word on a 1M-word DACH legal sample; GPT-2 > 2.2\"), then `scripts/measure_fertility.py` over the P3-F...."
+        },
+        "P3-E": {
+          "done": false,
+          "desc": "`lexhybrid/data/corpus/collectors/base.py`: `class Collector(Protocol): name, licence, jurisdiction; iter_documents(limit: int | None) -> Iterator[Document]`; shared `http_get` with retry/backoff and rate limit; `sha2..."
+        },
+        "P3-F": {
+          "done": false,
+          "desc": "Collector GII (gesetze-im-internet.de: federal statutes, XML, amtliches Werk §5 UrhG; captures `Stand` date, §, Absatz, Satz). 3 fixture records under `tests/fixtures/collectors/gii/`; offline parser test; `--limit 20..."
+        },
+        "P3-G": {
+          "done": false,
+          "desc": "Collector RII (rechtsprechung-im-internet.de: federal court decisions; Tenor/Tatbestand/Gründe; Randnummern). Same acceptance as P3-F."
+        },
+        "P3-H": {
+          "done": false,
+          "desc": "Collector OLDP (openlegaldata.io API, ODbL; court, date, ECLI). Same acceptance; `licence=ODbL-1.0`."
+        },
+        "P3-I": {
+          "done": false,
+          "desc": "Collector EUR-Lex (German language, CC BY 4.0 reuse notice; CELEX id, Artikel). Same acceptance; `jurisdiction=EU`."
+        },
+        "P3-J": {
+          "done": false,
+          "desc": "Collector RIS (Austrian Rechtsinformationssystem, CC BY 4.0; Bundesrecht + Judikatur; Inkrafttreten dates). Same acceptance; `jurisdiction=AT`."
+        },
+        "P3-K": {
+          "done": false,
+          "desc": "Collector Fedlex (Swiss federal law, open; SR number, Artikel; versions). Same acceptance; `jurisdiction=CH`."
+        },
+        "P3-L": {
+          "done": false,
+          "desc": "Collector BGer (Swiss Federal Supreme Court decisions; CC BY 4.0 as published; Erwägungen). Same acceptance; `jurisdiction=CH`."
+        },
+        "P3-M": {
+          "done": false,
+          "desc": "Collector DIP (Bundestag documentation, open; Drucksachen). Same acceptance; `doc_type=parliament`."
+        },
+        "P3-N": {
+          "done": false,
+          "desc": "Collector FineWeb-2 `deu_Latn` (HF `datasets` streaming, ODC-By 1.0; general-German replay). `--limit 20`; `doc_type=general`, `commercial_safe=true`."
+        },
+        "P3-O": {
+          "done": false,
+          "desc": "Collector MultiLegalPile NC subsets (HF, gated; `research_only=true`, `commercial_safe=false`). If `HF_TOKEN` is unset locally, fixtures only and a note; P4-B supplies the cluster token."
+        },
+        "P3-P": {
+          "done": false,
+          "desc": "Eval-set fetchers `lexhybrid/data/evalsets/{gerlerb,gerdalir}.py` (retrieval queries/qrels; eval only; licence recorded). `--limit 20` run; tests on fixtures."
+        },
+        "P3-Q": {
+          "done": false,
+          "desc": "Eval-set fetchers `lexhybrid/data/evalsets/{legalquad,gerlayqa}.py` (QA; eval only; GerLayQA explicitly excluded from training). Same acceptance."
+        },
+        "P3-R": {
+          "done": false,
+          "desc": "`lexhybrid/data/corpus/scrub_ler.py`: German-LER scrub with `flair/ner-german-legal` (PER, RR, AN, STR → typed placeholders), licence of the model verified and written into the register, scrub log (`data/manifests/scr..."
+        },
+        "P3-S": {
+          "done": false,
+          "desc": "`lexhybrid/data/corpus/dedup.py`: `datasketch` MinHash, 5-gram shingles, 128 permutations, Jaccard ≥ 0.8, exact-hash pre-pass. Test: `tests/test_data.py::test_dedup_catches_planted_near_duplicate`."
+        },
+        "P3-T": {
+          "done": false,
+          "desc": "`lexhybrid/data/corpus/changelog.py`: provisions amended since a date (GII `Stand`, RIS Inkrafttreten, Fedlex versions) → `data/manifests/changelog.jsonl`; this is P9's currency subset. Test: `tests/test_data.py::test..."
+        },
+        "P3-U": {
+          "done": false,
+          "desc": "`lexhybrid/data/packing.py`: EOS-delimited packing (`<|endoftext|>` after every document, `doc_ids` incremented after the EOS) into parquet shards with `input_ids`, `doc_ids`, `source`, `licence`, `commercial_safe` at..."
+        },
+        "P3-V": {
+          "done": false,
+          "desc": "`lexhybrid/data/datasets.py`: by-document validation split (random 0.1%, minimum 2,000 documents, asserted), mixture yaml `configs/dataset/mixture_pretrain.yaml` (legal 70 / general 30 by tokens; per-source weights; a..."
+        },
+        "P3-W": {
+          "done": false,
+          "desc": "Probes `lexhybrid/data/probes/{mqar,statute_recall}.py`: MQAR generator (reference `configs/dataset/mqar.yaml` semantics) and statute-recall (given a § in context, reproduce Absatz 2 verbatim; scored exact-match and c..."
+        },
+        "P3-X": {
+          "done": false,
+          "desc": "Probe `lexhybrid/data/probes/multihop.py`: two-hop cross-reference questions built from statutes that cite another § (the answer needs both passages); 200 items from fixtures; scored by exact-match. Test: `tests/test_..."
+        },
+        "P3-Y": {
+          "done": false,
+          "desc": "`lexhybrid/data/sft_format.py`: the RAG prompt as ONE document (no `<|endoftext|>` inside): `<|question|> … <|passage|><|c1|> sentence-numbered text … <|/passage|> … <|answer|>`; target sentences with `<|q|><|cK|><|sJ..."
+        },
+        "P3-Z": {
+          "done": false,
+          "desc": "Gate: `bash scripts/validate.sh` exit 0; a 100-row 4,096 shard built from the fixtures round-trips through `hybrid_legal_base` on CPU (`scripts/train_pretrain.py trainer=cpu_debug dataset=legal_smoke trainer.max_steps..."
+        }
+      },
+      "evidence": {},
+      "verdict": null
+    },
+    "P4": {
+      "title": "Cluster bring-up, corpus at scale, profiling",
+      "status": "pending",
+      "checkboxes": {
+        "P4-A": {
+          "done": false,
+          "desc": "USER ACTION — copy `scripts/slurm/cluster.env.example` to `scripts/slurm/cluster.env` (gitignored) and fill `CLUSTER_HOST` (ssh alias), `CLUSTER_REPO=/sc/home/<user>/lexhybrid`, `SCRATCH_ROOT=/sc/scratch/<user>/lexhyb..."
+        },
+        "P4-B": {
+          "done": false,
+          "desc": "USER ACTION — accept the MultiLegalPile terms on huggingface.co and place the token at `~/.hf_token` (mode 600) on the cluster; jobs export `HF_TOKEN=$(cat ~/.hf_token)` when the file exists."
+        },
+        "P4-C": {
+          "done": false,
+          "desc": "USER ACTION — confirm scratch quota: paste `df -h /sc/scratch/$USER` and `du -sh $HOME` outputs; the plan needs ≥ 300 GB scratch free."
+        },
+        "P4-D": {
+          "done": false,
+          "desc": "`scripts/sync_to_cluster.sh` (`rsync -az --delete --exclude-from=.rsync-exclude ./ $CLUSTER_HOST:$CLUSTER_REPO/`; writes `.sync_stamp` = ISO date + tree hash before syncing) and `scripts/sync_from_cluster.sh <subdir>`..."
+        },
+        "P4-E": {
+          "done": false,
+          "desc": "`scripts/slurm/setup_env.sh` (port map §11: CPU job, `--exclude=ga03`, installs `uv` if missing, `uv sync --locked` — torch `2.11.0+cu128` comes from the lock — then `scripts/check_env.py`) submitted with `sbatch`; re..."
+        },
+        "P4-F": {
+          "done": false,
+          "desc": "Verdict on the sbatch env job: pull the log; `check_env.py` must report Python 3.11, `torch 2.11.0+cu128`, CUDA 12.8 and every package equal to `uv.lock`; record its summary in evidence (the lock is the pin, so no sep..."
+        },
+        "P4-G": {
+          "done": false,
+          "desc": "`scripts/slurm/fetch_hf.sh` (CPU job, `HF_HUB_OFFLINE=0`, downloads `Qwen/Qwen3-1.7B-Base`, `Qwen/Qwen3-8B-Base`, `Qwen/Qwen3-0.6B-Base`, `flair/ner-german-legal`, `BAAI/bge-m3`, `BAAI/bge-reranker-v2-m3`, the NLI mod..."
+        },
+        "P4-H": {
+          "done": false,
+          "desc": "Verdict on the sbatch fetch job: `du -sh $HF_HOME/hub` recorded; every model directory present."
+        },
+        "P4-I": {
+          "done": false,
+          "desc": "`scripts/slurm/preflight.sh` (CPU job: `screen_arms.py verify --full`; `pytest -m \"not cuda and not slow and not reference\"`; ARCH line printed for every arm) submitted with `sbatch`."
+        },
+        "P4-J": {
+          "done": false,
+          "desc": "Verdict on the sbatch preflight job: \"PRE-FLIGHT PASSED\" in the log; test count recorded."
+        },
+        "P4-J1": {
+          "done": false,
+          "desc": "`scripts/slurm/gpu_tests.sh` (1 H100: `pytest -m cuda tests/`, plus `check_env.py`) submitted with `sbatch`; record the job id."
+        },
+        "P4-J2": {
+          "done": false,
+          "desc": "Verdict on the sbatch GPU-test job: every `cuda` test passed (count and log path in evidence); a failure is fixed before any screen job is submitted."
+        },
+        "P4-J3": {
+          "done": false,
+          "desc": "`scripts/slurm/multigpu_tests.sh` (2 H100: `pytest -m multigpu tests/`) submitted with `sbatch --gpus=2`; record the job id."
+        },
+        "P4-J4": {
+          "done": false,
+          "desc": "Verdict on the sbatch multi-GPU job: DDP smoke passed with identical gradients across ranks; evidence records the job id and log path."
+        },
+        "P4-K": {
+          "done": false,
+          "desc": "`scripts/slurm/build_corpus_array.sh` (CPU array, one task per collector, `--limit` unset, writes `data/raw/<src>` and manifests on scratch) submitted with `sbatch --array`."
+        },
+        "P4-L": {
+          "done": false,
+          "desc": "Verdict on the sbatch corpus array: per-source document and token counts; then `scripts/slurm/pack_corpus.sh` (scrub → dedup → pack at 4,096 and 8,192, commercial-safe and research arms as separate shard sets) submitt..."
+        },
+        "P4-M": {
+          "done": false,
+          "desc": "Verdict on the sbatch pack job: `analysis/corpus_manifest.md` from the template with tokens per source / jurisdiction / licence / arm, dedup removal rate, scrub entity counts; token budget for P6 set to `min(5B, avail..."
+        },
+        "P4-N": {
+          "done": false,
+          "desc": "`scripts/slurm/probe_ckpt_size.sh` (10-step `hybrid_legal_base` run on 1 GPU writing `last.ckpt` to scratch) submitted with `sbatch`."
+        },
+        "P4-O": {
+          "done": false,
+          "desc": "Verdict on the sbatch probe job: checkpoint size in GB → storage budget row in §6 and `evidence.ckpt_gb`; probe outputs deleted."
+        },
+        "P4-P": {
+          "done": false,
+          "desc": "`scripts/slurm/profile.sh` (port map §11 point() protocol: one length per process, fresh `TORCHINDUCTOR_CACHE_DIR`; arms: `ref_hybrid_m3` sanity at 16,384 chunk 64 / compiled chunk 128; `ref_transformer` at 16,384; `h..."
+        },
+        "P4-Q": {
+          "done": false,
+          "desc": "Verdict on the sbatch profile job: `analysis/profile_results.md` (prediction vs outcome; chunk-size decision by the rule \"128 unless it fails R1 or loses > 5% at 4,096\"); `effective_chunk_size` checked in every row."
+        },
+        "P4-R": {
+          "done": false,
+          "desc": "`scripts/slurm/equivalence.sh` (`check_operator_equivalence.py --chunk-sizes 64 128 --compile` on GPU) submitted with `sbatch`."
+        },
+        "P4-S": {
+          "done": false,
+          "desc": "Verdict on the sbatch equivalence job: exit 0 at 1e-4; compile smoke on the cluster (P2-Y's test under CUDA) green."
+        },
+        "P4-T": {
+          "done": false,
+          "desc": "`scripts/slurm/kd_memory_probe.sh` (4×H100 DDP, 20 steps each: 1.7B teacher at 4,096 and 8,192 rows; 8B teacher at 4,096 and 8,192; records s/step and peak GB per rank) submitted with `sbatch --gpus=4`."
+        },
+        "P4-U": {
+          "done": false,
+          "desc": "Verdict on the sbatch KD probe: `decisions.teacher` set by the rule \"8B if peak ≤ 70 GB at 4,096 rows and step time ≤ 1.6× the 1.7B step; else 1.7B\"; numbers into `analysis/profile_results.md`."
+        },
+        "P4-V": {
+          "done": false,
+          "desc": "`scripts/slurm/watch.sh` (port map §11: squeue/sacct/preemption/per-run checkpoint listing/log error grep; `source`-able; no python) and `tests/test_slurm_wrappers.py` (every wrapper: `--partition=aisc-batch`, `--acco..."
+        },
+        "P4-Z": {
+          "done": false,
+          "desc": "Gate: P4-F, P4-J, P4-J2, P4-J4, P4-S verdicts green; `analysis/corpus_manifest.md` and `analysis/profile_results.md` written with job ids; `decisions.teacher` recorded; `bash scripts/validate.sh` exit 0; `python3 scri..."
+        }
+      },
+      "evidence": {},
+      "verdict": null
+    },
+    "P5": {
+      "title": "Pre-registered screen",
+      "status": "pending",
+      "checkboxes": {
+        "P5-A": {
+          "done": false,
+          "desc": "Write the prediction above and the bar rule into `pre_registered.P5` (`plan_state.py evidence P5 prediction=... bar_rule=...`) before any submission; `analysis/screen_results.md` created from the template with the pre..."
+        },
+        "P5-B": {
+          "done": false,
+          "desc": "`scripts/slurm/screen_array.sh` (port map §11 array header; `ARMS` env list; `ARM` resolved on the compute node by `screen_arms.py env`; `unset EXPERIMENT`; `SAVE_TOP_K=0`; greps the ARCH line at step 0 against the ar..."
+        },
+        "P5-C": {
+          "done": false,
+          "desc": "Submit S1 seeds 42 and 43 with `sbatch --array=0-1` (`ARMS=\"S1-s42 S1-s43\"`); record both job ids; end the session."
+        },
+        "P5-D": {
+          "done": false,
+          "desc": "Verdict on the sbatch S1 jobs: val PPL per seed, two-seed SD, `bar_value = max(2×SD, 0.10)` written into this section and `pre_registered.P5.bar_value`; if the floor binds, say so."
+        },
+        "P5-E": {
+          "done": false,
+          "desc": "Submit S0, S2, S3, S4, S6 × seeds 42/43 with `sbatch --array=0-9` and S5 × 2 seeds separately with its own walltime (`sbatch --array=0-1 --time=24:00:00`); record job ids; end the session."
+        },
+        "P5-F": {
+          "done": false,
+          "desc": "Verdict on the sbatch arm jobs: per-arm, per-seed val PPL and late-25% PPL, s/step, peak GB into `analysis/screen_results.md`; requeued/failed arms noted with the `sacct` state."
+        },
+        "P5-G": {
+          "done": false,
+          "desc": "`scripts/slurm/eval_probes.sh` (1 GPU; `evaluate_probes.py` on every arm's `last.ckpt`: MQAR, statute-recall, multi-hop at 2,048) submitted with `sbatch`."
+        },
+        "P5-H": {
+          "done": false,
+          "desc": "Verdict on the sbatch probe job: probe columns filled; seed SD per column."
+        },
+        "P5-I": {
+          "done": false,
+          "desc": "Apply the decision rule verbatim; write RESULTS (prediction → outcome per arm), the chosen config into `decisions.backbone`, and the verdict; unexpected results are recorded, not re-run."
+        },
+        "P5-Z": {
+          "done": false,
+          "desc": "Gate: winner named by the rule with two seeds per arm; `analysis/screen_results.md` complete with every job id; `python3 scripts/plan_state.py next`."
+        }
+      },
+      "evidence": {},
+      "verdict": null
+    },
+    "P6": {
+      "title": "Full backbone pretraining",
+      "status": "pending",
+      "checkboxes": {
+        "P6-A": {
+          "done": false,
+          "desc": "`scripts/slurm/train_pretrain_4gpu.sh` (port map §11 header with `--gpus=4`, `--mem=256G`, `--cpus-per-task=32`, `--time=3-00:00:00`, `--requeue`, `--open-mode=append`; `CKPT=$OUT/checkpoints/last.ckpt` passed as `+re..."
+        },
+        "P6-B": {
+          "done": false,
+          "desc": "USER ACTION — decide whether a `research_only` arm (commercial-safe + NC shards) also trains (doubles P6 compute). Record the answer in `decisions.nc_arm`."
+        },
+        "P6-C": {
+          "done": false,
+          "desc": "Submit hybrid seed 42, stage A, with `sbatch --gpus=4 scripts/slurm/train_pretrain_4gpu.sh`; record the job id; artifact `P6.hybrid.s42.stageA_dir`."
+        },
+        "P6-D": {
+          "done": false,
+          "desc": "Submit hybrid seed 43, stage A, with `sbatch --gpus=4`; record; artifact."
+        },
+        "P6-E": {
+          "done": false,
+          "desc": "Submit `transformer_legal_base` seed 42, stage A, with `sbatch --gpus=4`; record; artifact; then `python3 scripts/plan_state.py phase P7` and end the session."
+        },
+        "P6-F": {
+          "done": false,
+          "desc": "If `decisions.nc_arm` is yes: submit the research arm with `sbatch --gpus=4`; else tick with `--evidence job=skipped reason=decisions.nc_arm=no`."
+        },
+        "P6-G": {
+          "done": false,
+          "desc": "Verdict on the sbatch hybrid s42 stage-A job: final val PPL, late-25% PPL, tokens seen, wall, preemptions (`sacct`), ARCH line; RESULTS row."
+        },
+        "P6-H": {
+          "done": false,
+          "desc": "Verdict on the sbatch hybrid s43 stage-A job: same."
+        },
+        "P6-I": {
+          "done": false,
+          "desc": "Verdict on the sbatch Transformer stage-A job: same."
+        },
+        "P6-J": {
+          "done": false,
+          "desc": "Submit stage B for the three runs with `sbatch --gpus=4 --dependency=afterok:<A-job>` where still needed (or directly when A finished); record three job ids."
+        },
+        "P6-K": {
+          "done": false,
+          "desc": "Verdict on the sbatch stage-B jobs: val PPL at 8,192 rows, late-25% PPL before/after stage B; artifacts `P6.<arm>.<seed>.last_ckpt`."
+        },
+        "P6-L": {
+          "done": false,
+          "desc": "`scripts/slurm/verify_handoff.sh` (CPU job; `verify_handoff.py` on each `last.ckpt` against its yaml; PASS = 0 missing / 0 unexpected) submitted with `sbatch` ×3 and verdict recorded in the same box (evidence carries ..."
+        },
+        "P6-M": {
+          "done": false,
+          "desc": "`scripts/slurm/eval_probes.sh` at 8,192 (MQAR, statute-recall, multi-hop) on the three stage-B checkpoints submitted with `sbatch`; verdict in the same box."
+        },
+        "P6-N": {
+          "done": false,
+          "desc": "`analysis/backbone_results.md` from the template: seed table (2 hybrid seeds with SD, 1 Transformer — descriptive only, no claim), probes, prediction → outcome, job ids, handoff PASS lines."
+        },
+        "P6-Z": {
+          "done": false,
+          "desc": "Gate: three stage-B checkpoints with handoff PASS; `analysis/backbone_results.md` complete; `python3 scripts/plan_state.py next` (if `current_phase` is already P7, tick this box with `--force` and record it)."
+        }
+      },
+      "evidence": {},
+      "verdict": null
+    },
+    "P7": {
+      "title": "Retrieval, renderer, verifier",
+      "status": "pending",
+      "checkboxes": {
+        "P7-A": {
+          "done": false,
+          "desc": "`lexhybrid/retrieval/chunking.py::chunk_statute`: § / Artikel units with hierarchy (Gesetz → Abschnitt → § → Absatz → Satz), `valid_from/to`, sentence ids `sJ`; from `Document.sections`. Test: `tests/test_retrieval.py..."
+        },
+        "P7-B": {
+          "done": false,
+          "desc": "`chunk_case_law`: Tenor / Tatbestand / Entscheidungsgründe, then 300–500-token windows with Randnummer anchors. Test: `tests/test_retrieval.py::test_case_windows_keep_randnummer`."
+        },
+        "P7-C": {
+          "done": false,
+          "desc": "`lexhybrid/retrieval/bm25.py` (`bm25s`, German stemming/stopwords, index build + query) and `scripts/build_index.py --kind bm25`. Test: `tests/test_retrieval.py::test_bm25_finds_planted_passage`."
+        },
+        "P7-D": {
+          "done": false,
+          "desc": "`lexhybrid/retrieval/dense.py` (`BAAI/bge-m3` embeddings, FAISS or numpy index) and `scripts/slurm/build_dense_index.sh` (1 GPU) submitted with `sbatch`; verdict in the same box (index size, docs/s)."
+        },
+        "P7-E": {
+          "done": false,
+          "desc": "`lexhybrid/retrieval/fusion.py` (reciprocal rank fusion) and `rerank.py` (`BAAI/bge-reranker-v2-m3`, top 50 → 3–8 chunks ≤ 4K tokens). Test: `tests/test_retrieval.py::test_rrf_and_rerank_orderings`."
+        },
+        "P7-F": {
+          "done": false,
+          "desc": "`lexhybrid/retrieval/filters.py` (jurisdiction DE/AT/CH/EU; valid-on date; doc_type) and `index.py` (manifest of index versions; nightly re-sync stub `scripts/resync_index.py` that only records what would change). Tes..."
+        },
+        "P7-G": {
+          "done": false,
+          "desc": "`lexhybrid/renderer/render.py`: `<|q|><|cK|><|sJ|>` → the exact sentence text in quotes with its `citation_id` label; `<|cite|><|cK|>` → `(BGB §573 Abs. 2 Nr. 1)`; appends \"Hinweis: Dies ist eine rechtliche Informatio..."
+        },
+        "P7-H": {
+          "done": false,
+          "desc": "`lexhybrid/verifier/pointers.py` (every pointer resolves) and `quotes.py` (rendered quote equals source after NFC + whitespace normalisation). Test: `tests/test_verifier.py::test_pointer_and_quote_checks_adversarial` ..."
+        },
+        "P7-I": {
+          "done": false,
+          "desc": "`lexhybrid/verifier/nli.py`: pre-register the entailment threshold (0.5 on the entailment probability) in `pre_registered.P7` before running `scripts/calibrate_nli.py` on a 100-pair hand-built set (`data/manifests/nli..."
+        },
+        "P7-J": {
+          "done": false,
+          "desc": "`lexhybrid/verifier/verifier.py`: sentence-level pipeline (pointer → quote → NLI → party-identity rule: reject any answer containing a PER placeholder or a name matched by the LER model; \"who was the party\" → refusal)..."
+        },
+        "P7-K": {
+          "done": false,
+          "desc": "`scripts/slurm/eval_retrieval.sh` (nDCG@10, R@5/10/20, MRR per jurisdiction on GerLeRB and GerDaLIR; BM25 / dense / fused / reranked arms) submitted with `sbatch`; verdict in the same box → `analysis/retrieval_results..."
+        },
+        "P7-L": {
+          "done": false,
+          "desc": "`scripts/answer.py`: end-to-end CLI (question → retrieve → build the P3-Y prompt → decode with pointer FSM and best-of-n → render → verify → print) runnable on CPU with a tiny checkpoint. Test: `tests/test_pipeline.py..."
+        },
+        "P7-Z": {
+          "done": false,
+          "desc": "Gate: verifier synthetic suite 100%; renderer notice test green; `analysis/retrieval_results.md` written with job ids; `bash scripts/validate.sh` exit 0; `python3 scripts/plan_state.py phase P8` once P6-Z is also ticked."
+        }
+      },
+      "evidence": {},
+      "verdict": null
+    },
+    "P8": {
+      "title": "Post-training",
+      "status": "pending",
+      "checkboxes": {
+        "P8-A": {
+          "done": false,
+          "desc": "USER ACTION — approve ~65 GB scratch for `Qwen/Qwen3-32B` weights and the vLLM environment."
+        },
+        "P8-B": {
+          "done": false,
+          "desc": "`scripts/slurm/setup_vllm.sh` (CPU job; `.venv-vllm` separate from `.venv` because vLLM pins torch) and `scripts/slurm/vllm_smoke.sh` on `Qwen3-0.6B-Base` (1 GPU) submitted with `sbatch`; verdict in the same box; then..."
+        },
+        "P8-C": {
+          "done": false,
+          "desc": "`scripts/generate_synthetic_qa.py` (over real retrieved passages from P7; questions incl. 20–30% unanswerable / false-premise / party-identity; answers in the pointer format; verifier-filtered; open teacher only, R10)..."
+        },
+        "P8-D": {
+          "done": false,
+          "desc": "`scripts/build_sft_data.py`: SFT shards from synthetic QA + LegalQuAD-style items (eval sets excluded), every target ends in `<|endoftext|>`, unanswerable share asserted in [0.2, 0.3], held-out dev split by question. ..."
+        },
+        "P8-E": {
+          "done": false,
+          "desc": "`lexhybrid/training/sft_module.py` (loss on answer tokens only; pointer tokens supervised) and `scripts/slurm/train_sft_4gpu.sh`; `scripts/train_sft_hf.py` for the Qwen3-0.6B baseline (same data, same steps). Tests: `..."
+        },
+        "P8-F": {
+          "done": false,
+          "desc": "Submit SFT hybrid seeds 42/43/44 with `sbatch --gpus=4` (three jobs); record ids."
+        },
+        "P8-G": {
+          "done": false,
+          "desc": "Submit SFT Transformer seeds 42/43/44 with `sbatch --gpus=4`; record ids."
+        },
+        "P8-H": {
+          "done": false,
+          "desc": "Submit SFT Qwen3-0.6B seed 42 with `sbatch --gpus=4`; record id; end the session."
+        },
+        "P8-I": {
+          "done": false,
+          "desc": "Verdict on the seven sbatch SFT jobs: dev loss, citation precision on dev (via `scripts/evaluate_citation.py`, P9-A may be pulled forward), truncation rate; table in `analysis/posttrain_results.md`."
+        },
+        "P8-J": {
+          "done": false,
+          "desc": "`scripts/build_dpo_pairs.py` (best-of-n samples from each SFT model; verifier pass vs fail pairs; coverage kept balanced) and `lexhybrid/training/dpo_module.py` (DPO/KTO). Test: `tests/test_training.py::test_dpo_loss_..."
+        },
+        "P8-K": {
+          "done": false,
+          "desc": "Submit DPO for the seven arms with `sbatch --gpus=4`; verdict in the same box (citation precision before/after; refusal F1)."
+        },
+        "P8-L": {
+          "done": false,
+          "desc": "GRPO decision by the pre-registered condition: if any hybrid seed's citation precision after DPO < 0.95, implement `lexhybrid/training/grpo_module.py` (verifier reward + coverage term + length penalty; stop rule: stop..."
+        },
+        "P8-M": {
+          "done": false,
+          "desc": "USER ACTION — hand over the jurist annotation kit (`analysis/annotation_kit/`: 200–300 questions with retrieved passages and the three systems' answers, blinded; double-annotation instructions; agreement sheet). The u..."
+        },
+        "P8-N": {
+          "done": false,
+          "desc": "Truncation audit: `scripts/audit_truncation.py` over every post-trained model's dev decodes; must be 0% at the budget (all end on EOS); recorded per arm."
+        },
+        "P8-Z": {
+          "done": false,
+          "desc": "Gate: 3-seed SFT (+DPO) checkpoints for hybrid and Transformer, 1 for Qwen3-0.6B; truncation 0%; `analysis/posttrain_results.md` with prediction → outcome and job ids; `python3 scripts/plan_state.py next`."
+        }
+      },
+      "evidence": {},
+      "verdict": null
+    },
+    "P9": {
+      "title": "Evaluation, benchmarks, writeup",
+      "status": "pending",
+      "checkboxes": {
+        "P9-A": {
+          "done": false,
+          "desc": "`scripts/evaluate_citation.py`: citation precision/recall (pointer resolves + NLI entails; recall against the annotated gold passages where available), quote fidelity (exact match after normalisation), refusal precisi..."
+        },
+        "P9-B": {
+          "done": false,
+          "desc": "Currency subset (questions whose answer changed after the changelog date, P3-T) with the valid-on filter on/off; general-German PPL (forgetting) on a held-out FineWeb-2 shard; probes at 8K. `scripts/slurm/eval_quality..."
+        },
+        "P9-C": {
+          "done": false,
+          "desc": "Efficiency at 8K / 32K / 128K (pre-registered as efficiency-only for a model trained at 8K): cached decode tokens/s, time-to-first-token, memory per session, best-of-n cost, plus the P4 profiler ladder re-run on the f..."
+        },
+        "P9-D": {
+          "done": false,
+          "desc": "Baselines: retrieval-copy floor (top-ranked passage verbatim) and the legacy-operator ablation (`hybrid_legal_legacy` after P5 at S5's checkpoint, PPL/probe-only, no latency); both scored by P9-A where applicable."
+        },
+        "P9-E": {
+          "done": false,
+          "desc": "Large open ceiling: `gpt-oss-120b` in vLLM with the same passages and the same pointer prompt, `scripts/slurm/eval_ceiling.sh` submitted with `sbatch --gpus=4`; if it does not fit or load, tick with `--evidence job=sk..."
+        },
+        "P9-F": {
+          "done": false,
+          "desc": "USER ACTION — optional: provide a frontier API key for a second ceiling (evaluation only, never training data, R10); if declined, record it."
+        },
+        "P9-G": {
+          "done": false,
+          "desc": "`scripts/bootstrap_compare.py` runs for every pair (hybrid vs Transformer, vs Qwen3-0.6B, vs floor) per seed, 1,000 resamples by question; seed SD computed across seeds; both reported in one table; the claim rule (dec..."
+        },
+        "P9-H": {
+          "done": false,
+          "desc": "Human-annotated subset ingested when it returns (`scripts/ingest_annotations.py`; agreement reported; per-system correct / incorrect / misgrounded / responsive typology); until then the table row says \"pending\"."
+        },
+        "P9-I": {
+          "done": false,
+          "desc": "`analysis/legal_results.md` from the template: summary findings incl. nulls; seed tables; predictions → outcomes; claims table \"licensed / not licensed\"; reproduction with every job id."
+        },
+        "P9-Z": {
+          "done": false,
+          "desc": "Gate: every pre-registered prediction of P4–P9 reported beside its outcome; no claim from one seed; every number carries a job id and a log path; `python3 scripts/plan_state.py next`."
+        }
+      },
+      "evidence": {},
+      "verdict": null
+    },
+    "P10": {
+      "title": "Release hygiene",
+      "status": "pending",
+      "checkboxes": {
+        "P10-A": {
+          "done": false,
+          "desc": "`README.md`: what the system is, the licensed claims list from `analysis/legal_results.md`, what is not claimed, the \"Hinweis … keine Rechtsberatung\" and EU AI Act Art. 50 transparency framing, DACH scope, no medical ..."
+        },
+        "P10-B": {
+          "done": false,
+          "desc": "`Docs/RUNBOOK.md`: reproduction from an empty scratch (sync → env → fetch → corpus → screen → backbone → system → post-training → evaluation) with the exact wrapper names and env levers."
+        },
+        "P10-C": {
+          "done": false,
+          "desc": "`Docs/CORPUS_LICENCE_REGISTER.md` final (every source, every version date) and `analysis/ARCHIVE_MANIFEST.md`: what may leave the cluster (commercial-safe checkpoints, `analysis/`, manifests without text); what may no..."
+        },
+        "P10-D": {
+          "done": false,
+          "desc": "`analysis/LITERATURE_CHECK.md`: the prior-work check for \"Mamba + xLSTM + sparse attention + pointer citations + verifier on DACH law\" before the word \"first\" appears anywhere; if it exists, the README says \"to our kn..."
+        },
+        "P10-E": {
+          "done": false,
+          "desc": "`python3 scripts/plan_state.py readme` refreshes the progress table; `bash scripts/validate.sh --ci` exit 0; `tests/test_port_map.py` still green."
+        },
+        "P10-F": {
+          "done": false,
+          "desc": "USER ACTION — release commit: the user commits and pushes the release state, or tells the model to run specific git commands (then it runs exactly those, after `check_repo_hygiene.py` passes, and nothing else). Tick w..."
+        },
+        "P10-G": {
+          "done": false,
+          "desc": "USER ACTION — CI on the pushed branch: after the user pushes, the model reads the run with `gh run list` / `gh run view` (only if the user has authorised `gh`; otherwise the user pastes the result) and every job must ..."
+        },
+        "P10-Z": {
+          "done": false,
+          "desc": "Gate: every P10 box ticked; `bash scripts/validate.sh --full` exit 0."
+        }
+      },
+      "evidence": {},
+      "verdict": null
+    },
+    "P11": {
+      "title": "Optional: Qwen3 conversion road",
+      "status": "pending",
+      "checkboxes": {
+        "P11-A": {
+          "done": false,
+          "desc": "Design note `Docs/CONVERSION_DESIGN.md`: MOHAWK/MambaInLlama-style initialisation of Mamba-3 `in_proj` slices from Qwen3-0.6B/1.7B Q/K/V/O, 25% of layers kept as attention, layer-wise alignment, KL against `Qwen3-8B-B..."
+        },
+        "P11-B": {
+          "done": false,
+          "desc": "Implementation and screen per the design note, under R1–R12 and a new pre-registered prediction."
+        },
+        "P11-Z": {
+          "done": false,
+          "desc": "Gate: only on user instruction; results into `analysis/conversion_results.md`."
+        }
+      },
+      "evidence": {},
+      "verdict": null
+    }
+  },
+  "jobs": {},
+  "artifacts": {},
+  "sessions": [
+    {
+      "started": "2026-09-27T13:36:18+02:00",
+      "ended": "2026-09-27T13:36:19+02:00",
+      "ticked": [
+        "P0-A",
+        "P0-B",
+        "P0-C",
+        "P0-D",
+        "P0-E",
+        "P0-F",
+        "P0-Z"
+      ],
+      "jobs": []
+    },
+    {
+      "started": "2026-09-27T13:36:19+02:00",
+      "ended": null,
+      "ticked": [
+        "P1-A",
+        "P1-B",
+        "P1-C",
+        "P1-D",
+        "P1-E",
+        "P1-F",
+        "P1-G",
+        "P1-H",
+        "P1-I",
+        "P1-J",
+        "P1-K",
+        "P1-L",
+        "P1-M",
+        "P1-N",
+        "P1-O",
+        "P1-P",
+        "P1-Q",
+        "P1-R",
+        "P1-S",
+        "P1-T",
+        "P1-U",
+        "P1-V",
+        "P1-W",
+        "P1-W1",
+        "P1-W2",
+        "P1-W3",
+        "P1-W4",
+        "P1-W5",
+        "P1-X",
+        "P1-Y",
+        "P1-A",
+        "P1-A",
+        "P1-Z"
+      ],
+      "jobs": []
+    }
+  ],
+  "notes": [
+    "2026-09-27: state file created from LEGAL_BUILD_PLAN.md (12 phases)",
+    "2026-09-27: decision 01_init_road: From scratch first: Qwen3 tokenizer + logit-KL from an open Qwen3-*-Base teacher. Qwen3 conversion = P11, optional, on user instruction only. (user 2026-09-27)",
+    "2026-09-27: decision 02_corpus: Open-licensed sources PLUS a research-exception arm; every document carries licence + commercial_safe; research_only never enters a shippable arm. (user 2026-09-27)",
+    "2026-09-27: decision 03_gpus: 1 H100 per screen arm; 4 H100 DDP for full backbone and SFT runs. (user 2026-09-27)",
+    "2026-09-27: decision 04_reference_deletion: P1-Z, after the port gate passes, user-confirmed. (user 2026-09-27)",
+    "2026-09-27: decision 05_package: lexhybrid; Python>=3.11; torch>=2.5; pytorch_lightning>=2.4; Hydra; editable install; no sys.path shims",
+    "2026-09-27: decision 06_tokenizer_eos: Qwen3 tokenizer (Qwen/Qwen3-1.7B-Base); EOS = Qwen3 <|endoftext|> id 151643; student vocab_size 151936",
+    "2026-09-27: decision 07_special_tokens: SFT-only, never in KD: <|q|>, <|cite|>, <|c1|>..<|c16|>, <|s1|>..<|s64|>, <|unanswerable|>, <|passage|>, <|/passage|>, <|question|>, <|answer|> (87 <= 267 free ids)",
+    "2026-09-27: decision 08_teacher: Qwen/Qwen3-1.7B-Base by default; Qwen/Qwen3-8B-Base only if P4-U measures peak <= 70 GB at 4096 rows on 4xH100 and step time <= 1.6x",
+    "2026-09-27: decision 09_kd_loss: online; (1-a)CE + a*T^2*KL(teacher_T || student_T), a=0.5, T=2; per 512-token slab under checkpointing; teacher gets per-document position_ids + block-diagonal mask; doc-boundary label mask applies to KL",
+    "2026-09-27: decision 10_model: 12 layers, dim 768, 12 heads, pattern M3 M3 M3 A L L L M3 M3 A M3 M3, norm_topology hybrid, tfla_impl exact, d_state 128, mamba3_chunk_size 128, mlstm_chunk_size 128, mlstm_forget_gate_bias_init 3.0, rope_theta 500000, dropout 0.0, tied embeddings, max_position_embeddings 8192",
+    "2026-09-27: decision 11_param_counting: non_embedding = total - embedding - (lm_head if untied); both counts always reported; base = 104.1M non-embedding / 220.8M total; never called 150M",
+    "2026-09-27: decision 12_seq_lengths: screens 2048-token rows; main pretraining 4096; long-context stage 8192; 32K/128K numbers are efficiency-only",
+    "2026-09-27: decision 13_corpus_tooling: LER scrub flair/ner-german-legal (PER/RR/AN/STR); dedup datasketch MinHash 5-gram/128 perms/Jaccard>=0.8; replay FineWeb-2 deu_Latn (ODC-By)",
+    "2026-09-27: decision 14_retrieval_verifier: bm25s + BAAI/bge-m3 + RRF + BAAI/bge-reranker-v2-m3; NLI MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7, threshold pre-registered before calibration",
+    "2026-09-27: decision 15_ceilings: gpt-oss-120b with the same passages (Qwen3-235B does not fit 4x80 GB) or skipped and said so; frontier API only as an optional USER ACTION, never training data",
+    "2026-09-27: decision 16_statistics: 2 seeds per screen arm, 3 for any claim; claim = paired mean > one baseline seed SD AND sign at >=2/3 seeds; bootstrap CIs (1000 resamples by question) beside, never instead",
+    "2026-09-27: decision 17_legacy_operators: only configs/model/hybrid_legal_legacy.yaml may set scan_impl/tfla_impl legacy; PPL/probe-only (no cached decode)",
+    "2026-09-27: pre-registered rules.R1",
+    "2026-09-27: pre-registered rules.R2",
+    "2026-09-27: pre-registered rules.R3",
+    "2026-09-27: pre-registered rules.R4",
+    "2026-09-27: pre-registered rules.R5",
+    "2026-09-27: pre-registered rules.R6",
+    "2026-09-27: pre-registered rules.R7",
+    "2026-09-27: pre-registered rules.R8",
+    "2026-09-27: pre-registered rules.R9",
+    "2026-09-27: pre-registered rules.R10",
+    "2026-09-27: pre-registered rules.R11",
+    "2026-09-27: pre-registered rules.R12",
+    "2026-09-27: P0-A: LEGAL_BUILD_PLAN.md written (12 phases, 180 checkboxes) by Fable 5.1, Stage 0 session 2026-09-27",
+    "2026-09-27: P0-B: scripts/plan_state.py written; smoke-tested in the scratchpad (init/tick guards/next/block/job/resume/check all behaved)",
+    "2026-09-27: P0-C: CLAUDE.md written (62 lines: instruction card, rules a-k, command table)",
+    "2026-09-27: P0-D: Docs/REFERENCE_PORT_MAP.md written from the reference at h100_efficiency HEAD 900acee (19 sections, 18 defects with line refs)",
+    "2026-09-27: P0-E: Docs/analysis_TEMPLATE.md and README.md written",
+    "2026-09-27: P0-F: state initialised from the plan; 17 decisions and rules R1-R12 recorded",
+    "2026-09-27: P0-Z: check exit 0; six deliverables present; no git, no GPU, no cluster, no downloads",
+    "2026-09-27: P0 complete -> current_phase P1",
+    "2026-09-27: session end: Stage 0 delivered; handing over to the implementing model at P1",
+    "2026-09-27: Plan amended at the user's request (Opus 5.5 session): testing strategy + CI (§8), decisions 18-19, rules R13-R14, risks FL15-FL16, boxes P1-W1..W5, P2-Y1, P4-J1..J4, P10-F/G; see §14 amendment log",
+    "2026-09-27: decision 18_environment: uv project, one uv.lock (macOS arm64 + Linux x86_64); .python-version 3.11; torch==2.11.0 (PyPI on macOS, 2.11.0+cu128 from the PyTorch cu128 index on Linux; torch 2.12+ has no cu128 build); every env built with uv sync --locked and verified by scripts/check_env.py (user 2026-09-27)",
+    "2026-09-27: decision 19_ci: GitHub Actions .github/workflows/ci.yml on every push/PR: lint, test (Linux, py3.11+3.12), hygiene (pushed tree), package; weekly network smoke + macOS clean install; GPU checks on the cluster; inert until the user pushes (user 2026-09-27)",
+    "2026-09-27: pre-registered rules.R13",
+    "2026-09-27: pre-registered rules.R14",
+    "2026-09-27: Observed: the user ran git init, committed README.md ('Add the readme file as the first commit', ccfc826) and pushed to github.com/krishankb-de/legal_ai_hybrid_mamba_xlstm_model at 13:50. Repository rule, CLAUDE.md rule (d), README and P10-F/G updated: git stays the user's; the model runs no git command unless asked",
+    "2026-09-27: P1-A/B: uv project + universal lock (macOS arm64, Linux x86_64 with torch 2.11.0+cu128), .venv via uv sync --locked; analysis/ and scripts/slurm/ carry .gitkeep so the layout survives a push.",
+    "2026-09-27: P1-C..N ported faithfully: renames only (doc_ids, lexhybrid, no sys.path, no git); slstm/pooling/prefix/_slow_forward/use_tfla dropped; defects 2,3,5-11,15-18 preserved for parity (fixed in P2); box test names aligned to the tests as written.",
+    "2026-09-27: P1-O..T: WSD + beta2 anneal, optimizer groups, metrics (bits_per_token), SignalCheckpointCallback, HybridLightningModule (4 schedules, 2 CPU steps), run_metadata without git, guarded checkpoint load, lexhybrid/config/loading.py as the one yaml path, eval scripts and text metrics.",
+    "2026-09-27: P1-U/V: fp64 oracle suite (SSD, TFLA exact/legacy, selective scan, step=forward, feature-off bit identity); Hydra configs (config, callbacks, 3 trainers, synthetic dataset, 2 reference replicas) with invariant tests.",
+    "2026-09-27: P1-W..W5: validate.sh gates 0-6 in fast/--full/--ci modes; check_env.py; check_repo_hygiene.py (gitignore-aware locally, --ci on the pristine checkout in CI); ci.yml with lint, test (3.11, 3.12), hygiene, package, weekly macos + network; test_ci_workflow.py; coverage floor 90 from a measured 94.51%.",
+    "2026-09-27: P1-X/Y: reference parity fixtures (model fixture vocab 256 to stay under the 5 MB hygiene limit) and the never-skipped parity test; port-map contract test; plan-references test so box test names cannot drift. P1 boxes were all validated together at the end of one long session.",
+    "2026-09-27: BLOCKED on P1-Z: USER ACTION: P1 gate passed; the user replies 'delete reference' (or deletes Reference/ themselves) before P1-Z is ticked",
+    "2026-09-27: P1-A amended after tick: .rsync-exclude used gitignore '!' syntax, so the parity fixtures would never have reached the cluster; now '+ tests/fixtures/**' precedes '*.pt', covered by tests/test_rsync_rules.py. Re-validated: --full and --ci exit 0, 440 passed.",
+    "2026-09-27: P1-A amended after tick (2): the sdist include 'README.md' was unanchored and pulled in Reference/**/README.md; includes are now root-anchored, pinned by tests/test_packaging.py (slow). Re-validated: fast, --full and --ci exit 0, 442 passed; actionlint exit 0.",
+    "2026-09-27: unblocked (P1-Z)",
+    "2026-09-27: P1-Z: the user wrote 'go ahead and delete reference'; Reference/ deleted; full gate re-run green without it. P1 complete.",
+    "2026-09-27: verdict P1: PASS: faithful port; parity within 1e-6 on 5 fixtures, beam tokens identical; validate --full and --ci green; Reference/ deleted at the user's instruction",
+    "2026-09-27: P1 complete -> current_phase P2"
+  ],
+  "open_questions": []
+}

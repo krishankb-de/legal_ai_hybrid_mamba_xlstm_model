@@ -1,0 +1,28 @@
+# rsync rules for scripts/sync_to_cluster.sh (--exclude-from). First match wins, so the
+# include line for the test fixtures must come before the *.pt exclude. Lines starting with
+# "+ " are includes; every other line is an exclude. ('!' is not a negation in rsync.)
++ tests/fixtures/**
+.venv/
+.venv-vllm/
+venv/
+Reference/
+data/raw/
+data/shards/
+data/hf/
+data/cache/
+outputs/
+logs/
+cluster/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+junit*.xml
+htmlcov/
+*.ckpt
+*.pt
+*.parquet
+.DS_Store
+scripts/slurm/cluster.env
+.git/

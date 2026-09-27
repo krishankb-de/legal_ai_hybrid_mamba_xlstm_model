@@ -1,0 +1,72 @@
+# Reference replica: the reference's hybrid_150m_m3 (its A2 arm), GPT-2 vocabulary.
+# Kept for the P4 sanity point only -- the ported code must reproduce the reference's exact
+# parameter count (184,192,200, tests/test_config_invariants.py) and its H100 timings. Never
+# trained in this project. Legacy operators are allowed here and in hybrid_legal_legacy only (R8).
+model_type: lexhybrid
+
+vocab_size: 50257
+dim: 768
+num_layers: 12
+layer_pattern: [mamba3, mamba3, mamba3, mamba3, mlstm, mlstm, mlstm, mamba3, mamba3, mamba3, mamba3, mamba3]
+
+# Mamba-1 fields: unused (no mamba layers), declared so every yaml has the same schema.
+state_size: 16
+conv_size: 4
+expand_factor: 2
+dt_rank: null
+use_fast_path: true
+
+# Operators, pinned explicitly (R8).
+scan_impl: legacy
+tfla_impl: legacy
+
+# Mamba-3: every flag at the Mamba-2 reduction.
+mamba3_d_state: 128
+mamba3_head_dim: 64
+mamba3_ngroups: 1
+mamba3_chunk_size: 64
+mamba3_use_conv: true
+mamba3_conv_size: 4
+mamba3_use_trapezoid: false
+mamba3_use_rope: false
+mamba3_rope_fraction: 0.5
+mamba3_theta_max: 1.0
+mamba3_dt_min: 1.0e-3
+mamba3_dt_max: 1.0e-1
+mamba3_dt_init_floor: 1.0e-4
+mamba3_bc_bias: none
+mamba3_mimo_rank: 1
+mamba3_a_mode: static
+mamba3_a_floor: 1.0e-4
+mamba3_dt_limit: 1.0
+mamba3_use_outproj_norm: false
+
+# mLSTM
+head_dim: 64
+num_heads: 12
+proj_factor: 2
+mlstm_gate_soft_cap: 15.0
+mlstm_input_gate_bias_init: -10.0
+mlstm_forget_gate_bias_init: 0.0
+
+# Attention (unused)
+attn_dropout: 0.0
+rope_theta: 10000.0
+
+# Shared
+norm_type: rms
+norm_topology: hybrid
+use_mlp: true
+mlp_ratio: 4.0
+max_position_embeddings: 1024
+dropout: 0.1
+initializer_range: 0.02
+tie_word_embeddings: false
+use_gradient_checkpointing: false
+
+# Optimization (the reference's values)
+learning_rate: 4.0e-4
+weight_decay: 0.1
+warmup_steps: 2000
+max_steps: 90000
+gradient_clip_val: 1.0
