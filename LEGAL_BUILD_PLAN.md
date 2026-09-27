@@ -237,8 +237,8 @@ Purpose: reach the aisc cluster from this repo without git, build the environmen
 - [x] **P4-F** Verdict on the sbatch env job: pull the log; `check_env.py` must report Python 3.11, `torch 2.11.0+cu128`, CUDA 12.8 and every package equal to `uv.lock`; record its summary in evidence (the lock is the pin, so no separate requirements file).
 - [x] **P4-G** `scripts/slurm/fetch_hf.sh` (CPU job, `HF_HUB_OFFLINE=0`, downloads `Qwen/Qwen3-1.7B-Base`, `Qwen/Qwen3-8B-Base`, `Qwen/Qwen3-0.6B-Base`, `flair/ner-german-legal`, `BAAI/bge-m3`, `BAAI/bge-reranker-v2-m3`, the NLI model into `$HF_HOME`) submitted with `sbatch`.
 - [x] **P4-H** Verdict on the sbatch fetch job: `du -sh $HF_HOME/hub` recorded; every model directory present.
-- [ ] **P4-I** `scripts/slurm/preflight.sh` (CPU job: `screen_arms.py verify --full`; `pytest -m "not cuda and not slow and not reference"`; ARCH line printed for every arm) submitted with `sbatch`.
-- [ ] **P4-J** Verdict on the sbatch preflight job: "PRE-FLIGHT PASSED" in the log; test count recorded.
+- [x] **P4-I** `scripts/slurm/preflight.sh` (CPU job: `screen_arms.py verify --full`; `pytest -m "not cuda and not slow and not reference"`; ARCH line printed for every arm) submitted with `sbatch`.
+- [x] **P4-J** Verdict on the sbatch preflight job: "PRE-FLIGHT PASSED" in the log; test count recorded.
 - [ ] **P4-J1** `scripts/slurm/gpu_tests.sh` (1 H100: `pytest -m cuda tests/`, plus `check_env.py`) submitted with `sbatch`; record the job id.
 - [ ] **P4-J2** Verdict on the sbatch GPU-test job: every `cuda` test passed (count and log path in evidence); a failure is fixed before any screen job is submitted.
 - [ ] **P4-J3** `scripts/slurm/multigpu_tests.sh` (2 H100: `pytest -m multigpu tests/`) submitted with `sbatch --gpus=2`; record the job id.

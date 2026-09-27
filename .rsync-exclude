@@ -1,18 +1,20 @@
 # rsync rules for scripts/sync_to_cluster.sh (--exclude-from). First match wins, so the
 # include line for the test fixtures must come before the *.pt exclude. Lines starting with
 # "+ " are includes; every other line is an exclude. ('!' is not a negation in rsync.)
+# A pattern is anchored to the repo root only with a leading "/": "data/probes/" would also drop
+# lexhybrid/data/probes/ (job 2588703).
 + tests/fixtures/**
 .venv/
 .venv-vllm/
 venv/
 Reference/
-data/raw/
-data/shards/
-data/hf/
-data/cache/
-data/evalsets/
-data/scrubbed/
-data/probes/
+/data/raw/
+/data/shards/
+/data/hf/
+/data/cache/
+/data/evalsets/
+/data/scrubbed/
+/data/probes/
 outputs/
 logs/
 cluster/

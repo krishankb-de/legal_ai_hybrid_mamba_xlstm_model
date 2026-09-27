@@ -97,5 +97,34 @@ def test_delete_keeps_what_the_cluster_owns(tmp_path):
     assert not (dst / "lexhybrid" / "stale.py").exists(), "stale code should be deleted"
 
 
+@pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync not installed on this machine")
+def test_every_source_file_reaches_the_cluster(tmp_path):
+    """Job 2588703: unanchored `data/probes/` also dropped `lexhybrid/data/probes/`. Mirror every
+    source file of the repo (empty copies) and check rsync keeps all of them."""
+    src, dst = tmp_path / "src", tmp_path / "dst"
+    sources = [
+        p.relative_to(REPO_ROOT).as_posix()
+        for d in ("lexhybrid", "scripts", "configs", "tests")
+        for p in (REPO_ROOT / d).rglob("*")
+        if p.is_file() and p.suffix in {".py", ".sh", ".yaml", ".yml"} and "__pycache__" not in p.parts
+    ]
+    sources = [s for s in sources if s != "scripts/slurm/cluster.env"]
+    assert any(s.startswith("lexhybrid/data/probes/") for s in sources)
+    for rel in sources:
+        (src / rel).parent.mkdir(parents=True, exist_ok=True)
+        (src / rel).touch()
+    dst.mkdir()
+    subprocess.run(
+        ["rsync", "-a", f"--exclude-from={RULES}", f"{src}/", f"{dst}/"], check=True, capture_output=True
+    )
+    missing = sorted(s for s in sources if not (dst / s).exists())
+    assert not missing, f"excluded by .rsync-exclude but needed on the cluster: {missing[:10]}"
+
+
+def test_data_excludes_are_anchored_to_the_root():
+    unanchored = [ln for ln in rules() if ln.startswith("data/")]
+    assert not unanchored, f"anchor with a leading '/', else lexhybrid/data/... is excluded too: {unanchored}"
+
+
 def test_rules_file_is_where_the_sync_script_will_look():
     assert RULES == Path(REPO_ROOT, ".rsync-exclude") and RULES.is_file()

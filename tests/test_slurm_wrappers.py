@@ -108,3 +108,22 @@ def test_fetch_hf_revision_lookups_return_the_pinned_revisions():
     worker = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(worker)
     assert flair.stdout.strip() == worker.REVISION and len(worker.REVISION) == 40
+
+
+def test_preflight_runs_the_planned_checks_and_gates_the_verdict_line():
+    body = code(SLURM_DIR / "preflight.sh")
+    assert "scripts/screen_arms.py verify --full" in body
+    assert '-m "not cuda and not slow and not reference"' in body
+    assert "export HF_HUB_OFFLINE=1" in body, "preflight reads the fetched cache offline"
+    assert "gpus" not in directives(SLURM_DIR / "preflight.sh"), "preflight is a CPU job"
+    fail_exit = body.index("exit 1", body.index("PRE-FLIGHT FAILED"))
+    assert fail_exit < body.index('echo "PRE-FLIGHT PASSED"'), "PASSED must only print after the failure exit"
+
+
+@pytest.mark.parametrize("path", WRAPPERS, ids=lambda p: p.name)
+def test_wrappers_that_check_the_env_can_find_uv(path):
+    """check_env.py reads uv.lock through `uv`; job 2588703 failed with 'uv not found on PATH'."""
+    body = code(path)
+    if "scripts/check_env.py" not in body:
+        pytest.skip("does not run check_env.py")
+    assert "$HOME/.local/bin" in body.split("scripts/check_env.py")[0], "put ~/.local/bin on PATH first"

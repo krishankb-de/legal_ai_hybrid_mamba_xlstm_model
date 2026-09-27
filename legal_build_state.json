@@ -1,12 +1,12 @@
 {
   "current_phase": "P4",
-  "last_updated": "2026-09-27T23:18:10+02:00",
-  "status": "P3 complete 2026-09-27 (gate PASS: validate --full 817 passed; smoke shard trains 2 CPU steps; fertility Qwen3 2.280 tok/word, prediction refuted). P4 current: cluster bring-up. P3 to be committed and pushed on branch p3-data-pipeline (user: commit+push after each phase, check CI).",
+  "last_updated": "2026-09-27T23:40:42+02:00",
+  "status": "P4 in progress: A-H done (env job 2588677, HF fetch 2588687, 27G); P4-A..H pushed to main 745abfe, CI 36351227023 green.",
   "plan_of_record": "LEGAL_BUILD_PLAN.md",
   "helper": "python3 scripts/plan_state.py <cmd> (stdlib only; the ONLY writer of LEGAL_BUILD_PLAN.md checkboxes and legal_build_state.json)",
   "scope": "Build lexhybrid: port the reference backbone/kernels/decode/tests (P1), fix 18 recorded defects and add legal decoder deltas (P2), data pipeline (P3), cluster + corpus + profiling (P4), pre-registered screen (P5), full backbone (P6), retrieval/renderer/verifier (P7), post-training (P8), evaluation (P9), release (P10); P11 optional. Local only, no git until the user writes 'git go'. Reference/ deleted at P1-Z by the user.",
   "blocked_on": null,
-  "next_action": "P4-I: scripts/slurm/preflight.sh (CPU: screen_arms.py verify --full; pytest -m 'not cuda and not slow and not reference'; ARCH line per arm) + test; validate; sync; sbatch; job add; stop.",
+  "next_action": "P4-J1: scripts/slurm/gpu_tests.sh (1 H100, aisc-batch, --gpus=1, exclude ga03,gx17v1,gx13v1, GLB_SCRATCH, PATH ~/.local/bin; pytest -m cuda tests/ + check_env) + test; validate; sync; sbatch; job add; stop.",
   "decisions": {
     "01_init_road": "From scratch first: Qwen3 tokenizer + logit-KL from an open Qwen3-*-Base teacher. Qwen3 conversion = P11, optional, on user instruction only. (user 2026-09-27)",
     "02_corpus": "Open-licensed sources PLUS a research-exception arm; every document carries licence + commercial_safe; research_only never enters a shippable arm. (user 2026-09-27)",
@@ -566,11 +566,11 @@
           "desc": "Verdict on the sbatch fetch job: `du -sh $HF_HOME/hub` recorded; every model directory present."
         },
         "P4-I": {
-          "done": false,
+          "done": true,
           "desc": "`scripts/slurm/preflight.sh` (CPU job: `screen_arms.py verify --full`; `pytest -m \"not cuda and not slow and not reference\"`; ARCH line printed for every arm) submitted with `sbatch`."
         },
         "P4-J": {
-          "done": false,
+          "done": true,
           "desc": "Verdict on the sbatch preflight job: \"PRE-FLIGHT PASSED\" in the log; test count recorded."
         },
         "P4-J1": {
@@ -652,13 +652,13 @@
         "home": "101G/200G",
         "date": "2026-09-27",
         "P4-C_user_confirmed": "P4-C is confirmed as tested",
-        "validate": "exit 0, 848 passed, 2026-09-27",
+        "validate": "exit 0, 853 passed, 2026-09-27",
         "sync_stamp": "2026-09-27T20:58:14Z b708e84f…b57f",
         "first_sync": "300 files 10.8MB to hpi-hpc:/sc/home/krishankumar.bhushan/lexhybrid",
         "ls_slurm": ".gitkeep cluster.env.example (no wrappers yet; first is P4-E setup_env.sh)",
-        "job": "2588687",
-        "log": "cluster/logs/fetch_hf_2588687.log",
-        "state": "COMPLETED 0:0, 00:02:03",
+        "job": "2588758",
+        "log": "cluster/logs/preflight_2588758.log",
+        "state": "COMPLETED 0:0, 00:02:00, gx14",
         "python": "3.11.15",
         "torch": "2.11.0+cu128",
         "cuda": "12.8",
@@ -666,7 +666,12 @@
         "check_env": "ENVIRONMENT OK",
         "shellcheck": "clean (uvx shellcheck-py)",
         "hf_hub": "27G",
-        "models": "Qwen3-8B 16G @49e3418; Qwen3-1.7B 3.3G @ea980cb (pinned); Qwen3-0.6B 1.2G @da87bfb; flair 1.4G @69c73dd (pinned); bge-m3 2.2G @5617a9f; bge-reranker-v2-m3 2.2G @953dc6f; mDeBERTa-nli 1.1G @b5113eb"
+        "models": "Qwen3-8B 16G @49e3418; Qwen3-1.7B 3.3G @ea980cb (pinned); Qwen3-0.6B 1.2G @da87bfb; flair 1.4G @69c73dd (pinned); bge-m3 2.2G @5617a9f; bge-reranker-v2-m3 2.2G @953dc6f; mDeBERTa-nli 1.1G @b5113eb",
+        "local_verify_full": "7 arms, 0 problems",
+        "verdict": "PRE-FLIGHT PASSED",
+        "tests": "863 passed, 15 skipped, 21 xfailed",
+        "arms": "7 arms, 0 problems, ARCH identical to Mac",
+        "failed_first": "2588703 (infra: rsync anchors, uv PATH)"
       },
       "verdict": null
     },
@@ -1041,6 +1046,24 @@
       "status": "COMPLETED",
       "log": "logs/fetch_hf_2588687.log",
       "last_checked": "2026-09-27T23:18:10+02:00"
+    },
+    "2588703": {
+      "phase": "P4",
+      "box": "P4-J",
+      "arm": "preflight",
+      "submitted": "2026-09-27T23:26:42+02:00",
+      "status": "FAILED",
+      "log": "logs/preflight_2588703.log",
+      "last_checked": "2026-09-27T23:35:03+02:00"
+    },
+    "2588758": {
+      "phase": "P4",
+      "box": "P4-J",
+      "arm": "preflight",
+      "submitted": "2026-09-27T23:36:22+02:00",
+      "status": "COMPLETED",
+      "log": "logs/preflight_2588758.log",
+      "last_checked": "2026-09-27T23:40:42+02:00"
     }
   },
   "artifacts": {},
@@ -1160,11 +1183,15 @@
         "P4-E",
         "P4-F",
         "P4-G",
-        "P4-H"
+        "P4-H",
+        "P4-I",
+        "P4-J"
       ],
       "jobs": [
         "2588677",
-        "2588687"
+        "2588687",
+        "2588703",
+        "2588758"
       ]
     }
   ],
@@ -1330,7 +1357,19 @@
     "2026-09-27: P4-G: fetch_hf.sh (CPU, GLB_SCRATCH, HF_HOME=$SCRATCH_ROOT/.hf, token from ~/.hf_token, requeue+append; 7 models incl. decision-14 NLI mDeBERTa; Qwen3-1.7B and flair pinned via tokenizer.py / scrub_ner_worker.py, others main; onnx excluded). setup_env.sh --mem 16G->32G. plan_state.py: tick now clears blocked_on when the blocked box is ticked (+test). SC2029 disabled in sync_to_cluster.sh (intended client-side expansion). Job 2588687 submitted.",
     "2026-09-27: job 2588687 -> COMPLETED",
     "2026-09-27: ticked P4-H",
-    "2026-09-27: P4-H: all 7 snapshots present, hub 27G (du -shL per snapshot; the log's per-model du showed only symlink dirs because hf 1.x stores weights in hub/blobs -> fetch_hf.sh now uses du -shL). Record the resolved main commits above as the pins for later loaders."
+    "2026-09-27: P4-H: all 7 snapshots present, hub 27G (du -shL per snapshot; the log's per-model du showed only symlink dirs because hf 1.x stores weights in hub/blobs -> fetch_hf.sh now uses du -shL). Record the resolved main commits above as the pins for later loaders.",
+    "2026-09-27: Commit 745abfe pushed to main (user request): P4-A..H. CI run 36351227023 in progress; check with gh run view 36351227023 next session.",
+    "2026-09-27: CI 36351227023 on 745abfe: success (test 3.11/3.12, package, hygiene, lint).",
+    "2026-09-27: ticked P4-I",
+    "2026-09-27: submitted job 2588703 (P4-J preflight)",
+    "2026-09-27: P4-I: preflight.sh (CPU, GLB_SCRATCH, offline HF_HOME on scratch; check_env + screen_arms verify --full + pytest not cuda/slow/reference; PRE-FLIGHT PASSED only if all exit 0; --qos=aisc from port map omitted: earlier jobs ran without it, and an unknown qos would reject at submit) + test. Job 2588703.",
+    "2026-09-27: job 2588703 -> FAILED",
+    "2026-09-27: Job 2588703 (preflight) FAILED 1:0 on gx14 -- infrastructure, not a measurement. log=cluster/logs/preflight_2588703.log tail: 'PRE-FLIGHT FAILED: environment == uv.lock pytest'. (1) check_env: 'uv not found on PATH' (uv at ~/.local/bin, not on batch PATH). (2) 10 pytest failures: ModuleNotFoundError lexhybrid.data.evalsets / lexhybrid.data.probes -- .rsync-exclude 'data/evalsets/', 'data/probes/' unanchored, so rsync also dropped lexhybrid/data/{evalsets,probes}. verify --full passed on the cluster (7 arms, 0 problems, ARCH identical to Mac); 837 passed. Fix + test + resubmit once (rule g).",
+    "2026-09-27: submitted job 2588758 (P4-J preflight)",
+    "2026-09-27: Fix for 2588703: .rsync-exclude data/* anchored (/data/...), + tests test_every_source_file_reaches_the_cluster (real rsync over every lexhybrid/scripts/configs/tests source) and test_data_excludes_are_anchored_to_the_root (both fail on the old rules); preflight.sh exports ~/.local/bin on PATH + test_wrappers_that_check_the_env_can_find_uv. validate exit 0, 858 passed. Resubmitted once: job 2588758 (evalsets/probes now present on the cluster).",
+    "2026-09-27: job 2588758 -> COMPLETED",
+    "2026-09-27: ticked P4-J",
+    "2026-09-27: P4-J: scrub test skipped on the cluster (envs/scrub not built there) -- P4-L's scrub at scale needs 'uv sync --locked --project envs/scrub' in a job first (add to pack_corpus.sh or setup_env.sh)."
   ],
   "open_questions": []
 }
