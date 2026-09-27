@@ -1,7 +1,8 @@
 """Normalization layers.
 
-Ported unchanged from the reference. ``RMSNorm`` computes in the input dtype with no fp32
-upcast; that is recorded defect 10 and is fixed in P2-E, not here, so the P1 parity fixtures hold.
+Ported from the reference. P2-E (defect 10): ``RMSNorm`` computes in fp32 and casts back to the
+input dtype. The reference squared and averaged in the activation dtype, so a bf16 model lost the
+mean-square to bf16's 8-bit mantissa. For fp32 inputs the computation is unchanged bit for bit.
 """
 
 import torch
@@ -22,9 +23,9 @@ class RMSNorm(nn.Module):
         self.weight = nn.Parameter(torch.ones(dim))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        rms = torch.sqrt(torch.mean(x**2, dim=-1, keepdim=True) + self.eps)
-        x_norm = x / rms
-        return self.weight * x_norm
+        x32 = x.float()
+        rms = torch.sqrt(torch.mean(x32**2, dim=-1, keepdim=True) + self.eps)
+        return (self.weight.float() * (x32 / rms)).to(x.dtype)
 
 
 def get_norm_layer(norm_type: str, dim: int, eps: float = 1e-6) -> nn.Module:

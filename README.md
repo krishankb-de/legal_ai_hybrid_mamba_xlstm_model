@@ -1,6 +1,6 @@
 # lexhybrid — a DACH legal, citation-faithful, retrieval-gated hybrid Mamba-3 / xLSTM decoder
 
-**Status: P0–P1 complete, 38/192 checkboxes; current phase P2.**
+**Status: P0–P2 complete, 65/192 checkboxes; current phase P3.**
 
 This repository is being built phase by phase from `LEGAL_BUILD_PLAN.md`. It ports the backbone, kernels, decode cache, packing, tests and measurement discipline of a finished medical research codebase (hybrid Mamba-3 + mLSTM + attention, PyTorch Lightning + Hydra, measured on the HPI aisc H100 cluster) into a production-grade package for German / Austrian / Swiss / EU law, and replaces everything domain-specific: tokenizer, teacher, corpus, targets, decode loop, sequence length.
 
@@ -20,15 +20,15 @@ What it does not claim (see the blueprint and the results documents under `analy
 | `scripts/plan_state.py` | the helper: `resume`, `tick`, `job`, `check`, … |
 | `CLAUDE.md` | instruction card for the implementing model |
 | `pyproject.toml`, `uv.lock`, `.python-version` | the environment: one lock for macOS arm64 and Linux x86_64, Python 3.11, torch 2.11.0 (cu128 on Linux) |
-| `lexhybrid/` | the package: `config`, `layers`, `kernels` (SSD, TFLA, selective scan), `models`, `decoding`, `training`, `eval`, `utils`, `data`; `retrieval`, `verifier` and `renderer` arrive in P7 |
-| `configs/` | Hydra configs: `model/`, `trainer/`, `dataset/`, `callbacks/` |
-| `scripts/` | `validate.sh` and its gate scripts, evaluation, profiling and comparison scripts, `dump_reference_parity.py`; `scripts/slurm/` arrives in P4 |
+| `lexhybrid/` | the package: `config`, `layers`, `kernels` (SSD, TFLA, selective scan), `models` (hybrid LM, MTP head, slab loss), `decoding` (cached and uncached greedy/sample/beam, pointer constraints, best-of-n), `training` (pretraining module, distillation), `eval`, `utils`, `data`; `retrieval`, `verifier` and `renderer` arrive in P7 |
+| `configs/` | Hydra configs: `model/` (the legal base, its matched Transformer, the legacy ablation, the screen variants, the reference replicas), `trainer/`, `dataset/`, `callbacks/`, `distill/` |
+| `scripts/` | `validate.sh` and its gate scripts; `train_pretrain.py` (Hydra entry point), `screen_arms.py` (the P5 arm table), `param_counts.py`; evaluation, profiling and comparison scripts; `dump_reference_parity.py`; `scripts/slurm/` arrives in P4 |
 | `tests/` | the pytest suite; `tests/fixtures/reference_parity/` holds what the medical reference computed, the record since `Reference/` was deleted at P1-Z |
 | `.github/workflows/ci.yml` | lint, tests on Python 3.11 and 3.12, hygiene and package jobs on every push and pull request |
 | `Docs/REFERENCE_PORT_MAP.md` | module-by-module port spec and the 18 recorded defects |
 | `Docs/analysis_TEMPLATE.md` | results write-up skeleton |
 | `Docs/Hybrid Mamba–xLSTM Codebase Review and DACH Legal AI Blueprint.md` | the design blueprint |
-| `analysis/` | measured results, from P4 onward |
+| `analysis/` | `param_counts.md` (computed from the configs); measured results from P4 onward |
 
 ## Working on it
 
@@ -47,7 +47,7 @@ Commits and pushes are the maintainer's decision; every push runs `.github/workf
 |---|---|---|
 | P0 | Plan of record | ✅ 7/7 |
 | P1 | Bootstrap and faithful port | ✅ 31/31 |
-| P2 | Correctness fixes, decoder deltas, legal configs | ⬜ 0/27 |
+| P2 | Correctness fixes, decoder deltas, legal configs | ✅ 27/27 |
 | P3 | Data pipeline at smoke scale | ⬜ 0/26 |
 | P4 | Cluster bring-up, corpus at scale, profiling | ⬜ 0/27 |
 | P5 | Pre-registered screen | ⬜ 0/10 |

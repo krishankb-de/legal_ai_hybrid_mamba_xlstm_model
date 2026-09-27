@@ -21,7 +21,7 @@ from lexhybrid.kernels.selective_scan.scan_interface import (
     selective_scan_sequential_reference,
 )
 from lexhybrid.kernels.ssd import ssd_chunked_scan, ssd_sequential_reference, ssd_step
-from lexhybrid.kernels.tfla import sequential_mlstm_reference, tfla_forward_parallel
+from lexhybrid.kernels.tfla import TFLAFallbackError, sequential_mlstm_reference, tfla_forward_parallel
 from lexhybrid.layers.mamba_block import MambaBlock
 from lexhybrid.layers.rotary import TWO_PI, apply_rotary, cumulative_angles
 
@@ -264,9 +264,170 @@ def test_tfla_clamp_hit_rate_is_documented(forget_bias):
 def test_tfla_exact_survives_extreme_decay(forget_bias, chunk_size):
     """The overflow guard: re-centring alone produced NaN here; the sequential fallback does not."""
     q, k, v, i_gate, f_gate = _tfla_fixture(forget_bias)
-    got = tfla_forward_parallel(q, k, v, i_gate, f_gate, chunk_size=chunk_size, tfla_impl="exact")
+    got = tfla_forward_parallel(
+        q, k, v, i_gate, f_gate, chunk_size=chunk_size, tfla_impl="exact", fallback="sequential"
+    )
     assert torch.isfinite(got).all()
     assert rel_max_err(got, sequential_mlstm_reference(q, k, v, i_gate, f_gate)) <= TOL
+
+
+@pytest.mark.parametrize("chunk_size", [64, 128])
+def test_tfla_fallback_is_an_error_unless_configured(chunk_size):
+    """P2-C: the slow path is a configured choice; by default a too-wide chunk raises."""
+    q, k, v, i_gate, f_gate = _tfla_fixture(-2.0)
+    with pytest.raises(TFLAFallbackError, match="half-range"):
+        tfla_forward_parallel(q, k, v, i_gate, f_gate, chunk_size=chunk_size, tfla_impl="exact")
+    with pytest.raises(ValueError, match="fallback"):
+        tfla_forward_parallel(q, k, v, i_gate, f_gate, chunk_size=chunk_size, fallback="silent")
+
+
+def _packed_tfla_inputs(seq_len: int, boundaries: dict, forget_bias: float = 1.0, seed: int = 0):
+    """Two rows with different boundary sets; doc_ids increase at each listed position."""
+    torch.manual_seed(seed)
+    shape = (2, 2, seq_len, 8)
+    q, v = torch.randn(shape), torch.randn(shape)
+    k = torch.randn(shape) / 8**0.5
+    i_gate = torch.exp(torch.randn(shape) * 0.5 - 1.0)
+    f_gate = torch.sigmoid(torch.randn(shape) * 0.5 + forget_bias)
+    doc_ids = torch.zeros(2, seq_len, dtype=torch.long)
+    for row, cuts in boundaries.items():
+        for cut in cuts:
+            doc_ids[row, cut:] += 1
+    return q, k, v, i_gate, f_gate, doc_ids
+
+
+def _tfla_per_document(q, k, v, i_gate, f_gate, doc_ids, **kw):
+    out = torch.zeros_like(q)
+    for b in range(q.shape[0]):
+        ids = doc_ids[b]
+        starts = [0] + [t for t in range(1, ids.numel()) if ids[t] != ids[t - 1]] + [ids.numel()]
+        for s, e in zip(starts, starts[1:]):
+            out[b : b + 1, :, s:e] = tfla_forward_parallel(
+                *(t[b : b + 1, :, s:e] for t in (q, k, v, i_gate, f_gate)), **kw
+            )
+    return out
+
+
+PACKED_CASES = [
+    # (chunk, L, {row: boundary positions}) -- mid-chunk, on a chunk edge, several per chunk
+    (8, 37, {0: [13], 1: [8, 16, 17]}),
+    (16, 64, {0: [16], 1: [5, 40]}),
+    (16, 100, {0: [31, 32, 33], 1: [48, 99]}),
+    (64, 100, {0: [64], 1: [1, 50, 63]}),
+]
+
+
+@pytest.mark.parametrize(
+    "chunk_size,seq_len,boundaries", PACKED_CASES, ids=[f"chunk{c}-L{n}" for c, n, _ in PACKED_CASES]
+)
+def test_tfla_packed_equals_per_document(chunk_size, seq_len, boundaries):
+    """Defect 15 (P2-D): resets inside the kernel equal running every document alone, and equal
+    the fp64 oracle with resets, at 1e-6."""
+    q, k, v, i_gate, f_gate, doc_ids = _packed_tfla_inputs(seq_len, boundaries)
+    kw = dict(chunk_size=chunk_size, tfla_impl="exact")
+    packed = tfla_forward_parallel(q, k, v, i_gate, f_gate, doc_ids=doc_ids, **kw)
+    alone = _tfla_per_document(q, k, v, i_gate, f_gate, doc_ids, **kw)
+    oracle = sequential_mlstm_reference(q, k, v, i_gate, f_gate, doc_ids=doc_ids)
+    assert rel_max_err(packed, alone) <= TOL, f"packed vs per-document {rel_max_err(packed, alone):.3e}"
+    assert rel_max_err(packed, oracle) <= TOL, f"packed vs oracle {rel_max_err(packed, oracle):.3e}"
+
+
+def test_tfla_documents_do_not_leak():
+    """Changing document A cannot change a single bit of document B's output."""
+    q, k, v, i_gate, f_gate, doc_ids = _packed_tfla_inputs(48, {0: [20], 1: [20]})
+    base = tfla_forward_parallel(q, k, v, i_gate, f_gate, chunk_size=16, tfla_impl="exact", doc_ids=doc_ids)
+    q2, v2 = q.clone(), v.clone()
+    q2[:, :, :20] += 5.0
+    v2[:, :, :20] -= 3.0
+    moved = tfla_forward_parallel(
+        q2, k, v2, i_gate, f_gate, chunk_size=16, tfla_impl="exact", doc_ids=doc_ids
+    )
+    assert torch.equal(base[:, :, 20:], moved[:, :, 20:])
+    assert not torch.allclose(base[:, :, :20], moved[:, :, :20])
+
+
+def test_tfla_sequential_fallback_resets_at_boundaries():
+    """The fallback, when configured, honours document boundaries too."""
+    q, k, v, i_gate, f_gate, doc_ids = _packed_tfla_inputs(64, {0: [10, 37], 1: [32]}, forget_bias=-3.0)
+    got = tfla_forward_parallel(
+        q, k, v, i_gate, f_gate, chunk_size=64, tfla_impl="exact", fallback="sequential", doc_ids=doc_ids
+    )
+    assert rel_max_err(got, sequential_mlstm_reference(q, k, v, i_gate, f_gate, doc_ids=doc_ids)) <= TOL
+
+
+@pytest.mark.parametrize("docs", [False, True], ids=["contiguous", "packed"])
+@pytest.mark.parametrize("seq_len", [1, 15, 16, 17, 50])
+def test_tfla_final_state_matches_oracle(seq_len, docs):
+    """`return_state` gives the (C, n) the step recurrence continues from (P2-G), on partial chunks."""
+    q, k, v, i_gate, f_gate, doc_ids = _packed_tfla_inputs(
+        seq_len, {0: [seq_len // 2] if seq_len > 2 else [], 1: []}
+    )
+    ids = doc_ids if docs else None
+    _, C, n = tfla_forward_parallel(
+        q, k, v, i_gate, f_gate, chunk_size=16, tfla_impl="exact", doc_ids=ids, return_state=True
+    )
+    _, C_ref, n_ref = sequential_mlstm_reference(q, k, v, i_gate, f_gate, doc_ids=ids, return_state=True)
+    assert rel_max_err(C, C_ref) <= TOL and rel_max_err(n, n_ref) <= TOL
+
+
+def _tfla_model(chunk_size: int, forget_bias: float):
+    from lexhybrid import HybridConfig, HybridLanguageModel
+
+    torch.manual_seed(0)
+    cfg = HybridConfig(
+        vocab_size=128,
+        dim=64,
+        num_layers=2,
+        layer_pattern=["mlstm", "mamba3"],
+        head_dim=16,
+        mamba3_d_state=16,
+        mamba3_head_dim=16,
+        tfla_impl="exact",
+        tfla_fallback="error",
+        mlstm_chunk_size=chunk_size,
+        mlstm_forget_gate_bias_init=forget_bias,
+        max_position_embeddings=512,
+        dropout=0.0,
+    )
+    return HybridLanguageModel(cfg).eval()
+
+
+@pytest.mark.parametrize("chunk_size,forget_bias", [(128, 3.0)], ids=["chunk=128, forget_bias=3.0"])
+def test_tfla_fast_path_at_init(chunk_size, forget_bias):
+    """Defect 9: the shipped configuration runs exact TFLA on its factorised path at init. With
+    tfla_fallback="error" the forward would raise if any chunk needed the fallback."""
+    model = _tfla_model(chunk_size, forget_bias)
+    with torch.no_grad():
+        out = model(torch.randint(0, 128, (2, 512))).logits
+    assert torch.isfinite(out).all()
+
+
+def test_tfla_needed_the_fallback_at_init_with_the_reference_forget_bias():
+    """The record behind defect 9: forget bias 0 gives f = 0.5 and a half-range of
+    0.5 * 128 * ln 2 = 44.4 > 40 at chunk 128, so the reference ran the fallback from step 0."""
+    model = _tfla_model(128, 0.0)
+    with torch.no_grad(), pytest.raises(TFLAFallbackError, match=r"half-range is 4[45]\.[0-9]"):
+        model(torch.randint(0, 128, (2, 512)))
+
+
+def test_tfla_chunk_size_reaches_kernel(monkeypatch):
+    """Defect 9: the block's chunk size, not the sequence length, sets the kernel's chunk."""
+    import lexhybrid.kernels.tfla.tfla_interface as tfla
+    from lexhybrid.layers.mlstm_block import mLSTMBlock
+
+    seen = []
+    real = tfla.tfla_forward_parallel
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs["chunk_size"])
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(tfla, "tfla_forward_parallel", spy)
+    for configured, length, expected in [(16, 96, 16), (64, 200, 64), (128, 40, 40)]:
+        block = mLSTMBlock(dim=32, head_dim=16, tfla_impl="exact", chunk_size=configured).eval()
+        with torch.no_grad():
+            block(torch.randn(1, length, 32))
+        assert seen[-1] == expected, f"chunk {configured}, L {length}: kernel saw {seen[-1]}"
 
 
 # ---------------------------------------------------------------------------------------------
@@ -332,6 +493,57 @@ def test_ssd_document_isolation_is_bit_exact(chunk_size):
     out = ssd_chunked_scan(chunk_size=chunk_size, doc_ids=ids, **perturbed)
     assert torch.equal(ref[:, boundary:], out[:, boundary:]), "doc B leaked from doc A"
     assert not torch.allclose(ref[:, :boundary], out[:, :boundary]), "doc A should have changed"
+
+
+@pytest.mark.parametrize("docs", [False, True], ids=["contiguous", "packed"])
+@pytest.mark.parametrize("seqlen", [1, 63, 64, 65, 200], ids=lambda n: f"L={n}")
+def test_ssd_final_state_matches_oracle(seqlen, docs):
+    """Defect 7 (P2-F): the state after the last token, including a partial last chunk -- where the
+    reference's fresh padding segment returned zeros -- and a document starting inside it."""
+    kw = ssd_fixture((2, seqlen, 4, 8, 1, 16))
+    ids = None
+    if docs and seqlen > 1:
+        ids = torch.zeros(2, seqlen, dtype=torch.long)
+        ids[0, seqlen // 3 :] = 1
+        ids[1, max(seqlen - 3, 1) :] = 1  # a document starting in the last chunk
+    beta = kw["dt"] * 0.5
+    extra = [(beta, torch.roll(kw["B"], 1, 1), torch.roll(kw["x"], 1, 1))]  # a trapezoid-like term
+    y, state = ssd_chunked_scan(chunk_size=64, doc_ids=ids, extra_terms=extra, return_final_state=True, **kw)
+    y_ref, state_ref = ssd_sequential_reference(doc_ids=ids, extra_terms=extra, return_final_state=True, **kw)
+    assert rel_max_err(y, y_ref) <= 1e-12
+    assert rel_max_err(state, state_ref) <= 1e-6, f"final state {rel_max_err(state, state_ref):.3e}"
+    assert state.abs().max() > 0
+
+
+@pytest.mark.parametrize("autocast", [False, True], ids=["bf16-inputs", "bf16-autocast"])
+def test_ssd_state_is_fp32_under_autocast(autocast):
+    """Defect 16 (P2-E): the carried state is fp32 by declaration, whatever the activations are."""
+    kw = {
+        k: v.to(torch.bfloat16) if v.is_floating_point() else v for k, v in ssd_fixture(SSD_SHAPES[0]).items()
+    }
+    kw["dt"], kw["A"], kw["D"] = (
+        kw["dt"].float(),
+        kw["A"].float(),
+        kw["D"].float(),
+    )  # as Mamba3Block passes them
+    with torch.autocast("cpu", dtype=torch.bfloat16, enabled=autocast):
+        y, state = ssd_chunked_scan(chunk_size=32, return_final_state=True, **kw)
+    assert state.dtype is torch.float32
+    assert y.dtype is torch.bfloat16
+
+
+def test_tfla_state_is_fp32_for_bf16_inputs():
+    """The TFLA carried state is fp32 too (P2-E), so the cache a bf16 forward writes stays fp32."""
+    q, k, v, i_gate, f_gate, _ = _packed_tfla_inputs(40, {0: [], 1: []})
+    h16, C, n = tfla_forward_parallel(
+        *(t.to(torch.bfloat16) for t in (q, k, v, i_gate, f_gate)),
+        chunk_size=16,
+        tfla_impl="exact",
+        return_state=True,
+    )
+    assert h16.dtype is torch.bfloat16 and C.dtype is torch.float32 and n.dtype is torch.float32
+    _, C_ref, _ = sequential_mlstm_reference(q, k, v, i_gate, f_gate, return_state=True)
+    assert rel_max_err(C, C_ref) < 0.05
 
 
 def test_ssd_extra_terms_are_linear():

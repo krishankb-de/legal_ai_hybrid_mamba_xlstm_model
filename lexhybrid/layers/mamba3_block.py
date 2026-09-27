@@ -19,8 +19,10 @@ Two deliberate departures from stock Mamba-2, recorded so they are not mistaken 
   slices of ``in_proj`` exist whether or not their flags are on, so parameter count is identical
   across arms and turning a flag off is exactly "zero that slice".
 
-P1 port: unchanged apart from the ``doc_ids`` name. ``forward`` does not yet write the decode
-cache (defect 7, P2-F).
+P2-F (defect 7): ``forward(x, cache)`` fills an empty decode cache -- the fp32 SSM state after the
+last token, the last ``conv_size - 1`` pre-convolution columns, the trapezoid's previous ``B`` and
+``x``, the fp64 rotation angle and ``seen`` -- so a prompt is consumed in one chunked pass and
+``step`` continues from it. The reference prefilled token by token.
 """
 
 import math
@@ -32,7 +34,7 @@ import torch.nn.functional as F
 from lexhybrid.kernels.ssd import ssd_chunked_scan
 from lexhybrid.kernels.ssd.ssd_reference import ssd_step
 from lexhybrid.layers.normalization import RMSNorm
-from lexhybrid.layers.rotary import apply_rotary, cumulative_angles
+from lexhybrid.layers.rotary import apply_rotary, cumulative_angles_fp64
 
 
 def heavy_tail_activation(x: torch.Tensor) -> torch.Tensor:
@@ -234,17 +236,29 @@ class Mamba3Block(nn.Module):
 
         Argument order is load-bearing: ``hybrid_lm.py`` passes these positionally through
         ``torch.utils.checkpoint.checkpoint``.
+
+        Args:
+            cache: an EMPTY cache from ``allocate_inference_cache`` (``seen == 0``); when given, it
+                is filled with the state after the last token (prefill, P2-F). A filled cache is
+                continued with ``step``.
+            doc_ids: optional (batch, seqlen) document ids; the state resets at every change.
         """
+        if cache is not None and cache.get("seen", 0) != 0:
+            raise ValueError(
+                "Mamba3Block.forward fills an empty cache (a prefill); continue a filled cache with step()"
+            )
         batch, seqlen, _ = x.shape
         proj = self.in_proj(x)
         z, xs, B, C, dt_raw, a_raw, trap_raw, angles = torch.split(proj, self._split, dim=-1)
 
         if self.conv1d is not None:
-            xbc = torch.cat([xs, B, C], dim=-1).transpose(1, 2)
-            xbc = self.conv1d(xbc)[..., :seqlen].transpose(1, 2)
+            raw = torch.cat([xs, B, C], dim=-1)
+            xbc = self.conv1d(raw.transpose(1, 2))[..., :seqlen].transpose(1, 2)
             xbc = self.activation(xbc)
             if doc_ids is not None:
-                xbc = self._mask_conv_across_documents(torch.cat([xs, B, C], dim=-1), xbc, doc_ids)
+                xbc = self._mask_conv_across_documents(raw, xbc, doc_ids)
+            if cache is not None:
+                cache["conv_state"] = self._conv_tail(raw, doc_ids)
             xs, B, C = torch.split(xbc, [self.inner_dim, self.bc_dim, self.bc_dim], dim=-1)
 
         dt = F.softplus(dt_raw.float() + self.dt_bias)
@@ -258,22 +272,28 @@ class Mamba3Block(nn.Module):
         C = self.C_norm(C.view(batch, seqlen, self.ngroups, self.d_state))
 
         xs = xs.view(batch, seqlen, self.nheads, self.head_dim)
-        y = self._scan(xs, dt, A, B, C, trap_raw, angles, doc_ids)
+        y = self._scan(xs, dt, A, B, C, trap_raw, angles, doc_ids, cache)
 
         y = y.reshape(batch, seqlen, self.inner_dim)
         if self.out_norm is not None:
             y = self.out_norm(y)
         return self.out_proj(y * self.activation(z))
 
-    def _scan(self, xs, dt, A, B, C, trap_raw, angles, doc_ids):
-        """SSD scan, plus the trapezoidal term and the complex-state rotation when enabled."""
+    def _scan(self, xs, dt, A, B, C, trap_raw, angles, doc_ids, cache=None):
+        """SSD scan, plus the trapezoidal term and the complex-state rotation when enabled.
+
+        With ``cache``, also records what ``step`` needs to continue after the last token.
+        """
         if self.use_rope:
             # Rotate BEFORE the trapezoid shifts anything (paper Prop. 4): the beta term's B_{t-1}
             # must carry its own Theta_{t-1}.
             theta = self.theta_max * torch.tanh(angles.float())
-            theta_angles = cumulative_angles(dt[..., :1], theta, doc_ids=doc_ids)
+            angles64 = cumulative_angles_fp64(dt[..., :1], theta, doc_ids=doc_ids)
+            theta_angles = angles64.to(theta.dtype)
             B = apply_rotary(B, theta_angles, self.rope_fraction)
             C = apply_rotary(C, theta_angles, self.rope_fraction)
+            if cache is not None:
+                cache["angle_state"] = angles64[:, -1:].clone()  # (batch, 1, n_angles), fp64
         if self.B_bias is not None:
             B = B.repeat_interleave(self.nheads // self.ngroups, dim=2) + self.B_bias
             C = C.repeat_interleave(self.nheads // self.ngroups, dim=2) + self.C_bias
@@ -282,7 +302,7 @@ class Mamba3Block(nn.Module):
         if self.use_trapezoid:
             coeff, extra = self._trapezoid_terms(xs, dt, A, B, trap_raw, doc_ids)
 
-        return ssd_chunked_scan(
+        out = ssd_chunked_scan(
             xs,
             dt,
             A,
@@ -293,7 +313,32 @@ class Mamba3Block(nn.Module):
             doc_ids=doc_ids,
             coeff=coeff,
             extra_terms=extra,
+            return_final_state=cache is not None,
         )
+        if cache is None:
+            return out
+        y, cache["ssm_state"] = out
+        if self.use_trapezoid:
+            # The last token's rotated, biased B and its x: the beta term of the next step.
+            cache["B_prev"], cache["x_prev"] = B[:, -1].float(), xs[:, -1].float()
+        cache["seen"] = xs.shape[1]
+        return y
+
+    def _conv_tail(self, raw: torch.Tensor, doc_ids: torch.Tensor | None) -> torch.Tensor:
+        """The last ``conv_size - 1`` pre-convolution columns, (batch, channels, conv_size - 1).
+
+        Positions of any document other than the last token's are zeroed, so the next ``step``
+        cannot see across a boundary; a prompt shorter than the window is left-padded with zeros.
+        """
+        k1 = max(self.conv_size - 1, 0)
+        batch, seqlen, channels = raw.shape
+        tail = raw[:, max(seqlen - k1, 0) :]
+        if doc_ids is not None and k1:
+            ids = doc_ids[:, max(seqlen - k1, 0) :]
+            tail = tail * (ids == doc_ids[:, -1:]).unsqueeze(-1).to(tail.dtype)
+        if tail.shape[1] < k1:
+            tail = F.pad(tail, (0, 0, k1 - tail.shape[1], 0))
+        return tail.transpose(1, 2).detach()
 
     def _trapezoid_terms(self, xs, dt, A, B, trap_raw, doc_ids):
         """Exponential-trapezoidal discretization (paper Prop. 1).
@@ -355,16 +400,19 @@ class Mamba3Block(nn.Module):
     # -- O(1) recurrent decode (reference M6-A) ---------------------------------------------------
     supports_step = True
 
-    def allocate_inference_cache(self, batch_size, device=None, dtype=torch.float32):
+    def allocate_inference_cache(self, batch_size, device=None, dtype=torch.float32, max_seq_len=None):
         """Everything the recurrence needs to continue from token t to t+1, and nothing that grows.
+
+        ``max_seq_len`` is accepted for interface parity with the attention KV cache and ignored.
 
         ``nheads * head_dim * d_state`` state elements, a conv window of ``conv_size - 1``, and,
         with RoPE, one accumulated angle per rotated pair (fp64, as the chunked path accumulates).
         """
         device = device or self.in_proj.weight.device
         cache = {
+            # fp32 whatever `dtype` is: `step` runs the recurrence in fp32 (P2-E).
             "ssm_state": torch.zeros(
-                batch_size, self.nheads, self.head_dim, self.d_state, device=device, dtype=dtype
+                batch_size, self.nheads, self.head_dim, self.d_state, device=device, dtype=torch.float32
             ),
             "seen": 0,
         }

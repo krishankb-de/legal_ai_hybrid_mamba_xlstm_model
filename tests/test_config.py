@@ -65,8 +65,28 @@ def test_every_mamba3_block_parameter_is_reachable_from_the_config():
         if n not in ("self", "dim") and p.kind is not inspect.Parameter.VAR_KEYWORD
     }
     fields = {f.name for f in dataclasses.fields(HybridConfig)}
-    shared = {"expand_factor", "use_hybrid_norm"}  # unprefixed, shared keys (defect 4 tracks expand_factor)
+    shared = {"use_hybrid_norm"}  # injected by HybridBlock; expand_factor has its own field since P2-A
     assert sorted(lv for lv in levers - shared if f"mamba3_{lv}" not in fields) == []
+
+
+def test_every_mlstm_block_parameter_is_reachable_from_the_config():
+    """Defect 2's twin: every mLSTMBlock lever is a shared field or an `mlstm_*` field."""
+    import inspect
+
+    from lexhybrid.layers.hybrid_block import _MLSTM_SHARED
+    from lexhybrid.layers.mlstm_block import mLSTMBlock
+
+    params = inspect.signature(mLSTMBlock.__init__).parameters
+    levers = {n for n in params if n not in ("self", "dim")}
+    fields = {f.name for f in dataclasses.fields(HybridConfig)}
+    unreachable = sorted(
+        lv
+        for lv in levers
+        if not (
+            (lv in _MLSTM_SHARED and (lv in fields or lv == "use_hybrid_norm")) or f"mlstm_{lv}" in fields
+        )
+    )
+    assert unreachable == []
 
 
 def test_get_layer_config_covers_every_mixer():
@@ -74,7 +94,7 @@ def test_get_layer_config_covers_every_mixer():
     assert c.get_layer_config(0)["scan_impl"] == "legacy"
     assert c.get_layer_config(1)["d_state"] == 128
     assert c.get_layer_config(2)["tfla_impl"] == "legacy"
-    assert c.get_layer_config(3)["rope_theta"] == 10000.0
+    assert c.get_layer_config(3)["rope_theta"] == 500000.0  # P2-H
 
 
 def test_save_pretrained_writes_config_json(tmp_path):

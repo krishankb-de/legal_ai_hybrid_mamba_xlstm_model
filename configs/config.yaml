@@ -1,7 +1,7 @@
 # Hydra entry point. Override on the command line, e.g.
 #   python scripts/train_pretrain.py model=hybrid_legal_base dataset=mixture_pretrain trainer=h100_multi_ddp
 defaults:
-  - model: ref_hybrid_m3
+  - model: hybrid_legal_base
   - dataset: synthetic
   - trainer: cpu_debug
   - callbacks: default
@@ -22,3 +22,11 @@ wandb:
   enabled: false
   project: ${project_name}
   name: ${experiment_name}
+
+# Hydra's own run directory sits under the run's output_dir, and the working directory is left
+# alone (paths in the configs are absolute or repository-relative).
+hydra:
+  run:
+    dir: ${output_dir}/hydra/${now:%Y-%m-%d_%H-%M-%S}
+  job:
+    chdir: false

@@ -1,0 +1,7 @@
+# Online logit distillation (decision 9) from the default teacher (decision 8). P4-U measures
+# whether Qwen3-8B-Base fits at 4,096-token rows on 4 x H100; until then this is the teacher.
+teacher: Qwen/Qwen3-1.7B-Base
+dtype: bfloat16
+alpha: 0.5
+temperature: 2.0
+slab: 512

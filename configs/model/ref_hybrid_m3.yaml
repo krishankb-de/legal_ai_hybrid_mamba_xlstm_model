@@ -48,6 +48,9 @@ proj_factor: 2
 mlstm_gate_soft_cap: 15.0
 mlstm_input_gate_bias_init: -10.0
 mlstm_forget_gate_bias_init: 0.0
+# The reference chose the TFLA chunk from the length (32 / 64 / 128 above 2,048 tokens); P4's
+# sanity point is at 16,384 tokens, where it used 128.
+mlstm_chunk_size: 128
 
 # Attention (unused)
 attn_dropout: 0.0
