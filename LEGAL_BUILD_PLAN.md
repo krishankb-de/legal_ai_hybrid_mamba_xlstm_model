@@ -239,7 +239,7 @@ Purpose: reach the aisc cluster from this repo without git, build the environmen
 - [x] **P4-H** Verdict on the sbatch fetch job: `du -sh $HF_HOME/hub` recorded; every model directory present.
 - [x] **P4-I** `scripts/slurm/preflight.sh` (CPU job: `screen_arms.py verify --full`; `pytest -m "not cuda and not slow and not reference"`; ARCH line printed for every arm) submitted with `sbatch`.
 - [x] **P4-J** Verdict on the sbatch preflight job: "PRE-FLIGHT PASSED" in the log; test count recorded.
-- [ ] **P4-J1** `scripts/slurm/gpu_tests.sh` (1 H100: `pytest -m cuda tests/`, plus `check_env.py`) submitted with `sbatch`; record the job id.
+- [x] **P4-J1** `scripts/slurm/gpu_tests.sh` (1 H100: `pytest -m cuda tests/`, plus `check_env.py`) submitted with `sbatch`; record the job id.
 - [ ] **P4-J2** Verdict on the sbatch GPU-test job: every `cuda` test passed (count and log path in evidence); a failure is fixed before any screen job is submitted.
 - [ ] **P4-J3** `scripts/slurm/multigpu_tests.sh` (2 H100: `pytest -m multigpu tests/`) submitted with `sbatch --gpus=2`; record the job id.
 - [ ] **P4-J4** Verdict on the sbatch multi-GPU job: DDP smoke passed with identical gradients across ranks; evidence records the job id and log path.

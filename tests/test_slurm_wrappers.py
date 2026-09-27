@@ -127,3 +127,15 @@ def test_wrappers_that_check_the_env_can_find_uv(path):
     if "scripts/check_env.py" not in body:
         pytest.skip("does not run check_env.py")
     assert "$HOME/.local/bin" in body.split("scripts/check_env.py")[0], "put ~/.local/bin on PATH first"
+
+
+def test_gpu_tests_runs_the_cuda_layer_on_one_gpu():
+    path = SLURM_DIR / "gpu_tests.sh"
+    d, body = directives(path), code(path)
+    assert d.get("gpus") == "1"
+    assert {"ga03", "gx17v1", "gx13v1"} <= set(d["exclude"].split(",")), "GPU jobs skip the faulty nodes"
+    assert "-m cuda" in body and "scripts/check_env.py" in body
+    assert "torch.cuda.is_available()" in body, "fail fast on a node without a visible GPU"
+    assert "SLURM_JOB_ID" in body.split("TORCHINDUCTOR_CACHE_DIR=")[1].splitlines()[0], "fresh cache per job"
+    fail_exit = body.index("exit 1", body.index("GPU TESTS FAILED"))
+    assert fail_exit < body.index('echo "GPU TESTS PASSED"')
