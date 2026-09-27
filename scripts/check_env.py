@@ -21,6 +21,7 @@ import importlib
 import importlib.metadata as md
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -55,11 +56,17 @@ def check_python(expected: str, actual=sys.version_info) -> list[str]:
     return [] if got == expected else [f"python {got} but the environment pins {expected}"]
 
 
+# CSI escape sequences. uv colours its output when FORCE_COLOR is set, even into a pipe, and the CI
+# workflow sets FORCE_COLOR=1: the "# via" annotations then arrived as "\x1b[32m    # via x\x1b[39m"
+# and failed to parse (CI run 36322586655).
+_ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
 def parse_export(text: str) -> list[Requirement]:
     """Requirements from ``uv export --format requirements-txt --no-hashes`` output."""
     reqs = []
     for raw in text.splitlines():
-        line = raw.strip()
+        line = _ANSI.sub("", raw).strip()
         if not line or line.startswith(("#", "-")):
             continue
         reqs.append(Requirement(line))
@@ -103,10 +110,15 @@ def uv_export(root: Path = REPO_ROOT) -> str:
         "--no-hashes",
         "--no-emit-project",
         "--no-header",
+        "--no-annotate",
+        "--color",
+        "never",
         "--format",
         "requirements-txt",
     ]
-    return subprocess.run(cmd, cwd=root, check=True, capture_output=True, text=True).stdout
+    env = {k: v for k, v in os.environ.items() if k not in ("FORCE_COLOR", "CLICOLOR_FORCE")}
+    env["NO_COLOR"] = "1"
+    return subprocess.run(cmd, cwd=root, check=True, capture_output=True, text=True, env=env).stdout
 
 
 def check_cuda_build(platform: str, cuda_version: str | None) -> list[str]:

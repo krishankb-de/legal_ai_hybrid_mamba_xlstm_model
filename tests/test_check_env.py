@@ -1,5 +1,8 @@
 """scripts/check_env.py: the environment-equals-lock check (plan P1-W1)."""
 
+import shutil
+import subprocess
+
 import pytest
 
 from tests.conftest import load_script
@@ -73,3 +76,34 @@ def test_expected_python_reads_the_pin():
 def test_this_environment_passes():
     """The live venv equals the lock (skipped in fast mode; CI and --full run it)."""
     assert CE.main([]) == 0
+
+
+def test_parse_export_ignores_ansi_colour():
+    """CI run 36322586655: FORCE_COLOR=1 made uv colour its "# via" lines, and they failed to parse."""
+    coloured = "absl-py==2.5.0\n\x1b[32m    # via tensorboard\x1b[39m\n\x1b[1mpyyaml==6.0.3\x1b[0m\n"
+    assert [str(r) for r in CE.parse_export(coloured)] == ["absl-py==2.5.0", "pyyaml==6.0.3"]
+
+
+def test_uv_export_asks_for_plain_output(monkeypatch):
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        seen["cmd"], seen["env"] = cmd, kw["env"]
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    monkeypatch.setattr(CE.subprocess, "run", fake_run)
+    monkeypatch.setattr(CE.shutil, "which", lambda _: "/usr/bin/uv")
+    monkeypatch.delenv("UV", raising=False)
+    CE.uv_export()
+    assert "--no-annotate" in seen["cmd"] and seen["cmd"][seen["cmd"].index("--color") + 1] == "never"
+    assert "FORCE_COLOR" not in seen["env"] and seen["env"]["NO_COLOR"] == "1"
+
+
+@pytest.mark.skipif(shutil.which("uv") is None, reason="uv not on PATH")
+def test_live_export_parses_under_force_color(monkeypatch):
+    """The CI condition, reproduced: the real uv, FORCE_COLOR=1, the real lock."""
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    reqs = CE.parse_export(CE.uv_export())
+    names = {r.name for r in reqs}
+    assert {"torch", "numpy", "pytorch-lightning"} <= names
