@@ -11,11 +11,13 @@ label, score], ...]}`` with character offsets into ``text``. Each line of a text
 long lines in chunks of at most ``--max-tokens`` whitespace tokens split after sentence ends;
 ``Sentence(use_tokenizer=False)`` as the model card advises for legal text. Throughput goes to
 stderr at the end. The model is ``flair/ner-german-legal`` at a pinned revision (LER German F1 96.35;
-19 tags), fetched into ``--cache-dir`` (default ``data/hf/hub``) on first use.
+19 tags), read from ``--cache-dir`` (default ``HF_HUB_CACHE``, else ``$HF_HOME/hub``, else
+``data/hf/hub``) and fetched there on first use when the job is online.
 """
 
 import argparse
 import json
+import os
 import re
 import sys
 import time
@@ -25,6 +27,15 @@ MODEL = "flair/ner-german-legal"
 REVISION = "69c73dd705665388224cff919a529dd53750fca6"
 REPO_ROOT = Path(__file__).resolve().parent.parent
 _SENTENCE_END = re.compile(r"(?<=[.!?;:])\s+(?=\S)")
+
+
+def default_cache_dir() -> str:
+    """``HF_HUB_CACHE``, else ``$HF_HOME/hub`` (the cluster's scratch cache), else ``data/hf/hub``."""
+    if os.environ.get("HF_HUB_CACHE"):
+        return os.environ["HF_HUB_CACHE"]
+    if os.environ.get("HF_HOME"):
+        return str(Path(os.environ["HF_HOME"]) / "hub")
+    return str(REPO_ROOT / "data" / "hf" / "hub")
 
 
 def chunks(text: str, max_tokens: int) -> list[tuple[int, str]]:
@@ -92,7 +103,7 @@ def tag(tagger, docs: list[dict], max_tokens: int, batch_size: int) -> list[dict
 
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="German legal NER over JSONL documents (stdin -> stdout).")
-    parser.add_argument("--cache-dir", default=str(REPO_ROOT / "data" / "hf" / "hub"))
+    parser.add_argument("--cache-dir", default=default_cache_dir())
     parser.add_argument("--max-tokens", type=int, default=200)
     parser.add_argument("--batch-size", type=int, default=32)
     args = parser.parse_args(argv)

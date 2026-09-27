@@ -1257,7 +1257,8 @@ def test_scrub_worker_tags_the_model_card_example():
         )
     doc = Document(id="t:1", source="t", jurisdiction="DE", doc_type="decision", licence="DE-UrhG-5",
                    commercial_safe=True, text="Herr W. verstieß gegen § 36 Abs. 7 IfSG.")  # fmt: skip
-    entities, stats = run_worker([doc])
+    # the cache the skip check looked in, whatever HF_HOME / HF_HUB_CACHE say in this shell
+    entities, stats = run_worker([doc], args=("--cache-dir", str(REPO_ROOT / "data" / "hf" / "hub")))
     (person,) = [e for e in entities["t:1"] if e.label == "PER"]
     assert doc.text[person.start : person.end] == "W." and person.score > 0.9 and stats["docs"] == 1
 
@@ -1787,3 +1788,16 @@ def test_sft_split_sentences():
         "Sie verlängert sich.",
         "(2) Weiteres gilt.",
     )
+
+
+def test_scrub_worker_reads_the_jobs_model_cache(script, monkeypatch):
+    """On the cluster the worker must find flair's weights where fetch_hf.sh put them ($HF_HOME)."""
+    worker = script("scrub_ner_worker")
+    monkeypatch.delenv("HF_HUB_CACHE", raising=False)
+    monkeypatch.setenv("HF_HOME", "/sc/scratch/u/lexhybrid/.hf")
+    assert worker.default_cache_dir() == "/sc/scratch/u/lexhybrid/.hf/hub"
+    monkeypatch.setenv("HF_HUB_CACHE", "/elsewhere/hub")
+    assert worker.default_cache_dir() == "/elsewhere/hub"
+    monkeypatch.delenv("HF_HUB_CACHE")
+    monkeypatch.delenv("HF_HOME")
+    assert worker.default_cache_dir().endswith("data/hf/hub")
