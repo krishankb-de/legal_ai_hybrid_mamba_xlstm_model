@@ -151,3 +151,22 @@ def test_peak_memory_slab_loss_on_gpu():
         lambda: torch.nn.functional.cross_entropy(head(hidden).float().view(-1, vocab), targets.view(-1))
     )
     assert slab < 0.5 * full, (slab, full)
+
+
+def test_compiled_flex_attention_matches_eager_per_row():
+    """Job 2588784: under an outer torch.compile, a block mask traced inside the graph was wrong for
+    batch row 1 (drift 0.99). Rows with different document layouts, every row within 1e-4."""
+    torch.backends.cuda.matmul.allow_tf32 = False
+    model = _reduced_base(layer_pattern=["attention"], num_layers=2, attn_impl="flex")
+    ids = torch.randint(0, 1024, (3, 512), device="cuda")
+    doc = torch.zeros(3, 512, dtype=torch.long, device="cuda")
+    doc[0, 200:] = 1
+    doc[1, 64:] = 1
+    doc[1, 300:] = 2
+    doc[2, 128:] = 1  # boundary on the 128 block edge
+    with torch.no_grad():
+        eager = model(ids, doc_ids=doc).logits
+        torch._dynamo.reset()
+        got = torch.compile(model, dynamic=False)(ids, doc_ids=doc).logits
+    drift = [(got[b] - eager[b]).abs().max().item() for b in range(3)]
+    assert max(drift) < 1e-4, drift

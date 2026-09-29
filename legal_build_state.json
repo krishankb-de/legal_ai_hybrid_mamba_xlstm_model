@@ -1,12 +1,12 @@
 {
   "current_phase": "P4",
-  "last_updated": "2026-09-27T23:53:34+02:00",
+  "last_updated": "2026-09-28T00:03:54+02:00",
   "status": "P4 in progress: A-H done (env job 2588677, HF fetch 2588687, 27G); P4-A..H pushed to main 745abfe, CI 36351227023 green.",
   "plan_of_record": "LEGAL_BUILD_PLAN.md",
   "helper": "python3 scripts/plan_state.py <cmd> (stdlib only; the ONLY writer of LEGAL_BUILD_PLAN.md checkboxes and legal_build_state.json)",
   "scope": "Build lexhybrid: port the reference backbone/kernels/decode/tests (P1), fix 18 recorded defects and add legal decoder deltas (P2), data pipeline (P3), cluster + corpus + profiling (P4), pre-registered screen (P5), full backbone (P6), retrieval/renderer/verifier (P7), post-training (P8), evaluation (P9), release (P10); P11 optional. Local only, no git until the user writes 'git go'. Reference/ deleted at P1-Z by the user.",
   "blocked_on": null,
-  "next_action": "P4-J2 fix: localize compile batch-row-1 drift on GPU -- diagnostic job (compile vs eager per mixer: mamba3-only, mlstm-only, attention-only reduced models, batch 2; also batch rows swapped, and flex vs sdpa) ; then fix + GPU test; rerun gpu_tests.sh. No P4-J3+ GPU screen work before this is green.",
+  "next_action": "P4-J2 fix: add CUDA test in tests/test_gpu.py (attention-only flex model, batch 2 with DIFFERENT per-row doc layouts, compiled vs eager < 1e-4 per row); bash scripts/validate.sh; sync; sbatch diag_compile.sh + gpu_tests.sh; verdict P4-J2 when all cuda tests pass. Follow-up: build the mask once per forward in the backbone (fewer graph breaks) -- measure in P4-P.",
   "decisions": {
     "01_init_road": "From scratch first: Qwen3 tokenizer + logit-KL from an open Qwen3-*-Base teacher. Qwen3 conversion = P11, optional, on user instruction only. (user 2026-09-27)",
     "02_corpus": "Open-licensed sources PLUS a research-exception arm; every document carries licence + commercial_safe; research_only never enters a shippable arm. (user 2026-09-27)",
@@ -1074,6 +1074,15 @@
       "status": "FAILED",
       "log": "logs/gpu_tests_2588779.log",
       "last_checked": "2026-09-27T23:53:34+02:00"
+    },
+    "2588784": {
+      "phase": "P4",
+      "box": "P4-J2",
+      "arm": "diag_compile",
+      "submitted": "2026-09-27T23:59:04+02:00",
+      "status": "COMPLETED",
+      "log": "logs/diag_compile_2588784.log",
+      "last_checked": "2026-09-28T00:03:54+02:00"
     }
   },
   "artifacts": {},
@@ -1203,7 +1212,8 @@
         "2588687",
         "2588703",
         "2588758",
-        "2588779"
+        "2588779",
+        "2588784"
       ]
     }
   ],
@@ -1388,7 +1398,12 @@
     "2026-09-27: submitted job 2588779 (P4-J2 gpu_tests)",
     "2026-09-27: P4-J1: gpu_tests.sh (1 GPU, exclude ga03,gx17v1,gx13v1, GLB_SCRATCH, per-job Inductor cache, CUDA assert + nvidia-smi, check_env + pytest -m cuda -v -rA; 9 cuda tests in tests/test_gpu.py) + test. Job 2588779. sbatch info: 'GPU requested without --nodes; defaulting to --nodes=1' -> add #SBATCH --nodes=1 to GPU wrappers (and P4-V test).",
     "2026-09-27: job 2588779 -> FAILED",
-    "2026-09-27: P4-J2 NOT PASSED: job 2588779 (gx11, H100 80GB) FAILED 1:0 -- a measurement, not infra. log=cluster/logs/gpu_tests_2588779.log. 8/9 cuda tests passed; test_compile_equals_eager_on_gpu failed: max |compiled-eager| = 0.0575 (bar 1e-4), fp32, TF32 off, reduced hybrid_legal_base (dim 128), batch (2,512), doc[:,200:]=1. Batch row 0 matches to ~1e-7; row 1 differs at every position incl. t=0 (before the boundary), rows share the doc layout -> batch-index-dependent error in the CUDA compiled path, not tolerance. CPU Inductor compile with batch 2 passes (test_models.py:427, test_linux_only.py). Plan: fix before any screen job. P4-J2 stays unticked."
+    "2026-09-27: P4-J2 NOT PASSED: job 2588779 (gx11, H100 80GB) FAILED 1:0 -- a measurement, not infra. log=cluster/logs/gpu_tests_2588779.log. 8/9 cuda tests passed; test_compile_equals_eager_on_gpu failed: max |compiled-eager| = 0.0575 (bar 1e-4), fp32, TF32 off, reduced hybrid_legal_base (dim 128), batch (2,512), doc[:,200:]=1. Batch row 0 matches to ~1e-7; row 1 differs at every position incl. t=0 (before the boundary), rows share the doc layout -> batch-index-dependent error in the CUDA compiled path, not tolerance. CPU Inductor compile with batch 2 passes (test_models.py:427, test_linux_only.py). Plan: fix before any screen job. P4-J2 stays unticked.",
+    "2026-09-27: Commit 91ce548 pushed to main (user request).",
+    "2026-09-27: submitted job 2588784 (P4-J2 diag_compile)",
+    "2026-09-27: P4-J2 diagnosis: scripts/diagnose_compile.py (+tests/test_diagnose_compile.py) and slurm/diag_compile.sh. Mac CPU Inductor at the GPU test's shape (512, dim 128): no drift for full/mamba3/mlstm/attention-sdpa (all ~6e-7, both rows). On CPU the full model's attention uses dense SDPA; on CUDA it uses FlexAttention -> lead suspect: compiled FlexAttention / create_block_mask inside the outer torch.compile, batch row 1. validate exit 0, 867 passed. Diagnostic job 2588784 submitted (per-mixer x packed/unpacked/swapped, per-row drift).",
+    "2026-09-28: job 2588784 -> COMPLETED",
+    "2026-09-28: Diag job 2588784 (gx11, COMPLETED 0:0), log cluster/logs/diag_compile_2588784.log: DRIFT only with FlexAttention + doc_ids under outer torch.compile, batch row 1 (attention-flex row1 0.99, full row1 0.057; swapped rows same -> position not content); mamba3/mlstm/attention-sdpa/unpacked all <=7.7e-7. Fix applied (UNVALIDATED, uncommitted): @torch.compiler.disable on build_doc_block_mask (lexhybrid/layers/attention_block.py) so the BlockMask is built eagerly. Session stopped at usage limit."
   ],
   "open_questions": []
 }

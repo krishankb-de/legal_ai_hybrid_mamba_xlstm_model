@@ -94,11 +94,17 @@ def compiled_flex_attention():
     return _COMPILED_FLEX
 
 
+@torch.compiler.disable
 def build_doc_block_mask(doc_ids: torch.Tensor):
     """FlexAttention ``BlockMask`` for causal attention inside each document of a packed row.
 
     Fully masked (row-block, column-block) tiles are skipped by the kernel, so the cost follows the
     documents' own lengths rather than the row's.
+
+    Built eagerly even inside a compiled model: traced by Dynamo, the ``mask_mod`` that reads
+    ``doc_ids[b, ...]`` from its closure produced a wrong mask for batch row 1 on the H100 (job
+    2588784: compiled vs eager drift 0.99 in row 1, 7e-7 in row 0). The compiled graph receives the
+    finished ``BlockMask`` instead, at the cost of one graph break per attention layer.
     """
     from torch.nn.attention.flex_attention import create_block_mask
 
