@@ -310,13 +310,80 @@ def test_val_check_interval_product(trainer_name, script):
 
 
 def test_ddp_strategy_is_built_explicitly(script):
+    """...and it launches its own ranks inside the one SLURM task (P6-A): under SLURM, Lightning
+    would otherwise take SLURM_NTASKS=1 as the world and expect srun to start the other ranks."""
+    from lightning_fabric.plugins.environments import LightningEnvironment
     from pytorch_lightning.strategies import DDPStrategy
 
     tp = script("train_pretrain")
     strategy = tp.build_trainer_kwargs(_compose("trainer=h100_multi_ddp").trainer)["strategy"]
     assert isinstance(strategy, DDPStrategy)
     assert strategy._ddp_kwargs == {"find_unused_parameters": False, "gradient_as_bucket_view": True}
+    assert isinstance(strategy.cluster_environment, LightningEnvironment)
     assert tp.build_strategy("auto") == "auto"
+
+
+def test_ddp_ignores_slurm_inside_a_batch_job(script, monkeypatch):
+    """With SLURM_NTASKS set (every batch job) the Trainer keeps the strategy's own environment."""
+    import pytorch_lightning as pl
+    from lightning_fabric.plugins.environments import LightningEnvironment
+
+    tp = script("train_pretrain")
+    monkeypatch.setenv("SLURM_NTASKS", "1")
+    monkeypatch.setenv("SLURM_JOB_NAME", "train_4gpu")
+    trainer = pl.Trainer(accelerator="cpu", devices=2, strategy=tp.build_strategy("ddp"), logger=False)
+    assert isinstance(trainer.strategy.cluster_environment, LightningEnvironment)
+
+
+def test_only_the_launcher_rank_writes_run_metadata(script, monkeypatch):
+    tp = script("train_pretrain")
+    monkeypatch.delenv("LOCAL_RANK", raising=False)
+    assert tp.is_launcher_rank()
+    monkeypatch.setenv("LOCAL_RANK", "0")
+    assert tp.is_launcher_rank()
+    monkeypatch.setenv("LOCAL_RANK", "3")
+    assert not tp.is_launcher_rank()
+
+
+def test_arch_only_prints_the_fingerprint_and_trains_nothing(tmp_path, script, capsys):
+    """The wrappers' step-0 check (FL1): `+arch_only=true` prints the ARCH line of exactly the model
+    the overrides describe, on meta, and writes nothing."""
+    tp = script("train_pretrain")
+    out = tmp_path / "out"
+    assert tp.run(_compose("model=hybrid_legal_ds64", f"output_dir={out}", "+arch_only=true")) is None
+    line = capsys.readouterr().out.strip().splitlines()[-1]
+    assert line.startswith("ARCH ") and "mamba3(d_state=64" in line and "vocab=151936" in line
+    assert not out.exists()
+
+
+def test_step_stats_callback_times_optimizer_steps(tmp_path, capsys):
+    """STEPSTATS (P4-T, P5-F): one timing per optimizer step, not per micro-batch; a line every
+    `every_n_steps` and a final one; peak memory is n/a without CUDA."""
+    from lexhybrid.training.callbacks import StepStatsCallback
+    from lexhybrid.training.lightning_module import HybridLightningModule
+
+    stats = StepStatsCallback(every_n_steps=1, skip_steps=0)
+    module = HybridLightningModule(_tiny_student(), warmup_steps=1, max_steps=2)
+    data = DataLoader(SyntheticPackedDataset(num_rows=8, row_len=24, vocab_size=128), batch_size=2)
+    _cpu_trainer(tmp_path, callbacks=[stats], accumulate_grad_batches=2, limit_val_batches=0).fit(
+        module, data
+    )
+    lines = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("STEPSTATS")]
+    assert len(stats.durations) == 2 and all(d > 0 for d in stats.durations)
+    assert [ln.split()[2] for ln in lines] == ["step=1", "step=2", "step=2"]
+    final = dict(kv.split("=", 1) for kv in lines[-1].split()[1:])
+    assert final["rank"] == "0" and final["final"] == "1" and final["n"] == "2"
+    assert float(final["s_per_step"]) > 0 and final["peak_alloc_gb"] == "n/a"
+    validated = StepStatsCallback(every_n_steps=0, skip_steps=0)  # validation after every step
+    _cpu_trainer(tmp_path, callbacks=[validated], max_steps=3).fit(
+        HybridLightningModule(_tiny_student(), warmup_steps=1, max_steps=3), data, data
+    )
+    assert len(validated.durations) == 2, "steps after a validation run are timed from its end"
+    skipping = StepStatsCallback(every_n_steps=0, skip_steps=5)
+    _cpu_trainer(tmp_path, callbacks=[skipping], limit_val_batches=0).fit(
+        HybridLightningModule(_tiny_student(), warmup_steps=1, max_steps=2), data
+    )
+    assert skipping.durations == [] and "s_per_step=n/a" in capsys.readouterr().out
 
 
 def _tiny_student(**kw):

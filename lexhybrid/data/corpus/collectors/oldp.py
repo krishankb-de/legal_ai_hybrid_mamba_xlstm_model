@@ -7,14 +7,14 @@ as HTML, already anonymised by the courts. No API key is needed for reading.
 One ``Document`` per decision. The court's full name becomes its citation abbreviation
 (``Verwaltungsgericht Bremen`` -> ``VG Bremen``), so the citation id is ``VG Bremen 2 K 1343/24``.
 Sections are the HTML paragraphs, grouped under the part headings the decision uses (``Tenor``,
-``Tatbestand``, ``Entscheidungsgründe``, ``Gründe``). Licence: the database is ODbL 1.0 (register
+``Tatbestand``, ``Entscheidungsgründe``, ``Gründe``; ``Section.part``, None before the first heading). Licence: the database is ODbL 1.0 (register
 row ``oldp``); the decisions themselves are official works.
 """
 
 import re
 from collections.abc import Iterator
 
-from lexhybrid.data.corpus.collectors.base import cli, http_get, licence_flags, utc_now
+from lexhybrid.data.corpus.collectors.base import http_get, licence_flags, main, utc_now
 from lexhybrid.data.corpus.collectors.htmltext import html_blocks
 from lexhybrid.data.schema import Document, Section
 
@@ -127,7 +127,7 @@ def parse_oldp_case(case: dict, retrieved_at: str | None = None) -> Document | N
         if block.strip(" :").lower() in PART_HEADINGS:
             part = block.strip(" :")
             continue
-        sections.append(Section(label=part, text=block))
+        sections.append(Section(label=part, text=block, part=None if part == "Text" else part))
     if not sections:
         return None
     return Document(
@@ -177,4 +177,4 @@ class OLDPCollector:
 
 
 if __name__ == "__main__":
-    raise SystemExit(cli(OLDPCollector()))
+    main(OLDPCollector())

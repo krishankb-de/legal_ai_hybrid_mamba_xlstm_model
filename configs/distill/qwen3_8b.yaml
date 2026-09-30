@@ -1,0 +1,7 @@
+# The larger teacher of decision 8: adopted only if P4-U measures that it fits at 4,096-token rows
+# on 4 x H100 (peak <= 70 GB and step time <= 1.6x the 1.7B step). The KD probe (P4-T) uses it.
+teacher: Qwen/Qwen3-8B-Base
+dtype: bfloat16
+alpha: 0.5
+temperature: 2.0
+slab: 512

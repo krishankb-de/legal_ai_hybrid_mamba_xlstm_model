@@ -48,6 +48,8 @@ KEY_IMPORTS = (
     "datasets",
     "einops",
     "yaml",
+    "bm25s",  # lexical retrieval (P7-C1)
+    "Stemmer",  # PyStemmer, bm25s's Snowball German stemmer
 )
 EXPECTED_CUDA = {"linux": "12.8", "darwin": None}
 SCRUB_ROOT = REPO_ROOT / "envs" / "scrub"

@@ -12,11 +12,22 @@ Ported from the reference ``scripts/performance_profile.py``. Modes:
 
 Protocol (plan R7): every compiled number is measured one shape per process with its own
 ``TORCHINDUCTOR_CACHE_DIR`` -- the SLURM wrapper does that -- because a shared Inductor cache once
-timed two chunk sizes identically to the microsecond in the reference. The chunk size is read back
+timed two chunk sizes identically to the microsecond in the reference. The chunk sizes are read back
 off the built module and recorded in every row.
+
+Packed rows and the training loss (plan P4-P). ``--doc-len N`` gives every row ``doc_ids`` with a
+new document every N tokens (each row's layout shifted, as packed rows are), so attention takes its
+packed path -- the flex block mask on CUDA -- and every mixer resets at the boundaries; without it
+rows are unpacked (causal SDPA). ``--loss slab`` times the training step the way
+``PretrainLightningModule`` computes it: the backbone (compiled on its own under ``--compile``), then
+the boundary-masked slab-wise cross-entropy through the head, so ``(B, L, V)`` logits never exist.
+The default ``--loss logits`` is the reference's ``logits.float().mean()``, kept for the sanity
+points; at the Qwen3 vocabulary its logits alone are 10 GB for a (4, 8192) batch in bf16.
 
     .venv/bin/python scripts/performance_profile.py --sweep --models hybrid_legal_base transformer_legal_base \
         --seq-lengths 2048 8192 16384 --dtype bf16 --output-dir analysis/profile
+    .venv/bin/python scripts/performance_profile.py --sweep --models hybrid_legal_base --backward \
+        --loss slab --doc-len 1000 --seq-lengths 4096 --dtype bf16 --output-dir analysis/profile/train
 """
 
 import argparse
@@ -31,13 +42,15 @@ from typing import Any
 import torch
 
 from lexhybrid.config.loading import available_model_configs, load_model_config
-from lexhybrid.models.hybrid_lm import HybridLanguageModel
+from lexhybrid.models.hybrid_lm import HybridLanguageModel, boundary_masked_labels
 
 DTYPES = {
     "fp32": torch.float32,
     "fp16": torch.float16,
     "bf16": torch.bfloat16,
 }
+LOSSES = ("logits", "slab")
+SLAB = 512  # positions per slab, as configs/distill/*.yaml
 
 
 @contextmanager
@@ -76,21 +89,80 @@ def _peak_memory_gb(device):
     return float("nan")
 
 
+def packed_doc_ids(batch_size, seq_length, doc_len, device):
+    """(B, L) document ids with a boundary every ``doc_len`` tokens; row b's layout is shifted by
+    ``b * doc_len / B``, so the rows of a batch are packed differently (as real packed rows are)."""
+    if doc_len < 1:
+        raise ValueError(f"doc_len must be >= 1, got {doc_len}")
+    pos = torch.arange(seq_length, device=device)
+    offsets = [(b * doc_len) // batch_size for b in range(batch_size)]
+    return torch.stack([(pos + off) // doc_len for off in offsets]).to(torch.long)
+
+
+def effective_chunk_sizes(model):
+    """``chunk_size`` read off the first built Mamba-3 and the first mLSTM mixer (None if absent)."""
+    base = getattr(model, "_orig_mod", model)
+    found = {"Mamba3Block": None, "mLSTMBlock": None}
+    for layer in base.layers:
+        kind = type(layer.mixer).__name__
+        if kind in found and found[kind] is None:
+            found[kind] = layer.mixer.chunk_size
+    return found["Mamba3Block"], found["mLSTMBlock"]
+
+
+def packed_attention(config, device, doc_len):
+    """What the attention layers run on this point: causal SDPA unpacked, else the packed kernel."""
+    if "attention" not in config.layer_pattern:
+        return "none"
+    if doc_len is None:
+        return "causal-sdpa"
+    impl = config.attn_impl
+    if impl == "auto":
+        impl = "flex" if device.startswith("cuda") else "sdpa"
+    return f"packed-{impl}"
+
+
 def measure_point(
-    model, batch_size, seq_length, num_iterations, device, vocab_size, backward=False, warmup=3
+    model,
+    batch_size,
+    seq_length,
+    num_iterations,
+    device,
+    vocab_size,
+    backward=False,
+    warmup=3,
+    doc_len=None,
+    loss="logits",
+    backbone=None,
 ):
     """Time one (batch_size, seq_length) point.
+
+    ``doc_len`` packs every row (``packed_doc_ids``); ``loss="slab"`` times the training step of
+    ``PretrainLightningModule`` (``backbone`` -- e.g. a compiled ``model.backbone`` -- then the
+    slab-wise cross-entropy through ``model.head``) instead of ``logits.float().mean()``.
 
     Returns a dict of timings in seconds and peak memory in GB, or a dict with
     `oom=True` if the point does not fit. Peak memory is reset per point so the
     number is attributable to this point and not to the largest earlier one.
     """
+    if loss not in LOSSES:
+        raise ValueError(f"loss must be one of {LOSSES}, got {loss!r}")
     input_ids = torch.randint(0, vocab_size, (batch_size, seq_length), device=device)
+    doc_ids = None if doc_len is None else packed_doc_ids(batch_size, seq_length, doc_len, device)
+    base = getattr(model, "_orig_mod", model)
+    backbone = backbone or base.backbone
+    targets = boundary_masked_labels(input_ids, doc_ids)
 
     def _run():
-        if backward:
+        if backward and loss == "slab":
+            from lexhybrid.training.distill import slab_ce_kl
+
             model.zero_grad(set_to_none=True)
-            out = model(input_ids)
+            residual, _ = backbone(input_ids, doc_ids=doc_ids)
+            slab_ce_kl(residual[:, :-1], targets, None, base.head, slab=SLAB)["loss"].backward()
+        elif backward:
+            model.zero_grad(set_to_none=True)
+            out = model(input_ids, doc_ids=doc_ids)
             # forward() returns a CausalLMOutput dataclass, not a tensor or dict.
             if hasattr(out, "logits"):
                 logits = out.logits
@@ -98,11 +170,11 @@ def measure_point(
                 logits = out["logits"]
             else:
                 logits = out
-            loss = logits.float().mean()
-            loss.backward()
+            loss_value = logits.float().mean()
+            loss_value.backward()
         else:
             with torch.no_grad():
-                model(input_ids)
+                model(input_ids, doc_ids=doc_ids)
 
     try:
         for _ in range(warmup):
@@ -183,6 +255,8 @@ def profile_model(
     backward=False,
     attn_backend="auto",
     compile_model=False,
+    doc_len=None,
+    loss="logits",
 ):
     """Profile a single (batch_size, seq_length) point and print a report."""
     print("=" * 80)
@@ -191,7 +265,7 @@ def profile_model(
 
     model = build_model(config, device, dtype)
     num_params = model.get_num_params(non_embedding=True)
-    model, compile_s = maybe_compile(model, compile_model)
+    model, backbone, compile_s = compile_for(model, compile_model, backward and loss == "slab")
     print(f"Model: {num_params / 1e6:.1f}M parameters (non-embedding)")
     print(
         "Attention backend: {}   torch.compile: {}".format(
@@ -201,13 +275,23 @@ def profile_model(
     print(f"Batch size: {batch_size}")
     print(f"Sequence length: {seq_length}")
     print(f"Device: {device}  dtype: {dtype}")
-    print("Pass: {}".format("forward+backward" if backward else "forward"))
+    print("Pass: {}".format(f"forward+backward (loss {loss})" if backward else "forward"))
+    print(f"Rows: {'unpacked' if doc_len is None else f'packed, a document every {doc_len} tokens'}")
     print()
 
     print("Warming up and profiling...")
     with attention_backend(attn_backend):
         res = measure_point(
-            model, batch_size, seq_length, num_iterations, device, config.vocab_size, backward=backward
+            model,
+            batch_size,
+            seq_length,
+            num_iterations,
+            device,
+            config.vocab_size,
+            backward=backward,
+            doc_len=doc_len,
+            loss=loss,
+            backbone=backbone,
         )
     if res["oom"]:
         print("OUT OF MEMORY at this point.")
@@ -243,12 +327,16 @@ def run_sweep(
     attn_backend="auto",
     compile_model=False,
     chunk_size=None,
+    mlstm_chunk_size=None,
+    doc_len=None,
+    loss="logits",
 ):
     """Sweep sequence length (x batch size) across models and fit exponents.
 
     `attn_backend` (E0-D) and `compile_model` (E1-B) are recorded on every row so
     two sweeps written to different directories can be compared arm by arm; the
-    published 14A-7 numbers are the `auto` / uncompiled arm.
+    published 14A-7 numbers are the `auto` / uncompiled arm. So are the packing
+    (`doc_len`, the attention path it takes) and the training `loss` (P4-P).
     """
     rows: list[dict[str, Any]] = []
 
@@ -256,6 +344,8 @@ def run_sweep(
         config = load_config(name)
         if chunk_size is not None and hasattr(config, "mamba3_chunk_size"):
             config.mamba3_chunk_size = chunk_size
+        if mlstm_chunk_size is not None and hasattr(config, "mlstm_chunk_size"):
+            config.mlstm_chunk_size = mlstm_chunk_size
         model = build_model(config, device, dtype)
         num_params = model.get_num_params(non_embedding=True)
         # Read the chunk size back OFF THE BUILT MODULE, not off the config. In the
@@ -264,19 +354,19 @@ def run_sweep(
         # 45%, which is not a plausible coincidence. Either the override stopped
         # reaching the operator under compile, or those points genuinely plateau.
         # Printing the effective value is what tells those two apart.
-        effective_chunk = None
-        for layer in model.layers:
-            if hasattr(layer.mixer, "chunk_size"):
-                effective_chunk = layer.mixer.chunk_size
-                break
-        model, compile_s = maybe_compile(model, compile_model)
+        effective_chunk, effective_mlstm_chunk = effective_chunk_sizes(model)
+        model, backbone, compile_s = compile_for(model, compile_model, backward and loss == "slab")
         if compile_model:
             print(
                 f"torch.compile: wrapped in {compile_s:.1f}s (graph build happens on the "
                 "first forward of each new shape)"
             )
-        if effective_chunk is not None:
-            print(f"effective chunk_size on the built module: {effective_chunk}")
+        if effective_chunk is not None or effective_mlstm_chunk is not None:
+            print(
+                f"effective chunk_size on the built module: mamba3 {effective_chunk}, "
+                f"mlstm {effective_mlstm_chunk}"
+            )
+        attn_path = packed_attention(config, device, doc_len)
         pattern = ",".join(config.layer_pattern)
         print("\n" + "=" * 80)
         print(
@@ -295,6 +385,9 @@ def run_sweep(
                         device,
                         config.vocab_size,
                         backward=backward,
+                        doc_len=doc_len,
+                        loss=loss,
+                        backbone=backbone,
                     )
                 row = {
                     "model": name,
@@ -305,12 +398,17 @@ def run_sweep(
                     "device": device,
                     "dtype": str(dtype).replace("torch.", ""),
                     "pass": "forward+backward" if backward else "forward",
+                    "loss": loss if backward else "",
                     "batch_size": batch_size,
                     "seq_length": seq_length,
+                    "doc_len": doc_len,
+                    "attn_path": attn_path,
                     "attn_backend": attn_backend,
                     "compiled": bool(compile_model),
                     "chunk_size": getattr(config, "mamba3_chunk_size", None),
                     "effective_chunk_size": effective_chunk,
+                    "mlstm_chunk_size": getattr(config, "mlstm_chunk_size", None),
+                    "effective_mlstm_chunk_size": effective_mlstm_chunk,
                     "oom": res["oom"],
                 }
                 if res["oom"]:
@@ -388,12 +486,17 @@ def run_sweep(
             "device",
             "dtype",
             "pass",
+            "loss",
             "batch_size",
             "seq_length",
+            "doc_len",
+            "attn_path",
             "attn_backend",
             "compiled",
             "chunk_size",
             "effective_chunk_size",
+            "mlstm_chunk_size",
+            "effective_mlstm_chunk_size",
             "oom",
             "latency_median_ms",
             "latency_mean_ms",
@@ -560,6 +663,16 @@ def maybe_compile(model, enabled):
     start = time.perf_counter()
     compiled = torch.compile(model)
     return compiled, time.perf_counter() - start
+
+
+def compile_for(model, enabled, slab_training):
+    """``(model, backbone, seconds)``: the slab-loss training step compiles the backbone alone, as
+    ``PretrainLightningModule`` does; every other pass compiles the whole model (``backbone`` None)."""
+    if slab_training:
+        backbone, seconds = maybe_compile(model.backbone, enabled)
+        return model, backbone, seconds
+    model, seconds = maybe_compile(model, enabled)
+    return model, None, seconds
 
 
 def _mark(cuda):
@@ -850,7 +963,7 @@ def run_layer_split(
     return rows
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser(description="Profile hybrid model")
     choices = available_configs()
     parser.add_argument(
@@ -944,8 +1057,25 @@ def main():
         action="store_true",
         help="torch.compile the model (measure one shape per process with its own Inductor cache, plan R7)",
     )
+    parser.add_argument(
+        "--mlstm-chunk-size", type=int, default=None, help="override mlstm_chunk_size (--sweep)"
+    )
+    parser.add_argument(
+        "--doc-len",
+        type=int,
+        default=None,
+        help="pack every row with doc_ids, a document every N tokens (flex attention on CUDA); "
+        "default: unpacked rows",
+    )
+    parser.add_argument(
+        "--loss",
+        choices=LOSSES,
+        default="logits",
+        help="with --backward: 'slab' is the training loss (backbone + slab-wise CE, no (B, L, V) "
+        "logits); 'logits' is the reference's logits.float().mean()",
+    )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     dtype = DTYPES[args.dtype]
 
     if args.per_layer:
@@ -984,6 +1114,9 @@ def main():
             attn_backend=args.attn_backend,
             compile_model=args.compile_model,
             chunk_size=args.chunk_size,
+            mlstm_chunk_size=args.mlstm_chunk_size,
+            doc_len=args.doc_len,
+            loss=args.loss,
         )
     else:
         profile_model(
@@ -996,8 +1129,11 @@ def main():
             backward=args.backward,
             attn_backend=args.attn_backend,
             compile_model=args.compile_model,
+            doc_len=args.doc_len,
+            loss=args.loss,
         )
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

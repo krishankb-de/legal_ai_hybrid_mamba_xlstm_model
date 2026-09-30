@@ -241,9 +241,20 @@ def test_fineweb_and_multilegalpile_collectors_read_their_rows(monkeypatch):
     rows = json.loads((FIXTURES / "fineweb2_de" / "rows.json").read_text())
     seen = {}
 
+    class Stream:
+        def __init__(self, items):
+            self.items = items
+
+        def __iter__(self):
+            return iter(self.items)
+
+        def shuffle(self, seed, buffer_size):
+            seen.update(shuffle=(seed, buffer_size))
+            return Stream(self.items[::-1])
+
     def load_dataset(path, **kw):
         seen.update(kw, path=path)
-        return iter([{"id": "<urn:uuid:empty>", "text": "  "}, *rows])
+        return Stream([{"id": "<urn:uuid:empty>", "text": "  "}, *rows])
 
     monkeypatch.setattr(datasets, "load_dataset", load_dataset)
     docs = list(fineweb2_de.FineWeb2DECollector().iter_documents(limit=2))
@@ -252,7 +263,10 @@ def test_fineweb_and_multilegalpile_collectors_read_their_rows(monkeypatch):
         and seen["streaming"] is True
         and seen["path"] == "HuggingFaceFW/fineweb-2"
         and seen["name"] == "deu_Latn"
+        and seen["shuffle"] == (0, 1000)  # sampled across the dataset's files (dumps), seeded
     )
+    in_order = list(fineweb2_de.FineWeb2DECollector(shuffle_seed=None).iter_documents(limit=None))
+    assert [d.id for d in docs] == [d.id for d in in_order[::-1][:2]]
 
     fixture = json.loads((FIXTURES / "multilegalpile" / "rows.json").read_text())
     by_subset = {tuple(k.split("_", 2)): v["row"] for k, v in fixture.items()}
@@ -356,11 +370,16 @@ def test_changelog_packing_and_scrub_entry_points(monkeypatch, tmp_path, capsys)
     )
     assert rc == 0 and len(packing.read_rows(tmp_path / "shards" / "shard-00000.parquet")) == 2
 
-    worker = scrub_ler.run_worker  # the real one, for its missing-environment error
+    with pytest.raises(FileNotFoundError, match="uv sync --locked --project envs/scrub"):
+        scrub_ler.run_worker(cases[:1], python=tmp_path / "missing" / "python")  # the real worker's check
     entities = {cases[0].id: [Entity(0, 5, "PER", 0.9)]}  # "Tenor", tagged so it is replaced and logged
-    monkeypatch.setattr(
-        scrub_ler, "run_worker", lambda docs, python=None, args=(): (entities, {"docs": len(docs)})
-    )
+
+    def fake_stream(docs, python=None, args=(), worker=None, in_flight=1024, stats=None):
+        docs = list(docs)
+        stats.update({"docs": len(docs)})
+        yield from ((d, entities.get(d.id, [])) for d in docs)
+
+    monkeypatch.setattr(scrub_ler, "stream_worker", fake_stream)  # scrub_file's one seam to the worker
     key = "ab" * 32
     monkeypatch.setenv("LEXHYBRID_SCRUB_KEY", key)
     rc = scrub_ler.main(["--source", "oldp", "--in", str(tmp_path / "oldp.jsonl"), "--out", str(tmp_path / "s.jsonl"),
@@ -373,8 +392,6 @@ def test_changelog_packing_and_scrub_entry_points(monkeypatch, tmp_path, capsys)
     assert row["entity_hmac"] == scrub_ler.entity_hash(
         "Tenor", bytes.fromhex(key)
     ) and "Tenor" not in json.dumps(row)
-    with pytest.raises(FileNotFoundError, match="uv sync --locked --project envs/scrub"):
-        worker(cases[:1], python=tmp_path / "missing" / "python")
 
 
 # -- tokenizer glue ---------------------------------------------------------------------------

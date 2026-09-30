@@ -1,12 +1,12 @@
 {
   "current_phase": "P4",
-  "last_updated": "2026-09-28T00:03:54+02:00",
-  "status": "P4 in progress: A-H done (env job 2588677, HF fetch 2588687, 27G); P4-A..H pushed to main 745abfe, CI 36351227023 green.",
+  "last_updated": "2026-09-30T16:50:28+02:00",
+  "status": "P4 in progress, 12/27: A-J1 and V done; cluster in maintenance since 2026-09-29. P4-J2 fix validated on the Mac (verdict needs gpu_tests.sh); wrappers for J3, K, L (scrub_array + pack_corpus), N, P, R, T written and sandbox-tested. Ahead of phase on the user's instruction: P5-A, P5-B, P6-A, P7-A, P7-B, P7-C1, P7-C ticked. uv.lock changed (bm25s, pystemmer): setup_env.sh first on the cluster. Decision 13 amended: cross-source copies kept and linked.",
   "plan_of_record": "LEGAL_BUILD_PLAN.md",
   "helper": "python3 scripts/plan_state.py <cmd> (stdlib only; the ONLY writer of LEGAL_BUILD_PLAN.md checkboxes and legal_build_state.json)",
   "scope": "Build lexhybrid: port the reference backbone/kernels/decode/tests (P1), fix 18 recorded defects and add legal decoder deltas (P2), data pipeline (P3), cluster + corpus + profiling (P4), pre-registered screen (P5), full backbone (P6), retrieval/renderer/verifier (P7), post-training (P8), evaluation (P9), release (P10); P11 optional. Local only, no git until the user writes 'git go'. Reference/ deleted at P1-Z by the user.",
   "blocked_on": null,
-  "next_action": "P4-J2 fix: add CUDA test in tests/test_gpu.py (attention-only flex model, batch 2 with DIFFERENT per-row doc layouts, compiled vs eager < 1e-4 per row); bash scripts/validate.sh; sync; sbatch diag_compile.sh + gpu_tests.sh; verdict P4-J2 when all cuda tests pass. Follow-up: build the mask once per forward in the backbone (fewer graph breaks) -- measure in P4-P.",
+  "next_action": "Cluster back: bash scripts/sync_to_cluster.sh; sbatch scripts/slurm/setup_env.sh FIRST (uv.lock gained bm25s + pystemmer in P7-C1, so every job's check_env.py would fail on the old .venv; it also builds envs/scrub); verdict = SETUP_ENV DONE; then sbatch scripts/slurm/gpu_tests.sh (P4-J2 verdict); one submission per session: multigpu_tests.sh --gpus=2 (P4-J3), build_corpus_array.sh --array=0-9 (P4-K), probe_ckpt_size.sh (P4-N), profile.sh (P4-P), equivalence.sh (P4-R), kd_memory_probe.sh --gpus=4 (P4-T); after P4-K: scrub_array.sh --array=0-79, pack_corpus.sh (P4-L). Cluster down: next local P7 boxes P7-E (RRF + reranker behind an injectable scorer), P7-F (filters; index fills Chunk.copies from dedup.jsonl links), P7-G (renderer cites every copy), P7-H; P7-D's dense.py code can be written, its index job needs the GPU.",
   "decisions": {
     "01_init_road": "From scratch first: Qwen3 tokenizer + logit-KL from an open Qwen3-*-Base teacher. Qwen3 conversion = P11, optional, on user instruction only. (user 2026-09-27)",
     "02_corpus": "Open-licensed sources PLUS a research-exception arm; every document carries licence + commercial_safe; research_only never enters a shippable arm. (user 2026-09-27)",
@@ -29,7 +29,9 @@
     "19_ci": "GitHub Actions .github/workflows/ci.yml on every push/PR: lint, test (Linux, py3.11+3.12), hygiene (pushed tree), package; weekly network smoke + macOS clean install; GPU checks on the cluster; inert until the user pushes (user 2026-09-27)",
     "s5_band": "+2.36% non-embedding is a stated difference inside +-2.5%, not reshaped; PPL/probe-only (user, 2026-09-27; plan decision 20)",
     "s5_forget_bias": "3.0, the base's value; one lever per arm (user, 2026-09-27; plan decision 21)",
-    "ler_scrub_env": "flair/ner-german-legal in its own uv project envs/scrub/ (own lock); main env keeps transformers 5; fallback: a transformers-5-compatible model trained on German LER, evaluated on its test split first (user, 2026-09-27; plan decision 22)"
+    "ler_scrub_env": "flair/ner-german-legal in its own uv project envs/scrub/ (own lock); main env keeps transformers 5; fallback: a transformers-5-compatible model trained on German LER, evaluated on its test split first (user, 2026-09-27; plan decision 22)",
+    "dedup_cross_source": "every copy (user, 2026-09-29: 'keep both and when cited cite both so that not only 1 citetion works but many'; chose 'Every copy' for pretraining): copies of one text in DIFFERENT sources are all kept and packed, and linked in the dedup log; duplicates inside ONE source are still dropped (decision 13 amended)",
+    "cite_every_copy": "a citation names every source that holds the cited passage (user, 2026-09-29): retrieval keeps every copy; the dedup log's cross-source links group them; the renderer (P7-G) cites all of them"
   },
   "pre_registered": {
     "rules": {
@@ -52,6 +54,11 @@
     "P3": {
       "fertility_prediction": "Qwen3 < 1.8 tokens/word on a 1M-word DACH legal sample; GPT-2 > 2.2 (analysis/tokenizer_fertility.md, method fixed before measuring, 2026-09-27)",
       "written": "2026-09-27T19:49:22+02:00"
+    },
+    "P5": {
+      "prediction": "S1 (attn-2) beats S0 (attn-0) on statute-recall and multi-hop by more than the bar and ties on val PPL; S2 (attn-4) ties S1 on everything and is not adopted (simplest-arm rule); S3 (d_state 64) is within the bar on PPL and worse on late-position PPL; S4 (MTP) is within the bar; S5 (legacy recipe) is worse on val PPL by more than 1.0; S6 (alpha=0, no KD) is worse on val PPL by more than the bar.",
+      "written": "2026-09-29T14:44:28+02:00",
+      "bar_rule": "bar = max(2 x the two-seed SD of S1 val PPL, 0.10 PPL), set in P5-D from S1 alone. Decision: the simplest arm (S1 unless a lever is needed) advances unless another arm beats it on the two-seed mean val PPL by more than the bar AND does not lose statute-recall or multi-hop by more than the bar; a lever that wins PPL but loses recall is recorded and not adopted. Every arm scored on val PPL, late-25% PPL, MQAR, statute-recall, multi-hop, s/step, peak GB."
     }
   },
   "phase_order": [
@@ -634,7 +641,7 @@
           "desc": "Verdict on the sbatch KD probe: `decisions.teacher` set by the rule \"8B if peak ≤ 70 GB at 4,096 rows and step time ≤ 1.6× the 1.7B step; else 1.7B\"; numbers into `analysis/profile_results.md`."
         },
         "P4-V": {
-          "done": false,
+          "done": true,
           "desc": "`scripts/slurm/watch.sh` (port map §11: squeue/sacct/preemption/per-run checkpoint listing/log error grep; `source`-able; no python) and `tests/test_slurm_wrappers.py` (every wrapper: `--partition=aisc-batch`, `--acco..."
         },
         "P4-Z": {
@@ -652,7 +659,7 @@
         "home": "101G/200G",
         "date": "2026-09-27",
         "P4-C_user_confirmed": "P4-C is confirmed as tested",
-        "validate": "exit 0, 863 passed, 2026-09-27",
+        "validate": "exit 0, 933 passed, 2026-09-29",
         "sync_stamp": "2026-09-27T20:58:14Z b708e84f…b57f",
         "first_sync": "300 files 10.8MB to hpi-hpc:/sc/home/krishankumar.bhushan/lexhybrid",
         "ls_slurm": ".gitkeep cluster.env.example (no wrappers yet; first is P4-E setup_env.sh)",
@@ -672,20 +679,21 @@
         "tests": "863 passed, 15 skipped, 21 xfailed",
         "arms": "7 arms, 0 problems, ARCH identical to Mac",
         "failed_first": "2588703 (infra: rsync anchors, uv PATH)",
-        "cuda_tests_collected": "9"
+        "cuda_tests_collected": "9",
+        "wrappers": "14 planned wrappers + diag_compile; tests/test_slurm_wrappers.py 72 tests incl. sandbox runs"
       },
       "verdict": null
     },
     "P5": {
       "title": "Pre-registered screen",
-      "status": "pending",
+      "status": "in_progress",
       "checkboxes": {
         "P5-A": {
-          "done": false,
+          "done": true,
           "desc": "Write the prediction above and the bar rule into `pre_registered.P5` (`plan_state.py evidence P5 prediction=... bar_rule=...`) before any submission; `analysis/screen_results.md` created from the template with the pre..."
         },
         "P5-B": {
-          "done": false,
+          "done": true,
           "desc": "`scripts/slurm/screen_array.sh` (port map §11 array header; `ARMS` env list; `ARM` resolved on the compute node by `screen_arms.py env`; `unset EXPERIMENT`; `SAVE_TOP_K=0`; greps the ARCH line at step 0 against the ar..."
         },
         "P5-C": {
@@ -721,15 +729,19 @@
           "desc": "Gate: winner named by the rule with two seeds per arm; `analysis/screen_results.md` complete with every job id; `python3 scripts/plan_state.py next`."
         }
       },
-      "evidence": {},
+      "evidence": {
+        "prereg": "pre_registered.P5.prediction + bar_rule, 2026-09-29T14:44",
+        "results_file": "analysis/screen_results.md",
+        "validate": "exit 0, 935 passed, 2026-09-29"
+      },
       "verdict": null
     },
     "P6": {
       "title": "Full backbone pretraining",
-      "status": "pending",
+      "status": "in_progress",
       "checkboxes": {
         "P6-A": {
-          "done": false,
+          "done": true,
           "desc": "`scripts/slurm/train_pretrain_4gpu.sh` (port map §11 header with `--gpus=4`, `--mem=256G`, `--cpus-per-task=32`, `--time=3-00:00:00`, `--requeue`, `--open-mode=append`; `CKPT=$OUT/checkpoints/last.ckpt` passed as `+re..."
         },
         "P6-B": {
@@ -789,23 +801,29 @@
           "desc": "Gate: three stage-B checkpoints with handoff PASS; `analysis/backbone_results.md` complete; `python3 scripts/plan_state.py next` (if `current_phase` is already P7, tick this box with `--force` and record it)."
         }
       },
-      "evidence": {},
+      "evidence": {
+        "validate": "exit 0, 935 passed, 2026-09-29"
+      },
       "verdict": null
     },
     "P7": {
       "title": "Retrieval, renderer, verifier",
-      "status": "pending",
+      "status": "in_progress",
       "checkboxes": {
         "P7-A": {
-          "done": false,
+          "done": true,
           "desc": "`lexhybrid/retrieval/chunking.py::chunk_statute`: § / Artikel units with hierarchy (Gesetz → Abschnitt → § → Absatz → Satz), `valid_from/to`, sentence ids `sJ`; from `Document.sections`. Test: `tests/test_retrieval.py..."
         },
         "P7-B": {
-          "done": false,
+          "done": true,
           "desc": "`chunk_case_law`: Tenor / Tatbestand / Entscheidungsgründe, then 300–500-token windows with Randnummer anchors. Test: `tests/test_retrieval.py::test_case_windows_keep_randnummer`."
         },
+        "P7-C1": {
+          "done": true,
+          "desc": "Dependencies for P7 in a box of their own (CLAUDE.md rule m): `bm25s[stem]` (decision 14; the `stem` extra pulls `PyStemmer`, the Snowball German stemmer) in `pyproject.toml`; `uv lock`, `uv sync --locked`, `scripts/c..."
+        },
         "P7-C": {
-          "done": false,
+          "done": true,
           "desc": "`lexhybrid/retrieval/bm25.py` (`bm25s`, German stemming/stopwords, index build + query) and `scripts/build_index.py --kind bm25`. Test: `tests/test_retrieval.py::test_bm25_finds_planted_passage`."
         },
         "P7-D": {
@@ -849,7 +867,10 @@
           "desc": "Gate: verifier synthetic suite 100%; renderer notice test green; `analysis/retrieval_results.md` written with job ids; `bash scripts/validate.sh` exit 0; `python3 scripts/plan_state.py phase P8` once P6-Z is also ticked."
         }
       },
-      "evidence": {},
+      "evidence": {
+        "validate": "exit 0, 964 passed, 2026-09-30",
+        "lock_diff": "added bm25s 0.3.11, pystemmer 3.1.0; nothing else changed (104 packages)"
+      },
       "verdict": null
     },
     "P8": {
@@ -1205,7 +1226,15 @@
         "P4-H",
         "P4-I",
         "P4-J",
-        "P4-J1"
+        "P4-J1",
+        "P4-V",
+        "P5-A",
+        "P5-B",
+        "P6-A",
+        "P7-A",
+        "P7-B",
+        "P7-C1",
+        "P7-C"
       ],
       "jobs": [
         "2588677",
@@ -1403,7 +1432,27 @@
     "2026-09-27: submitted job 2588784 (P4-J2 diag_compile)",
     "2026-09-27: P4-J2 diagnosis: scripts/diagnose_compile.py (+tests/test_diagnose_compile.py) and slurm/diag_compile.sh. Mac CPU Inductor at the GPU test's shape (512, dim 128): no drift for full/mamba3/mlstm/attention-sdpa (all ~6e-7, both rows). On CPU the full model's attention uses dense SDPA; on CUDA it uses FlexAttention -> lead suspect: compiled FlexAttention / create_block_mask inside the outer torch.compile, batch row 1. validate exit 0, 867 passed. Diagnostic job 2588784 submitted (per-mixer x packed/unpacked/swapped, per-row drift).",
     "2026-09-28: job 2588784 -> COMPLETED",
-    "2026-09-28: Diag job 2588784 (gx11, COMPLETED 0:0), log cluster/logs/diag_compile_2588784.log: DRIFT only with FlexAttention + doc_ids under outer torch.compile, batch row 1 (attention-flex row1 0.99, full row1 0.057; swapped rows same -> position not content); mamba3/mlstm/attention-sdpa/unpacked all <=7.7e-7. Fix applied (UNVALIDATED, uncommitted): @torch.compiler.disable on build_doc_block_mask (lexhybrid/layers/attention_block.py) so the BlockMask is built eagerly. Session stopped at usage limit."
+    "2026-09-28: Diag job 2588784 (gx11, COMPLETED 0:0), log cluster/logs/diag_compile_2588784.log: DRIFT only with FlexAttention + doc_ids under outer torch.compile, batch row 1 (attention-flex row1 0.99, full row1 0.057; swapped rows same -> position not content); mamba3/mlstm/attention-sdpa/unpacked all <=7.7e-7. Fix applied (UNVALIDATED, uncommitted): @torch.compiler.disable on build_doc_block_mask (lexhybrid/layers/attention_block.py) so the BlockMask is built eagerly. Session stopped at usage limit.",
+    "2026-09-29: P4-J2 fix validated on the Mac: @torch.compiler.disable on build_doc_block_mask (lexhybrid/layers/attention_block.py) + tests/test_gpu.py::test_compiled_flex_attention_matches_eager_per_row (3 rows, different doc layouts, one boundary on the 128 block edge; model builds on CPU, runs on the cluster only). validate exit 0, 871 passed, 2026-09-29. Cluster in maintenance: sync + sbatch diag_compile.sh / gpu_tests.sh still pending; P4-J2 stays open until the cuda layer passes.",
+    "2026-09-29: P4-V: scripts/slurm/watch.sh (queue, 3-day sacct, preempt/requeue/fail list, checkpoints per run, errors + requeue-vs-resume per log; no python; set -uo pipefail) and tests/test_slurm_wrappers.py (every wrapper: partition/account, --exclude=ga03,gx17v1,gx13v1, GLB_SCRATCH, --gpus never --gres, requeue+append on training wrappers, %A_%a on arrays, ARM resolved on the node, no git, cd SLURM_SUBMIT_DIR; plus sandbox runs of the train/screen/4gpu/probe/profile/corpus/watch wrappers with a fake interpreter). Also written for the cluster's return (their sbatch boxes stay open): multigpu_tests.sh (P4-J3), build_corpus_array.sh (P4-K), probe_ckpt_size.sh (P4-N), profile.sh (P4-P; performance_profile.py gains --doc-len/--loss slab/--mlstm-chunk-size), equivalence.sh (P4-R), kd_memory_probe.sh (P4-T; StepStatsCallback, configs/distill/qwen3_8b.yaml). validate exit 0, 933 passed, 2026-09-29.",
+    "2026-09-29: pre-registered P5.prediction",
+    "2026-09-29: pre-registered P5.bar_rule",
+    "2026-09-29: Out-of-phase work on the user's instruction of 2026-09-29 (GPU cluster in maintenance): \"start implementing the next stages or stages which can be build upon without the use of the GPU cluster ... proceed with backlogs or pending tasks which are not dependent on the GPU or the server\". current_phase stays P4 (its remaining boxes are cluster jobs); P5-A, P5-B, P6-A are ticked with --force.",
+    "2026-09-29: P5-A (ahead of phase, --force): the P5 prediction and bar rule written into pre_registered.P5 before any P5 submission; analysis/screen_results.md from the template with the prediction rows, the bar and decision rule, and an empty seed table carrying each arm's non-embedding delta (R3).",
+    "2026-09-29: P5-B (ahead of phase, --force): scripts/slurm/screen_array.sh (array header, ARMS list, ARM resolved on the node by screen_arms.py env, unset EXPERIMENT, SAVE_TOP_K=0) delegating to scripts/slurm/train_pretrain_1gpu.sh (env block, optional levers, EXTRA_OVERRIDES last, resume from last.ckpt, ARCH line from train_pretrain.py +arch_only=true checked against ARM_EXPECT/ARM_FORBID before step 0). screen_arms.py env exports ARM_FORBID. PackedMixture serves 2,048-token rows cut from the 4,096 shards (P4-L packs 4,096/8,192 only; datasets.shard_directory). StepStatsCallback prints s/step + peak GB per rank. Tests: test_slurm_wrappers sandbox runs, test_data::test_mixture_cuts_stored_rows_for_a_shorter_row_len, test_training::test_step_stats_callback_times_optimizer_steps. validate exit 0, 935 passed, 2026-09-29.",
+    "2026-09-29: P6-A (ahead of phase, --force): scripts/slurm/train_pretrain_4gpu.sh (--gpus=4, --mem=256G, --cpus-per-task=32, --time=3-00:00:00, --requeue, --open-mode=append; NUM_GPUS=4, TRAINER_CFG=h100_multi_ddp, SAVE_TOP_K=1) through the train_pretrain_1gpu.sh body (du first, device-count check, resume from last.ckpt). train_pretrain.py: DDPStrategy with LightningEnvironment (one SLURM task starts its own ranks; SLURM_NTASKS would otherwise make Lightning expect srun), +arch_only, run_metadata from rank 0 only. Tests: test_slurm_wrappers::test_pretrain_wrapper_resumes_from_last, test_training::test_ddp_ignores_slurm_inside_a_batch_job. validate exit 0, 935 passed, 2026-09-29.",
+    "2026-09-29: P4-L at scale (code ready; box stays open until its jobs run): the CPU scrub measured ~1,000 chars/s (P3-R), so a single pack job could never scrub the corpus. New: scripts/slurm/scrub_array.sh (1 H100 per source part; scrub_ler --part/--parts streams stride shares through ONE worker, --docs-per-batch batches NER calls; one HMAC key on scratch for every part; parts already written are skipped), scripts/slurm/pack_corpus.sh (build_shards.py rewritten streaming: dedup signatures in worker processes (dedup.deduplicate_stream, same decisions as deduplicate), per-source packing at 4,096 and 8,192 from one tokenisation (datasets.build_source_shards_stream, identical output to build_source_shards), scrub parts read back in collection order, build_summary.json for P4-M), setup_env.sh also builds envs/scrub from its lock. P4-K: collectors take --limit all, stream to *.partial, resume through --http-cache; FineWeb-2 capped at FINEWEB_LIMIT=2,000,000 and shuffled across dumps. Smoke rebuild with the streaming path: same documents/tokens/dedup as the P3-Z shards; rows differ only by order (collection order instead of id order). Observation for the user: dedup keep-order sorts by source name, so a FineWeb copy of a legal document survives and the legal original is dropped (existing P3-S rule, unchanged). validate exit 0, 950 passed, 2026-09-29.",
+    "2026-09-29: P7 needs a decision before code: the collectors keep no Abschnitt level (GII skips gliederungseinheit; Document has no hierarchy field) and RII flattens Tenor/Tatbestand/Gruende (the part of each Rn. is lost), so P7-A/P7-B need a backward-compatible schema addition (Document.hierarchy, Section.part) and parser changes in the statute and case-law collectors. The HTTP cache lets a corpus be re-parsed later without re-downloading, so it does not block P4-K.",
+    "2026-09-29: decision dedup_cross_source: every copy (user, 2026-09-29: 'keep both and when cited cite both so that not only 1 citetion works but many'; chose 'Every copy' for pretraining): copies of one text in DIFFERENT sources are all kept and packed, and linked in the dedup log; duplicates inside ONE source are still dropped (decision 13 amended)",
+    "2026-09-29: decision cite_every_copy: a citation names every source that holds the cited passage (user, 2026-09-29): retrieval keeps every copy; the dedup log's cross-source links group them; the renderer (P7-G) cites all of them",
+    "2026-09-29: User instruction 2026-09-29: 'proceed with the P7-A/B' (ahead of phase, --force; current_phase stays P4) with the schema addition Document.hierarchy / Section.part.",
+    "2026-09-29: P7-A (ahead of phase, --force; user: 'proceed with the P7-A/B'): lexhybrid/retrieval/chunking.py::chunk_statute -- one chunk per § / Artikel, hierarchy act -> Document.hierarchy (new schema field: GII gliederungseinheit path, Fedlex part/title/chapter; RIS norms and EUR-Lex none yet) -> provision heading; every Absatz cut into Satz / Nr. / lit. units labelled as statute citation ids (grammar now allows Nr. 2a); valid_from/to; <= 64 sentences per chunk, longer provisions continue; Chunk.passage() is a P3-Y passage; Chunk.copies for the cross-source links (decisions.cite_every_copy). Tests: tests/test_retrieval.py::test_statute_chunks_carry_hierarchy_and_dates, ::test_statute_labels_are_citation_ids_and_long_provisions_continue, ::test_chunks_are_prompt_passages_and_dispatch_by_type; tests/test_data.py::test_collectors_record_hierarchy_and_parts. validate exit 0, 958 passed, 2026-09-29.",
+    "2026-09-29: P7-B (ahead of phase, --force): chunk_case_law -- part by part via the new Section.part (RII, OLDP, BGer, RIS decisions record it), windows of 300-500 tokens (paragraph boundary once 300 are held, sentence end only when 500 would pass, an over-long sentence cut at spaces; only a part's edges may be short), anchored at the Randnummern / Erwaegungen covered (BAG 3 AZR 158/22 Rn. 6-8, BGer 4A_102/2026 E. 3.1), every sentence labelled at its Rn.; tokens estimated at 2.28 Qwen3 tokens/word (P3-D) unless a counter is passed. Tests: tests/test_retrieval.py::test_case_windows_keep_randnummer, ::test_swiss_windows_anchor_at_erwaegungen_and_counts_are_injectable, ::test_an_overlong_sentence_is_cut_into_window_sized_verbatim_pieces. validate exit 0, 958 passed, 2026-09-29.",
+    "2026-09-29: Decision 13 as amended (decisions.dedup_cross_source) implemented: dedup.deduplicate_signatures drops a duplicate only inside one source; a copy in another source is kept, packed and logged with dropped=false (DedupLog.dropped); build_shards.py packs it and reports duplicates_dropped / copies_linked in build_summary.json. Tests updated to the amended rule (test_dedup_catches_planted_near_duplicate, test_dedup_at_scale_makes_the_same_decisions, test_build_shards_streams_scrub_parts_dedups_and_packs_every_length). validate exit 0, 958 passed, 2026-09-29.",
+    "2026-09-30: P7-C1 (ahead of phase, --force; user: 'Yes proceed with P7-C'): pyproject.toml gains bm25s[stem]>=0.3.11 (decision 14; the stem extra pulls PyStemmer, cp311 wheels for macOS arm64 and Linux x86_64); uv lock: +bm25s 0.3.11, +pystemmer 3.1.0, no other change; uv sync --locked; check_env.py KEY_IMPORTS gain bm25s and Stemmer (ENVIRONMENT OK). The cluster .venv now differs from uv.lock: setup_env.sh must run before the next cluster job that runs check_env.py. validate exit 0, 960 passed, 2026-09-30.",
+    "2026-09-30: P7-C (ahead of phase, --force): lexhybrid/retrieval/bm25.py (BM25Index over chunk texts with bm25s: lower-case, NLTK German stopwords, Snowball German stemmer via PyStemmer (umlauts folded), one-character tokens kept for '§ 1' / 'Art. 6' / 'lit. f'; Lucene BM25 k1 1.5 b 0.75; zero-score chunks left out; save/load with the tokenizer settings checked) and scripts/build_index.py --kind bm25 (scrubbed JSONL in -- raw/ refused per R11, scrub parts accepted; chunks.jsonl + bm25/ + index.json out; every copy of a text indexed, decision 13 as amended). Chunk.to_json/from_json. Tests: tests/test_retrieval.py::test_bm25_finds_planted_passage, ::test_build_index_writes_chunks_manifest_and_a_queryable_index. validate exit 0, 964 passed, 2026-09-30.",
+    "2026-09-30: Verification pass on the Mac, 2026-09-30 (user: 'check it if each components changed is working or not'), real inputs, no cluster numbers: collectors live (GII 5, RII 2, BGer 1 docs) with --http-cache, offline replay with proxies on a closed port gave identical documents and no new cache files; live GII BGB §1 hierarchy [Buch 1, Abschnitt 1, Titel 1], live RII/BGer parts; FineWeb-2 live shuffle differs from dataset order, same seed same sample; streaming scrub (2 parts, 8 docs/call, real flair) equals the P3 scrub on gii, fedlex, ris (87/87 entity lines identical, ~800-900 chars/s CPU); streaming build_shards with amended dedup equals P3 per source at 4096 and builds 8192 (1 within-RII duplicate dropped, 0 cross-source copies in the smoke corpus); 2,048-token cut from 4096 shards + train_pretrain CLI 3 steps; 2-rank CPU DDP under simulated SLURM_NTASKS=1 starts both ranks (without LightningEnvironment: KeyError SLURM_NODEID); arch_only CLI; screen_arms verify --reduced 7 arms 0 problems; profiler packed slab step on real hybrid_legal_base, chunk 16 read back; R1 eager on hybrid_legal_base L=512: operator 2.98e-7, chunk 64 vs 128 logits 1.9e-6 PASS; torch.compile cannot run on this Mac (Inductor clang++ breaks on the spaces in the repo path; CI and cluster paths have none); chunking 174 smoke docs -> 603 chunks, 298/298 statute labels parse, decision windows median 438 max 500 tokens; BM25 on the GerLeRB/GerDaLIR fixture samples nDCG@10 0.881/0.863 (18/21 passages: a sanity check, not P7-K). Found and fixed: StepStatsCallback reset the clock to None after validation, so a run validating every step timed nothing; it now restarts the clock when validation ends (test extended). validate exit 0, 965 passed; validate --ci exit 0, 972 passed, coverage 95.44%, 2026-09-30.",
+    "2026-09-30: Bug found and fixed (P4-K code, box still open): the FineWeb-2 collector with the seeded shuffle wrote its files and printed its summary but its process never ended (hang in native teardown after Python's shutdown: faulthandler never fired; the in-order stream exits in 1 s), so the P4-K FineWeb array task would have held its slot until the 4-day limit. Every collector module now ends through base.main (cli, flush, os._exit with cli's code; errors -> traceback, exit 1). Live FineWeb --limit 3: exit 0 after 62 s. Tests: tests/test_data.py::test_collector_entry_point_ends_the_process_at_once (subprocesses with a lingering worker thread; exit codes 0/1/1/2), ::test_every_collector_module_ends_through_the_entry_point. validate exit 0, 970 passed, 2026-09-30."
   ],
   "open_questions": []
 }

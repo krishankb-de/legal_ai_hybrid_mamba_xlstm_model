@@ -9,7 +9,9 @@ part is a sequence of ``<dl class="RspDL">`` entries: a ``<dt>`` that may carry 
 ``<a name="rd_N">N</a>`` and a ``<dd>`` with the paragraph.
 
 One ``Document`` per decision; each non-empty entry is a ``Section`` labelled ``Rn. N`` when it has
-a Randnummer, otherwise by its part (``Tenor``, ``Leitsatz``). ``valid_from`` is the decision date.
+a Randnummer, otherwise by its part (``Tenor``, ``Leitsatz``), and every section records its part
+(``Section.part``: the retriever chunks a decision part by part, P7-B). ``valid_from`` is the
+decision date.
 The published decisions are already anonymised; the LER scrub (P3-R) still runs over them.
 Licence: official work under § 5 UrhG (register row ``rii``).
 """
@@ -20,7 +22,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Iterator
 
-from lexhybrid.data.corpus.collectors.base import cli, http_get, licence_flags, utc_now
+from lexhybrid.data.corpus.collectors.base import http_get, licence_flags, main, utc_now
 from lexhybrid.data.schema import Document, Section
 
 TOC_URL = "https://www.rechtsprechung-im-internet.de/rii-toc.xml"
@@ -84,7 +86,9 @@ def parse_rii_xml(xml_bytes: bytes, url: str = "", retrieved_at: str | None = No
             anchor = dl.find("dt/a")
             rd = _RD.fullmatch(anchor.get("name", "")) if anchor is not None else None
             number = int(rd.group(1)) if rd else None
-            sections.append(Section(label=f"Rn. {number}" if number else name, randnummer=number, text=text))
+            sections.append(
+                Section(label=f"Rn. {number}" if number else name, randnummer=number, text=text, part=name)
+            )
             if first:
                 lines.append(name)
                 first = False
@@ -152,4 +156,4 @@ class RIICollector:
 
 
 if __name__ == "__main__":
-    raise SystemExit(cli(RIICollector()))
+    main(RIICollector())

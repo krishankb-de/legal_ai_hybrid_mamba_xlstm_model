@@ -22,10 +22,21 @@ the renderer and the verifier. The schema is plan box P3-A.
 | `retrieved_at` | ISO timestamp | UTC time of retrieval |
 | `sha256` | str | SHA-256 of the UTF-8 `text`; filled automatically and checked on load |
 | `sections` | list of `Section` | the quotable units, in document order |
+| `hierarchy` | list of str | the structural headings above a provision (Buch, Abschnitt, Titel), outermost first; empty when the source has none |
 
 `Section` holds `label` (the citable label inside the document, such as `§ 573 Abs. 2 Nr. 1`,
-`Art. 97 Abs. 1`, `Rn. 14`, `E. 3.2` or `Tenor`), `absatz`, `satz_idx`, `randnummer`, and the section
-`text`. The integer fields are null when they do not apply.
+`Art. 97 Abs. 1`, `Rn. 14`, `E. 3.2` or `Tenor`), `absatz`, `satz_idx`, `randnummer`, the section
+`text`, and `part`: the part of a decision the section belongs to (`Leitsatz`, `Tenor`, `Tatbestand`,
+`Entscheidungsgründe`, `Gründe`, `Sachverhalt`, `Erwägungen`, `Dispositiv`, `Kopf`, `Spruch`,
+`Begründung`, ...), null for statutes and for sources that mark no parts. The integer fields are null
+when they do not apply.
+
+`hierarchy` (list of str, default empty) is the act's structural headings above a provision,
+outermost first, where the source records them: `["Abschnitt 1 Allgemeine Vorschriften"]` (GII),
+`["Erste Abteilung: Allgemeine Bestimmungen", "Zweiter Titel: ...", "Zweiter Abschnitt: ..."]`
+(Fedlex). RIS norms and EUR-Lex acts carry none yet. The retriever's statute chunks (P7-A) start
+their hierarchy with the act and end it with the provision; decisions are chunked part by part
+(P7-B). Both fields were added on 2026-09-29; a record written before then loads with the defaults.
 
 A record that breaks these rules raises `ValueError` on construction and on load:
 - `id` must start with `source:`.
@@ -47,7 +58,7 @@ abbreviation (or `SR <number>`) and may be followed by `SchlT`; then, optionally
 - `ZGB SchlT Art. 1`: an article of the Swiss Civil Code's final title (Schlusstitel)
 - `SR 221.214.111 Art. 3`: a Swiss act without an abbreviation, cited by its SR number
 
-Numbers may carry a letter suffix: `BGB §573a`, `ZGB Art. 334bis`, `OR Art. 40a Abs. 2bis`.
+Numbers may carry a letter suffix: `BGB §573a`, `ZGB Art. 334bis`, `OR Art. 40a Abs. 2bis`, `BeurkG §3 Abs. 1 Nr. 2a`.
 
 The renderer (P7) prints these labels next to every quoted sentence.
 

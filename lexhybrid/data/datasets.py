@@ -22,19 +22,20 @@ research-only source listed for the commercial-safe arm is an error, never a sil
 import hashlib
 import json
 import math
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
 import torch
 from torch.utils.data import Dataset
 
-from lexhybrid.data.packing import pack, write_shards
+from lexhybrid.data.packing import Packer, ShardWriter
 from lexhybrid.data.schema import Document
 
 VAL_FRACTION = 0.001
 MIN_VAL_DOCS = 2000
 ARMS = ("commercial_safe", "research")
+SPLITS = ("train", "val")
 
 
 def _unit(seed: int, key: str) -> float:
@@ -72,24 +73,74 @@ def build_source_shards(
     sources = {d.source for d in docs}
     if len(sources) != 1:
         raise ValueError(f"one source per call, got {sorted(sources)}")
-    (source,) = sources
     val_ids = split_by_document([d.id for d in docs], fraction, minimum, seed)
-    out = root / str(row_len) / source
-    meta = {
-        "source": source, "row_len": row_len, "licences": sorted({d.licence for d in docs}),
-        "commercial_safe": all(d.commercial_safe for d in docs), "research_only": any(d.research_only for d in docs),
-        "val_fraction": fraction, "min_val_docs": minimum, "seed": seed, **(extra or {}),
-    }  # fmt: skip
-    for split, part in (
-        ("train", [d for d in docs if d.id not in val_ids]),
-        ("val", [d for d in docs if d.id in val_ids]),
-    ):
-        rows = list(pack(part, encode, eos_id, row_len))
-        write_shards(rows, out / split)
-        meta[split] = {"documents": len(part), "rows": len(rows), "tokens": sum(r.length for r in rows),
-                       "document_ids": sorted(d.id for d in part)}  # fmt: skip
-    (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1) + "\n")
-    return meta
+    metas = build_source_shards_stream(
+        docs, val_ids, encode, eos_id, (row_len,), root, fraction, minimum, seed, extra
+    )
+    return metas[row_len]
+
+
+def build_source_shards_stream(
+    docs: Iterable[Document],
+    val_ids: set[str],
+    encode: Callable[[str], list[int]],
+    eos_id: int,
+    row_lens: Sequence[int],
+    root: Path,
+    fraction: float = VAL_FRACTION,
+    minimum: int = MIN_VAL_DOCS,
+    seed: int = 0,
+    extra: dict | None = None,
+) -> dict[int, dict]:
+    """``build_source_shards`` for a source that does not fit in memory (P4-L): ONE pass over its
+    documents, each tokenised once and packed at every row length, rows written to their shards as
+    they complete. ``val_ids`` is ``split_by_document`` over the source's ids (a first pass, ids
+    only). The shards and ``meta.json`` of each row length are exactly ``build_source_shards``'."""
+    packers = {(n, s): Packer(n, eos_id) for n in row_lens for s in SPLITS}
+    writers: dict[tuple[int, str], ShardWriter] = {}
+    counts = {(n, s): {"rows": 0, "tokens": 0} for n in row_lens for s in SPLITS}
+    ids: dict[str, list[str]] = {s: [] for s in SPLITS}
+    source, licences, commercial_safe, research_only = None, set(), True, False
+
+    def emit(key, rows):
+        for row in rows:
+            writers[key].write(row)
+            counts[key]["rows"] += 1
+            counts[key]["tokens"] += row.length
+
+    for doc in docs:
+        if source is None:
+            source = doc.source
+            writers.update(
+                {(n, s): ShardWriter(root / str(n) / source / s) for n in row_lens for s in SPLITS}
+            )
+        elif doc.source != source:
+            raise ValueError(f"one source per call, got {source!r} and {doc.source!r}")
+        split = "val" if doc.id in val_ids else "train"
+        ids[split].append(doc.id)
+        licences.add(doc.licence)
+        commercial_safe &= doc.commercial_safe
+        research_only |= doc.research_only
+        tokens = [*encode(doc.text), eos_id]
+        for n in row_lens:
+            emit((n, split), packers[(n, split)].add(doc, tokens))
+    if source is None:
+        raise ValueError("no documents")
+    metas = {}
+    for n in row_lens:
+        meta = {
+            "source": source, "row_len": n, "licences": sorted(licences), "commercial_safe": commercial_safe,
+            "research_only": research_only, "val_fraction": fraction, "min_val_docs": minimum, "seed": seed,
+            **(extra or {}),
+        }  # fmt: skip
+        for s in SPLITS:
+            emit((n, s), packers[(n, s)].finish())
+            writers[(n, s)].close()
+            meta[s] = {"documents": len(ids[s]), **counts[(n, s)], "document_ids": sorted(ids[s])}
+        out = root / str(n) / source
+        (out / "meta.json").write_text(json.dumps(meta, ensure_ascii=False, indent=1) + "\n")
+        metas[n] = meta
+    return metas
 
 
 @dataclass(frozen=True)
@@ -118,10 +169,36 @@ def effective_weights(groups: dict[str, float], sources: Sequence[SourceSpec], a
     return {k: v / z for k, v in weights.items()}
 
 
-class SourceShards:
-    """The rows of one source's split, read shard by shard on first use."""
+def shard_directory(root: Path, row_len: int, source: str) -> tuple[Path, int]:
+    """Where ``source``'s ``row_len``-token rows come from, and how many sub-rows a stored row gives.
 
-    def __init__(self, directory: Path, split: str):
+    Shards packed at exactly ``row_len`` are read as they are (factor 1). Otherwise the smallest
+    packed length that is a multiple of ``row_len`` serves each stored row as ``factor`` consecutive
+    sub-rows: the P5 screen trains on 2,048-token rows cut from the 4,096-token shards (P4-L packs
+    4,096 and 8,192 only). A cut is a stretch of the same packed stream; a sub-row that starts inside
+    a document is an ordinary packed row (no position predicts into position 0).
+    """
+    root = Path(root)
+    exact = root / str(row_len) / source
+    if exact.is_dir():
+        return exact, 1
+    lengths = sorted(
+        int(p.name)
+        for p in (root.iterdir() if root.is_dir() else ())
+        if p.name.isdigit() and int(p.name) > row_len and int(p.name) % row_len == 0 and (p / source).is_dir()
+    )
+    if not lengths:
+        raise FileNotFoundError(
+            f"no shards for {source} at {row_len} tokens or a multiple of it under {root}"
+        )
+    return root / str(lengths[0]) / source, lengths[0] // row_len
+
+
+class SourceShards:
+    """The rows of one source's split, read shard by shard on first use. With ``factor`` > 1 every
+    stored row is served as ``factor`` consecutive sub-rows of ``stored_len / factor`` tokens."""
+
+    def __init__(self, directory: Path, split: str, factor: int = 1):
         import pyarrow.parquet as pq
 
         self.meta = json.loads((directory / "meta.json").read_text())
@@ -129,12 +206,17 @@ class SourceShards:
         if not self.paths:
             raise FileNotFoundError(f"no shards in {directory / split}")
         self.counts = [pq.ParquetFile(p).metadata.num_rows for p in self.paths]
+        self.factor = int(factor)
+        if self.factor < 1 or int(self.meta.get("row_len", self.factor)) % self.factor:
+            raise ValueError(
+                f"{directory}: stored rows of {self.meta.get('row_len')} tokens cannot be cut {factor} ways"
+            )
         self._cache: dict[int, list[dict]] = {}
 
     def __len__(self) -> int:
-        return sum(self.counts)
+        return sum(self.counts) * self.factor
 
-    def row(self, k: int) -> dict:
+    def _stored(self, k: int) -> dict:
         for i, n in enumerate(self.counts):
             if k < n:
                 if i not in self._cache:
@@ -144,6 +226,22 @@ class SourceShards:
                 return self._cache[i][k]
             k -= n
         raise IndexError(k)
+
+    def row(self, k: int) -> dict:
+        if not 0 <= k < len(self):
+            raise IndexError(k)
+        stored, part = divmod(k, self.factor)
+        row = self._stored(stored)
+        if self.factor == 1:
+            return row
+        width = len(row["input_ids"]) // self.factor
+        lo = part * width
+        return {
+            **row,
+            "input_ids": row["input_ids"][lo : lo + width],
+            "doc_ids": row["doc_ids"][lo : lo + width],
+            "length": max(0, min(row["length"] - lo, width)),  # real tokens of this cut
+        }
 
 
 class PackedMixture(Dataset):
@@ -167,9 +265,10 @@ class PackedMixture(Dataset):
         import numpy as np
 
         self.arm, self.row_len = arm, row_len
-        self.sources = {
-            name: SourceShards(Path(root) / str(row_len) / name, split) for name in sorted(weights)
-        }
+        self.sources = {}
+        for name in sorted(weights):
+            directory, factor = shard_directory(root, row_len, name)
+            self.sources[name] = SourceShards(directory, split, factor)
         for name, s in self.sources.items():
             if arm == "commercial_safe" and (s.meta["research_only"] or not s.meta["commercial_safe"]):
                 raise ValueError(

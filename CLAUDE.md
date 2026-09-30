@@ -64,3 +64,13 @@ Claude runs on the Mac; the cluster is reached only through the `ssh` one-liners
 ## Environment
 
 Local: `.venv` from `uv sync --locked` (Python 3.11 from `.python-version`, torch 2.11.0 CPU/MPS wheel). CI: the same command on Linux (torch 2.11.0+cu128, CPU execution). Cluster: `.venv` built by `scripts/slurm/setup_env.sh` with the same command (torch 2.11.0+cu128), `outputs/` on `$SCRATCH_ROOT`, `HF_HUB_OFFLINE=1` in training jobs, `SAVE_TOP_K=0` on arms. `Reference/` exists only until P1-Z.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).

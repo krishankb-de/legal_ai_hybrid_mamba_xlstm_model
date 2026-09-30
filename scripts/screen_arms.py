@@ -147,6 +147,7 @@ def env_lines(name: str) -> list[str]:
         "SAVE_TOP_K": "0",
         "EXTRA_OVERRIDES": " ".join(hydra_overrides(arm_name)),
         "ARM_EXPECT": "|".join(arm.expect),
+        "ARM_FORBID": "|".join(arm.forbid),
         "ARM_WALLTIME": arm.walltime,
     }
     return [f"export {k}={shlex.quote(v)}" for k, v in exports.items()]

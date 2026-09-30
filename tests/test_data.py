@@ -262,6 +262,165 @@ def test_collector_cli_writes_documents_and_manifest(tmp_path):
     lines = (tmp_path / "raw" / "gii.jsonl").read_text().splitlines()
     assert len(lines) == 3 and Document.from_json(lines[0]).id == "gii:fake:0"
     assert len(read_manifest(tmp_path / "m" / "gii.jsonl")) == 3
+    # P4-K: `--limit all` collects everything the source has; nothing is left as .partial
+    assert (
+        cli(Fake(), ["--limit", "all", "--out", str(tmp_path / "raw"), "--manifest-dir", str(tmp_path / "m")])
+        == 0
+    )
+    assert len((tmp_path / "raw" / "gii.jsonl").read_text().splitlines()) == 5
+    assert [r["id"] for r in read_manifest(tmp_path / "m" / "gii.jsonl")] == [
+        f"gii:fake:{i}" for i in range(5)
+    ]
+    assert not list(tmp_path.rglob("*.partial"))
+    for bad in ("0", "-2", "many"):
+        with pytest.raises(SystemExit):
+            cli(Fake(), ["--limit", bad])
+
+
+_ENTRY_POINT_SCRIPT = r"""
+import sys, threading, time
+from lexhybrid.data.corpus.collectors.base import main
+from lexhybrid.data.schema import Document
+
+class Collector:
+    name, licence, jurisdiction = "gii", "DE-UrhG-5", "DE"
+
+    def iter_documents(self, limit=None):
+        mode = sys.argv[1]
+        if mode == "raise":
+            raise ConnectionError("network gone")
+        # a download worker left behind, as a stopped datasets stream leaves them
+        threading.Thread(target=time.sleep, args=(120,)).start()
+        for i in range(0 if mode == "empty" else (limit or 3)):
+            yield Document(id=f"gii:x:{i}", source="gii", jurisdiction="DE", doc_type="statute",
+                           licence="DE-UrhG-5", commercial_safe=True, text=f"Satz {i}.")
+
+main(Collector(), sys.argv[2:])
+"""
+
+
+@pytest.mark.parametrize(
+    "mode, args, code",
+    [("ok", ["--limit", "2"], 0), ("empty", [], 1), ("raise", [], 1), ("ok", ["--limit", "0"], 2)],
+)
+def test_collector_entry_point_ends_the_process_at_once(tmp_path, mode, args, code):
+    """P4-K: a collector module ends its process right after writing its files (base.main), even
+    with a worker thread still alive -- a stopped, shuffled datasets stream left one that kept the
+    FineWeb-2 process alive past its summary line (2026-09-30) -- and exits with cli's code."""
+    import subprocess
+    import sys
+    import time
+
+    script = tmp_path / "collect.py"
+    script.write_text(_ENTRY_POINT_SCRIPT)
+    out, manifests = tmp_path / "raw", tmp_path / "m"
+    start = time.monotonic()
+    res = subprocess.run(
+        [sys.executable, str(script), mode, *args, "--out", str(out), "--manifest-dir", str(manifests)],
+        capture_output=True, text=True, timeout=90,
+    )  # fmt: skip
+    assert time.monotonic() - start < 60, "the lingering worker kept the process alive"
+    assert res.returncode == code, res.stdout + res.stderr
+    if code == 0:
+        assert "gii: 2 documents" in res.stdout and len((out / "gii.jsonl").read_text().splitlines()) == 2
+    if mode == "raise":
+        assert "ConnectionError: network gone" in res.stderr
+
+
+def test_every_collector_module_ends_through_the_entry_point():
+    import re
+
+    root = FIXTURES.parents[1].parent / "lexhybrid" / "data" / "corpus" / "collectors"
+    modules = [p for p in root.glob("*.py") if p.name not in ("__init__.py", "base.py", "htmltext.py")]
+    assert len(modules) == 10
+    for p in modules:
+        tail = p.read_text().split('if __name__ == "__main__":', 1)[1]
+        assert re.fullmatch(r"\s*main\(\w+\(\)\)\s*", tail), p.name
+
+
+def test_collection_that_dies_leaves_the_last_complete_files_alone(tmp_path):
+    """A killed or failing at-scale collection (P4-K) streams into *.partial; the finished files of
+    the previous run are only replaced when a collection completes."""
+    from lexhybrid.data.corpus.collectors.base import run_collector
+
+    class Dies:
+        name, licence, jurisdiction = "gii", "DE-UrhG-5", "DE"
+
+        def __init__(self, fail_after):
+            self.fail_after = fail_after
+
+        def iter_documents(self, limit=None):
+            for i in range(10):
+                if self.fail_after is not None and i == self.fail_after:
+                    raise ConnectionError("network gone")
+                yield _doc(id=f"gii:fake:{i}")
+
+    raw, man = tmp_path / "raw", tmp_path / "m"
+    assert run_collector(Dies(None), None, raw, man, progress_every=4) == 10
+    with pytest.raises(ConnectionError):
+        run_collector(Dies(3), None, raw, man)
+    assert len((raw / "gii.jsonl").read_text().splitlines()) == 10  # the complete run survives
+    assert len((raw / "gii.jsonl.partial").read_text().splitlines()) == 3
+
+
+def test_http_cache_replays_responses_without_the_network(tmp_path):
+    """--http-cache (P4-K): a restarted collection is served what it already fetched -- GET by URL
+    and query, POST by JSON body -- without a request or a rate-limit wait; failures are not kept."""
+    import requests
+
+    from lexhybrid.data.corpus.collectors import base
+
+    class Session:
+        def __init__(self):
+            self.calls = []
+
+        def _reply(self, url, status=200, body=b'{"hits": [1, 2]}'):
+            r = requests.Response()
+            r.status_code, r._content, r.url, r.encoding = status, body, url, "utf-8"
+            r.headers = requests.structures.CaseInsensitiveDict({"Content-Type": "application/json"})
+            return r
+
+        def get(self, url, params=None, **kw):
+            self.calls.append(("GET", url, params))
+            return self._reply(url, 404 if url.endswith("/missing") else 200)
+
+        def post(self, url, json=None, **kw):
+            self.calls.append(("POST", url, json))
+            return self._reply(url, body=b'{"page": %d}' % json["page"])
+
+    waits = []
+
+    class Limiter:
+        def wait(self, host):
+            waits.append(host)
+
+    session, limiter = Session(), Limiter()
+    try:
+        base.set_http_cache(tmp_path / "cache")
+        first = base.http_get("https://ex.org/a", params={"q": 1}, session=session, limiter=limiter)
+        again = base.http_get("https://ex.org/a", params={"q": 1}, session=session, limiter=limiter)
+        other = base.http_get("https://ex.org/a", params={"q": 2}, session=session, limiter=limiter)
+        assert first.json() == again.json() == other.json() == {"hits": [1, 2]}
+        assert again.reason == "OK (http cache)" and again.headers["content-type"] == "application/json"
+        assert [c[2] for c in session.calls] == [{"q": 1}, {"q": 2}] and len(waits) == 2
+        p1 = base.http_post("https://ex.org/s", json={"page": 1}, session=session, limiter=limiter)
+        p2 = base.http_post("https://ex.org/s", json={"page": 2}, session=session, limiter=limiter)
+        assert (p1.json(), p2.json()) == ({"page": 1}, {"page": 2})
+        assert base.http_post(
+            "https://ex.org/s", json={"page": 1}, session=session, limiter=limiter
+        ).json() == {"page": 1}
+        assert len(session.calls) == 4
+        for _ in range(2):
+            with pytest.raises(base.FetchError):
+                base.http_get(
+                    "https://ex.org/missing", session=session, limiter=limiter, sleep=lambda s: None
+                )
+        assert len(session.calls) == 6, "a failed request is asked again, never replayed"
+        assert not list((tmp_path / "cache").rglob("*.tmp*"))
+    finally:
+        base.set_http_cache(None)
+    base.http_get("https://ex.org/a", params={"q": 1}, session=session, limiter=limiter)
+    assert len(session.calls) == 7, "without a cache every call reaches the network"
 
 
 # -- collector: Gesetze im Internet (P3-F) ------------------------------------------------------
@@ -1257,10 +1416,187 @@ def test_scrub_worker_tags_the_model_card_example():
         )
     doc = Document(id="t:1", source="t", jurisdiction="DE", doc_type="decision", licence="DE-UrhG-5",
                    commercial_safe=True, text="Herr W. verstieß gegen § 36 Abs. 7 IfSG.")  # fmt: skip
+    other = Document(id="t:2", source="t", jurisdiction="DE", doc_type="decision", licence="DE-UrhG-5",
+                     commercial_safe=True, text="Die Klage wird abgewiesen.")  # fmt: skip
     # the cache the skip check looked in, whatever HF_HOME / HF_HUB_CACHE say in this shell
-    entities, stats = run_worker([doc], args=("--cache-dir", str(REPO_ROOT / "data" / "hf" / "hub")))
+    cache = ("--cache-dir", str(REPO_ROOT / "data" / "hf" / "hub"))
+    entities, stats = run_worker([doc], args=cache)
     (person,) = [e for e in entities["t:1"] if e.label == "PER"]
     assert doc.text[person.start : person.end] == "W." and person.score > 0.9 and stats["docs"] == 1
+    batched, stats = run_worker(
+        [doc, other], args=(*cache, "--docs-per-batch", "2")
+    )  # P4-L: one predict call
+    assert batched["t:1"] == entities["t:1"] and batched["t:2"] == [] and stats["docs"] == 2
+
+
+def test_collectors_record_hierarchy_and_parts():
+    """P7-A/B's inputs (schema fields added 2026-09-29): statute collectors carry the act's
+    structural headings above each provision (Document.hierarchy, outermost first), decision
+    collectors the part of the decision each paragraph belongs to (Section.part); records written
+    before the fields existed still load, with the defaults."""
+    import json
+
+    from lexhybrid.data.corpus.collectors.gii import parse_gii_xml
+    from lexhybrid.data.corpus.collectors.oldp import parse_oldp_case
+    from lexhybrid.data.corpus.collectors.rii import parse_rii_xml
+    from lexhybrid.data.corpus.collectors.ris import parse_ris_decision
+
+    gii = parse_gii_xml((FIXTURES / "gii" / "beurkg_excerpt.xml").read_bytes(), "beurkg")
+    assert {tuple(d.hierarchy) for d in gii} == {("Abschnitt 1 Allgemeine Vorschriften",)}
+    fedlex = {**_fedlex("or_excerpt"), **_fedlex("zgb_excerpt")}
+    assert fedlex["OR Art. 97"].hierarchy == [
+        "Erste Abteilung: Allgemeine Bestimmungen",
+        "Zweiter Titel: Die Wirkung der Obligationen",
+        "Zweiter Abschnitt: Die Folgen der Nichterfüllung",
+    ]
+    assert fedlex["ZGB SchlT Art. 1"].hierarchy[0].startswith("Schlusstitel")
+    rii = parse_rii_xml((FIXTURES / "rii" / "jb-KARE600065578.xml").read_bytes())
+    parts = [s.part for s in rii.sections]
+    assert parts[0] == "Leitsatz" and "Tenor" in parts and parts[-1] == "Entscheidungsgründe"
+    assert parts == sorted(parts, key=["Leitsatz", "Tenor", "Tatbestand", "Entscheidungsgründe"].index)
+    assert {s.part for s in rii.sections if s.label == "Rn. 3"} == {"Tatbestand"}
+    bger = _bger("CH_BGer_004_4A-102-2026_2026-08-17")
+    assert {s.part for s in bger.sections if s.label.startswith("E. ")} == {"Erwägungen"}
+    assert {s.part for s in bger.sections if s.label.startswith("Sachverhalt")} == {"Sachverhalt"}
+    oldp = parse_oldp_case(json.loads((FIXTURES / "oldp" / "case_521941.json").read_text()))
+    assert {s.part for s in oldp.sections} >= {"Tenor"} and all(
+        s.part == s.label or (s.part is None and s.label == "Text") for s in oldp.sections
+    )
+    ris = parse_ris_decision(*_ris_fixture("JJT_20260917_OGH0002_0070OB00143_26V0000_000"))
+    assert all(s.part == s.label for s in ris.sections) and "Rechtliche Beurteilung" in {
+        s.part for s in ris.sections
+    }
+    old = json.loads(gii[0].to_json())
+    old.pop("hierarchy")
+    for s in old["sections"]:
+        s.pop("part")
+    back = Document.from_dict(old)
+    assert back.hierarchy == [] and back.sections[0].part is None and back.sha256 == gii[0].sha256
+
+
+def test_scrub_worker_tags_a_batch_of_documents_in_one_predict_call(script, monkeypatch):
+    """P4-L: `--docs-per-batch` puts the sentences of several documents into ONE predict call (short
+    documents fill the GPU's mini-batches together) and yields the per-document entities unchanged."""
+    import sys
+    import types
+
+    class Label:
+        def __init__(self, value, score):
+            self.value, self.score = value, score
+
+    class Span:
+        def __init__(self, start, end, value):
+            self.start_position, self.end_position, self._label = start, end, Label(value, 0.99)
+
+        def get_label(self, name):
+            return self._label
+
+    class Sentence:
+        def __init__(self, text, use_tokenizer=True):
+            assert use_tokenizer is False
+            self.text, self.spans = text, []
+
+        def get_spans(self, name):
+            return self.spans
+
+    class Tagger:
+        def __init__(self):
+            self.calls = []
+
+        def predict(self, sentences, mini_batch_size):
+            self.calls.append(len(sentences))
+            for s in sentences:
+                s.spans = [Span(m.start(), m.end(), "PER") for m in re.finditer(r"Müller|Schmidt", s.text)]
+
+    import re
+
+    monkeypatch.setitem(sys.modules, "flair", types.ModuleType("flair"))
+    monkeypatch.setitem(sys.modules, "flair.data", types.SimpleNamespace(Sentence=Sentence))
+    worker = script("scrub_ner_worker")
+    docs = [
+        {"id": "a", "text": "Herr Müller klagt.\nFrau Schmidt nicht."},
+        {"id": "b", "text": "Ohne Namen."},
+        {"id": "c", "text": "Müller und Schmidt; Müller zahlt."},
+    ]
+    batched = Tagger()
+    together = worker.tag(batched, docs, max_tokens=200, batch_size=32)
+    assert batched.calls == [4], "one predict call over the sentences (lines) of all three documents"
+    alone = Tagger()
+    assert together == [worker.tag(alone, [d], 200, 32)[0] for d in docs] and alone.calls == [2, 1, 1]
+    assert [e[2] for e in together[2]["entities"]] == ["PER", "PER", "PER"]
+
+
+FAKE_SCRUB_WORKER = r"""
+import json, re, sys
+argv = sys.argv[1:]
+batch = int(argv[argv.index("--docs-per-batch") + 1]) if "--docs-per-batch" in argv else 1
+die_after = int(argv[argv.index("--die-after") + 1]) if "--die-after" in argv else None
+pending, n = [], 0
+def flush():
+    for doc in pending:
+        ents = [[m.start(), m.end(), "PER", 0.99] for m in re.finditer(r"Müller", doc["text"])]
+        print(json.dumps({"id": doc["id"], "entities": ents}, ensure_ascii=False), flush=True)
+    pending.clear()
+for line in sys.stdin:
+    if not line.strip():
+        continue
+    n += 1
+    if die_after is not None and n > die_after:
+        print("worker died", file=sys.stderr); sys.exit(3)
+    pending.append(json.loads(line))
+    if len(pending) >= batch:
+        flush()
+flush()
+print("some flair log line", file=sys.stderr)
+print(json.dumps({"docs": n, "chars": 0, "seconds": 0.1, "docs_per_s": 1.0}), file=sys.stderr)
+"""
+
+
+def test_scrub_streams_parts_through_one_worker(tmp_path):
+    """P4-L: stride parts of a source, streamed through one worker process with a bounded window
+    of documents in flight; outputs named per part and renamed from *.partial on completion; a
+    worker that dies leaves only the *.partial files; a consumer that stops early does not hang."""
+    import itertools
+    import sys
+
+    from lexhybrid.data.corpus.scrub_ler import iter_part, part_name, scrub_file, stream_worker
+
+    fake = tmp_path / "fake_worker.py"
+    fake.write_text(FAKE_SCRUB_WORKER)
+    docs = [_doc(id=f"gii:bgb:{i}", text=f"Herr Müller zahlt {i} Euro.") for i in range(50)]
+    raw = tmp_path / "gii.jsonl"
+    raw.write_text("".join(d.to_json() + "\n" for d in docs))
+    assert [d.id for d in iter_part(raw, 1, 3)] == [f"gii:bgb:{i}" for i in range(1, 50, 3)]
+    with pytest.raises(ValueError):
+        next(iter_part(raw, 3, 3))
+    assert part_name("gii", 0, 1) == "gii.jsonl" and part_name("gii", 1, 4) == "gii.part-1-of-4.jsonl"
+
+    stats = {}
+    streamed = list(
+        stream_worker(iter(docs), sys.executable, ("--docs-per-batch", "4"), fake, in_flight=16, stats=stats)
+    )
+    assert [d.id for d, _ in streamed] == [d.id for d in docs] and stats["docs"] == 50
+    assert all(e[0].label == "PER" for _, e in streamed)
+    head = list(itertools.islice(stream_worker(iter(docs), sys.executable, (), fake, in_flight=4), 3))
+    assert len(head) == 3  # the generator was closed early: the worker is killed, nothing hangs
+
+    out_ids = []
+    for k in (0, 1):
+        name = part_name("gii", k, 2)
+        s = scrub_file("gii", raw, tmp_path / "scrubbed" / name, tmp_path / "manifests" / f"scrub_{name}",
+                       python=sys.executable, part=k, parts=2, worker=fake, in_flight=8)  # fmt: skip
+        assert s["docs"] == 25 and s["entities"] == 25 and s["worker"]["docs"] == 25
+        lines = (tmp_path / "scrubbed" / name).read_text().splitlines()
+        assert all("[PER_1] zahlt" in Document.from_json(ln).text for ln in lines)
+        out_ids += [Document.from_json(ln).id for ln in lines]
+    assert sorted(out_ids) == sorted(d.id for d in docs)
+    assert not list(tmp_path.rglob("*.partial"))
+
+    dead = tmp_path / "scrubbed" / "dead.jsonl"
+    with pytest.raises(RuntimeError, match="worker died"):
+        scrub_file("gii", raw, dead, tmp_path / "manifests" / "scrub_dead.jsonl", python=sys.executable,
+                   worker_args=("--die-after", "10"), worker=fake, in_flight=4)  # fmt: skip
+    assert not dead.exists() and (tmp_path / "scrubbed" / "dead.jsonl.partial").exists()
 
 
 # -- deduplication (P3-S) ----------------------------------------------------------------------
@@ -1278,8 +1614,10 @@ def _oldp_docs():
 
 
 def test_dedup_catches_planted_near_duplicate():
-    """P3-S: exact-hash pre-pass, then MinHash (5-gram shingles, 128 permutations, Jaccard >= 0.8);
-    the commercial-safe copy survives whatever the input order, and the answer is deterministic."""
+    """P3-S: exact-hash pre-pass, then MinHash (5-gram shingles, 128 permutations, Jaccard >= 0.8).
+    A near duplicate inside one source is dropped; the copy in another source (here the research-only
+    Multi Legal Pile copy of an OLDP decision) is kept and linked (decision 13 as amended by the user,
+    2026-09-29: "keep both and when cited cite both"); whatever the input order, the same answer."""
     import dataclasses
     import random
 
@@ -1301,15 +1639,45 @@ def test_dedup_catches_planted_near_duplicate():
     assert 0.8 <= true_jaccard < 1.0 and minhash(base.text).jaccard(minhash(near.text)) >= 0.8
 
     kept, log = deduplicate([exact_nc, near, *docs])  # the research-only copy comes first on purpose
-    assert [d.id for d in kept] == sorted(d.id for d in docs)  # every original, and only those
+    # every original, then the research-only copy (visited last), and not the planted duplicate
+    assert [d.id for d in kept] == [*sorted(d.id for d in docs), exact_nc.id]
     by_id = {entry.id: entry for entry in log}
-    assert by_id["multilegalpile:de_caselaw_germany_openlegaldata:7"].duplicate_of == docs[0].id
-    assert by_id["multilegalpile:de_caselaw_germany_openlegaldata:7"].kind == "exact"
+    link = by_id["multilegalpile:de_caselaw_germany_openlegaldata:7"]
+    assert (link.duplicate_of, link.kind, link.dropped) == (docs[0].id, "exact", False)
     assert by_id["oldp:planted"].kind == "near" and by_id["oldp:planted"].duplicate_of == base.id
+    assert by_id["oldp:planted"].dropped is True
     assert set(by_id) == {"multilegalpile:de_caselaw_germany_openlegaldata:7", "oldp:planted"}
     shuffled = [exact_nc, near, *docs]
     random.Random(1).shuffle(shuffled)
     assert [d.id for d in deduplicate(shuffled)[0]] == [d.id for d in kept]
+
+
+def test_dedup_at_scale_makes_the_same_decisions(tmp_path):
+    """P4-L: signatures (no text, 512 bytes of MinHash) computed in worker processes from a stream,
+    then the same visiting order and decisions as `deduplicate`."""
+    import dataclasses
+
+    import numpy as np
+
+    from lexhybrid.data.corpus.dedup import deduplicate, deduplicate_stream, signature
+
+    docs = _oldp_docs() + [_bger("CH_BGer_004_4A-102-2026_2026-08-17")]
+    near = dataclasses.replace(docs[1], id="oldp:planted", text=docs[1].text.replace(" ", "  ", 2), sha256="")
+    twin = dataclasses.replace(docs[0], id="oldp:exact-copy")
+    web = dataclasses.replace(  # another source: a near copy that must stay, linked
+        _fineweb_docs()[0], id="fineweb2_de:copy", text=docs[2].text.replace(" ", "  ", 1), sha256=""
+    )
+    corpus = [twin, near, web, *docs]
+    kept, log = deduplicate(corpus)
+    sig = signature(docs[0])
+    assert len(sig.hashvalues) == 128 * 4 and np.frombuffer(sig.hashvalues, np.uint32).shape == (128,)
+    for workers in (1, 2):
+        ids, stream_log = deduplicate_stream(iter(corpus), workers=workers)
+        assert ids == [d.id for d in kept] and stream_log == log
+    assert {e.id for e in log if e.dropped} == {"oldp:exact-copy", "oldp:planted"}
+    (linked,) = [e for e in log if not e.dropped]
+    assert {linked.id, linked.duplicate_of} == {"fineweb2_de:copy", docs[2].id} and linked.kind == "near"
+    assert "fineweb2_de:copy" in {d.id for d in kept}
 
 
 def test_dedup_shingles():
@@ -1568,6 +1936,153 @@ def test_mixture_draws_the_configured_shares(tmp_path):
     assert last["length"] < 64 and torch.all(full[k]["labels"][last["length"] :] == -100)
     val = PackedMixture(tmp_path, 64, "val", weights, "commercial_safe")
     assert len(val) == sum(len(s) for s in val.sources.values())
+
+
+def test_streaming_build_equals_the_in_memory_build_at_every_row_len(tmp_path):
+    """P4-L at scale: one pass, each document tokenised once, packed at two row lengths together --
+    the same shards and meta.json as build_source_shards at each length on its own."""
+    import json
+
+    from lexhybrid.data.datasets import build_source_shards, build_source_shards_stream, split_by_document
+    from lexhybrid.data.packing import read_rows
+
+    encode, _, eos = _char_codec()
+    docs = _oldp_docs()
+    calls = []
+
+    def counted(text):
+        calls.append(text)
+        return encode(text)
+
+    val_ids = split_by_document([d.id for d in docs], 0.001, 1, 0)
+    metas = build_source_shards_stream(
+        iter(docs), val_ids, counted, eos, (32, 64), tmp_path / "stream", 0.001, 1, 0, {"scrubbed": True}
+    )
+    assert len(calls) == len(docs), "every document is tokenised once for both row lengths"
+    for n in (32, 64):
+        ref = build_source_shards(docs, encode, eos, n, tmp_path / f"ref{n}", 0.001, 1, 0, {"scrubbed": True})
+        assert metas[n] == ref
+        stream_dir, ref_dir = tmp_path / "stream" / str(n) / "oldp", tmp_path / f"ref{n}" / str(n) / "oldp"
+        assert json.loads((stream_dir / "meta.json").read_text()) == ref
+        for split in ("train", "val"):
+            got = sorted((stream_dir / split).glob("*.parquet"))
+            want = sorted((ref_dir / split).glob("*.parquet"))
+            assert [p.name for p in got] == [p.name for p in want]
+            assert [read_rows(p) for p in got] == [read_rows(p) for p in want]
+    with pytest.raises(ValueError, match="no documents"):
+        build_source_shards_stream(iter([]), set(), encode, eos, (32,), tmp_path / "empty")
+    with pytest.raises(ValueError, match="one source"):
+        build_source_shards_stream(
+            iter(docs + _fineweb_docs()), val_ids, encode, eos, (32,), tmp_path / "mix"
+        )
+
+
+def _char_encoder():
+    return _char_codec()[0]
+
+
+def test_build_shards_streams_scrub_parts_dedups_and_packs_every_length(tmp_path, script):
+    """P4-L's pack step (scripts/build_shards.py): a whole scrubbed file and a source in scrub-array
+    parts, deduplicated together (a cross-source copy is dropped from its source before packing),
+    packed at two row lengths; the summary P4-M reads; incomplete parts and unscrubbed sources
+    are refused."""
+    import argparse
+    import dataclasses
+    import json
+
+    bs = script("build_shards")
+    scrubbed, raw, root = tmp_path / "scrubbed", tmp_path / "raw", tmp_path / "shards"
+    scrubbed.mkdir()
+    oldp, web = _oldp_docs(), _fineweb_docs()
+    copy = dataclasses.replace(web[0], id="fineweb2_de:copy-of-oldp", text=oldp[0].text, sha256="")
+    twin = dataclasses.replace(oldp[1], id="oldp:twin")  # a duplicate inside one source: dropped
+    (scrubbed / "oldp.jsonl").write_text("".join(d.to_json() + "\n" for d in [*oldp, twin]))
+    parts = [[d for i, d in enumerate([*web, copy]) if i % 2 == k] for k in (0, 1)]
+    for k, docs in enumerate(parts):
+        (scrubbed / f"fineweb2_de.part-{k}-of-2.jsonl").write_text("".join(d.to_json() + "\n" for d in docs))
+    args = argparse.Namespace(
+        sources=["oldp", "fineweb2_de", "gii"], scrubbed=scrubbed, raw=raw, allow_unscrubbed=False,
+        workers=1, row_len=[32, 64], root=root, val_fraction=0.001, min_val_docs=1, seed=0,
+    )  # fmt: skip
+    part_files = [scrubbed / f"fineweb2_de.part-{k}-of-2.jsonl" for k in (0, 1)]
+    assert [d.id for d in bs.iter_documents(part_files)] == [d.id for d in [*web, copy]], "collection order"
+    summary = bs.build(args, encoder_factory=_char_encoder, eos_id=0)
+    assert (summary["duplicates_dropped"], summary["copies_linked"]) == (1, 1)
+    assert summary["documents"] == len(oldp) + len(web) + 2
+    for n in (32, 64):
+        entries = [json.loads(ln) for ln in (root / str(n) / "dedup.jsonl").read_text().splitlines()]
+        (drop,) = [e for e in entries if e["dropped"]]
+        (entry,) = [e for e in entries if not e["dropped"]]
+        assert (drop["id"], drop["duplicate_of"]) == ("oldp:twin", oldp[1].id)
+        assert {entry["id"], entry["duplicate_of"]} == {copy.id, oldp[0].id} and entry["kind"] == "exact"
+        shipped = set()
+        for source in ("oldp", "fineweb2_de"):
+            meta = json.loads((root / str(n) / source / "meta.json").read_text())
+            assert meta["row_len"] == n and meta["scrubbed"] is True
+            shipped |= set(meta["train"]["document_ids"] + meta["val"]["document_ids"])
+            got = summary["sources"][source][str(n)]
+            assert (
+                got["train"]["documents"] + got["val"]["documents"]
+                == len(meta["train"]["document_ids"] + meta["val"]["document_ids"])
+                and "document_ids" not in got["train"]
+            )
+        assert {entry["id"], entry["duplicate_of"]} <= shipped, "a copy in another source is packed too"
+        assert shipped == {d.id for d in [*oldp, *web, copy]}, "the within-source twin is not"
+    assert json.loads((root / "build_summary.json").read_text()) == json.loads(json.dumps(summary))
+    assert "gii" not in summary["sources"]  # no files: skipped
+    (raw / "gii").mkdir(parents=True)
+    (raw / "gii" / "gii.jsonl").write_text("{}\n")
+    with pytest.raises(SystemExit, match="not scrubbed"):
+        bs.build(args, encoder_factory=_char_encoder, eos_id=0)
+    (scrubbed / "fineweb2_de.part-1-of-2.jsonl").rename(scrubbed / "fineweb2_de.part-1-of-3.jsonl")
+    with pytest.raises(SystemExit, match="incomplete or mixed scrub parts"):
+        bs.source_files("fineweb2_de", scrubbed, raw, False)
+    with pytest.raises(SystemExit, match="oldp: .*cannot give a validation split"):
+        bs.build(
+            argparse.Namespace(**{**vars(args), "sources": ["oldp"], "min_val_docs": 10_000}),
+            _char_encoder,
+            0,
+        )
+
+
+def test_mixture_cuts_stored_rows_for_a_shorter_row_len(tmp_path):
+    """The P5 screen trains on 2,048-token rows and P4-L packs 4,096 and 8,192: a row length with
+    no shards of its own is served from the smallest packed multiple, each stored row cut into
+    consecutive sub-rows that are exactly the stored row's pieces (here 32 from 64)."""
+    import torch
+
+    from lexhybrid.data.datasets import PackedMixture, SourceShards, shard_directory
+
+    _build(tmp_path, _oldp_docs(), row_len=64)
+    _build(tmp_path, _oldp_docs(), row_len=128)
+    assert shard_directory(tmp_path, 64, "oldp") == (tmp_path / "64" / "oldp", 1)
+    assert shard_directory(tmp_path, 32, "oldp") == (tmp_path / "64" / "oldp", 2)  # smallest multiple
+    with pytest.raises(FileNotFoundError, match="multiple"):
+        shard_directory(tmp_path, 48, "oldp")
+    stored, cut = (
+        SourceShards(tmp_path / "64" / "oldp", "train"),
+        SourceShards(tmp_path / "64" / "oldp", "train", 2),
+    )
+    assert len(cut) == 2 * len(stored)
+    for k in range(len(stored)):
+        whole, a, b = stored.row(k), cut.row(2 * k), cut.row(2 * k + 1)
+        assert a["input_ids"] + b["input_ids"] == whole["input_ids"]
+        assert a["doc_ids"] + b["doc_ids"] == whole["doc_ids"]
+        assert a["length"] + b["length"] == whole["length"] and a["documents"] == whole["documents"]
+    last = cut.row(len(cut) - 1)
+    assert 0 <= last["length"] <= 32 and last["length"] == max(0, stored.row(len(stored) - 1)["length"] - 32)
+    with pytest.raises(IndexError):
+        cut.row(len(cut))
+    with pytest.raises(ValueError, match="cut"):
+        SourceShards(tmp_path / "64" / "oldp", "train", 3)
+    mix = PackedMixture(tmp_path, 32, "train", {"oldp": 1.0}, "commercial_safe", num_samples=50)
+    item = mix[0]
+    assert item["input_ids"].shape == (32,) and item["doc_ids"].shape == (32,)
+    val = PackedMixture(tmp_path, 32, "val", {"oldp": 1.0}, "commercial_safe")
+    val_cut = val.sources["oldp"]
+    assert len(val) == len(val_cut) == 2 * len(SourceShards(tmp_path / "64" / "oldp", "val"))
+    tail = val_cut.row(len(val_cut) - 1)["length"]  # val reads every sub-row once, in order
+    assert torch.all(val[len(val) - 1]["labels"][tail:] == -100)
 
 
 # -- probes: MQAR and statute recall (P3-W) ----------------------------------------------------

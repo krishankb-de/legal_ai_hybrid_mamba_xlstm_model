@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --partition=aisc-batch
 #SBATCH --account=aisc
-#SBATCH --exclude=ga03   # ARM/Grace node; x86 .venv python -> "cannot execute binary file: Exec format error"
+#SBATCH --exclude=ga03,gx17v1,gx13v1   # ga03: ARM/Grace node (x86 .venv -> "Exec format error"); gx13v1: faulty GPU
 #SBATCH --constraint=GLB_SCRATCH   # the uv cache lives on /sc/scratch, mounted only on these nodes
 #SBATCH --mem=32G   # job 2588677: uv sync peaked at 14.1 GB of 16G
 #SBATCH --cpus-per-task=8
@@ -39,4 +39,8 @@ echo "uv: $(uv --version)"
 
 uv sync --locked
 .venv/bin/python scripts/check_env.py
+# The LER scrub's own environment (decision 22; flair needs transformers < 5), from its own lock:
+# the P4-L scrub array runs scripts/scrub_ner_worker.py in it.
+uv sync --locked --project envs/scrub
+envs/scrub/.venv/bin/python scripts/check_env.py --scrub
 echo "SETUP_ENV DONE"

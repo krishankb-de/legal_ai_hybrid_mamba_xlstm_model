@@ -20,7 +20,7 @@ import re
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator
 
-from lexhybrid.data.corpus.collectors.base import cli, http_get, licence_flags, utc_now
+from lexhybrid.data.corpus.collectors.base import http_get, licence_flags, main, utc_now
 from lexhybrid.data.schema import Document, Section
 
 API = "https://data.bka.gv.at/ris/api/v2.6"
@@ -146,7 +146,7 @@ def parse_ris_decision(ref: dict, xml_bytes: bytes, retrieved_at: str | None = N
         if part != last:
             lines.append(part)
             last = part
-        sections.append(Section(label=part, text=text))
+        sections.append(Section(label=part, text=text, part=part))
         lines.append(text)
     if not sections:
         return None
@@ -238,4 +238,4 @@ class RISCollector:
 
 
 if __name__ == "__main__":
-    raise SystemExit(cli(RISCollector()))
+    main(RISCollector())

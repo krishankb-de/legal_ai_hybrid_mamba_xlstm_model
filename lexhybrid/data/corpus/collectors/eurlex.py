@@ -20,7 +20,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Iterator
 from datetime import date
 
-from lexhybrid.data.corpus.collectors.base import FetchError, cli, http_get, licence_flags, utc_now
+from lexhybrid.data.corpus.collectors.base import FetchError, http_get, licence_flags, main, utc_now
 from lexhybrid.data.schema import Document, Section
 
 CELLAR = "https://publications.europa.eu/resource/celex/{celex}"
@@ -190,4 +190,4 @@ class EURLexCollector:
 
 
 if __name__ == "__main__":
-    raise SystemExit(cli(EURLexCollector()))
+    main(EURLexCollector())

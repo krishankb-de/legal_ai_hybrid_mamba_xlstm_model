@@ -36,6 +36,10 @@ class Section:
         satz_idx: sentence number within the Absatz, when the section is one sentence.
         randnummer: margin number (Randnummer / Rz.) of a decision, when it has one.
         text: the section's exact text (what a quote is checked against).
+        part: the part of a decision the section belongs to -- ``"Leitsatz"``, ``"Tenor"``,
+            ``"Tatbestand"``, ``"Entscheidungsgründe"``, ``"Gründe"``, ``"Sachverhalt"``,
+            ``"Erwägungen"``, ``"Spruch"``, ``"Begründung"`` -- when the source marks it (P7-B chunks a
+            decision part by part); None for statutes and sources without parts.
     """
 
     label: str
@@ -43,6 +47,7 @@ class Section:
     satz_idx: int | None = None
     randnummer: int | None = None
     text: str = ""
+    part: str | None = None
 
 
 @dataclass
@@ -64,6 +69,9 @@ class Document:
     sha256: str = ""  # filled from ``text`` when empty
     research_only: bool = False
     sections: list[Section] = field(default_factory=list)
+    # The act's structural headings above this provision, outermost first, when the source has them
+    # (P7-A): ["Buch 2 Recht der Schuldverhältnisse", "Abschnitt 8 Einzelne Schuldverhältnisse", ...].
+    hierarchy: list[str] = field(default_factory=list)
 
     def __post_init__(self):
         self.sections = [s if isinstance(s, Section) else Section(**s) for s in self.sections]
@@ -135,7 +143,7 @@ _STATUTE = re.compile(
     rf"(?: (?P<part>SchlT))? "
     rf"(?:§ ?(?P<paragraph>{_NUM})|Art\. (?P<article>{_NUM}))"
     rf"(?: Abs\. (?P<absatz>{_NUM}))?(?: (?:S\.|Satz) (?P<satz>\d+))?"
-    rf"(?: Nr\. (?P<nummer>\d+))?(?: lit\. (?P<litera>[a-z]{{1,2}}))?$"
+    rf"(?: Nr\. (?P<nummer>{_NUM}))?(?: lit\. (?P<litera>[a-z]{{1,2}}))?$"
 )
 _DECISION = re.compile(
     r"^(?P<court>BGH|BVerfG|BVerwG|BFH|BAG|BSG|BPatG|OGH|VfGH|VwGH|BGer|BVGer|EuGH|EuG|[A-Z][A-Za-z]*G|[A-Z][A-Za-z]*GH) "

@@ -21,6 +21,7 @@ dependencies = [
     "tensorboard>=2.16",
     "requests>=2.31",  # collectors (P3-E); was only transitive
     "datasketch>=1.6",  # MinHash deduplication (P3-S); pulls scipy
+    "bm25s[stem]>=0.3.11",  # lexical retrieval (P7-C, decision 14); [stem] pulls PyStemmer (Snowball German)
 ]
 
 [dependency-groups]

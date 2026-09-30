@@ -82,14 +82,19 @@ def load_tagger(cache_dir: str):
 
 
 def tag(tagger, docs: list[dict], max_tokens: int, batch_size: int) -> list[dict]:
+    """Entities of every document, the sentences of all ``docs`` tagged in ONE ``predict`` call (on
+    a GPU, short documents fill the mini-batches together; the tags do not depend on the batch)."""
     from flair.data import Sentence
 
-    out = []
+    prepared = []
     for doc in docs:
         pieces = chunks(doc["text"], max_tokens)
-        sentences = [Sentence(piece, use_tokenizer=False) for _, piece in pieces]
-        if sentences:
-            tagger.predict(sentences, mini_batch_size=batch_size)
+        prepared.append((doc, pieces, [Sentence(piece, use_tokenizer=False) for _, piece in pieces]))
+    everything = [s for _, _, sentences in prepared for s in sentences]
+    if everything:
+        tagger.predict(everything, mini_batch_size=batch_size)
+    out = []
+    for doc, pieces, sentences in prepared:
         entities = []
         for (offset, piece), sentence in zip(pieces, sentences, strict=True):
             for span in sentence.get_spans("ner"):
@@ -105,20 +110,30 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="German legal NER over JSONL documents (stdin -> stdout).")
     parser.add_argument("--cache-dir", default=default_cache_dir())
     parser.add_argument("--max-tokens", type=int, default=200)
-    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--batch-size", type=int, default=32, help="sentences per mini-batch")
+    parser.add_argument("--docs-per-batch", type=int, default=1, help="documents tagged per predict call")
     args = parser.parse_args(argv)
     # flair logs to sys.stdout; keep stdout for the JSONL results and send everything else to stderr.
     out, sys.stdout = sys.stdout, sys.stderr
     tagger = load_tagger(args.cache_dir)
-    t0, n_docs, n_chars = time.perf_counter(), 0, 0
+    t0, n_docs, n_chars, batch = time.perf_counter(), 0, 0, []
+
+    def flush():
+        for result in tag(tagger, batch, args.max_tokens, args.batch_size):
+            out.write(json.dumps(result, ensure_ascii=False) + "\n")
+        out.flush()
+        batch.clear()
+
     for line in sys.stdin:
         if not line.strip():
             continue
         doc = json.loads(line)
-        (result,) = tag(tagger, [doc], args.max_tokens, args.batch_size)
-        out.write(json.dumps(result, ensure_ascii=False) + "\n")
-        out.flush()
+        batch.append(doc)
         n_docs, n_chars = n_docs + 1, n_chars + len(doc["text"])
+        if len(batch) >= args.docs_per_batch:
+            flush()
+    if batch:
+        flush()
     dt = time.perf_counter() - t0
     print(json.dumps({"docs": n_docs, "chars": n_chars, "seconds": round(dt, 2),
                       "docs_per_s": round(n_docs / dt, 3) if dt else None}), file=sys.stderr)  # fmt: skip

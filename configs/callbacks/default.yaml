@@ -13,3 +13,10 @@ checkpoint:
 lr_monitor:
   enabled: true
   logging_interval: step
+
+# STEPSTATS lines (s/step, peak GB) from every rank: the KD probe (P4-T) and the screen tables (P5-F)
+# read them from the job log.
+step_stats:
+  enabled: true
+  every_n_steps: 500
+  skip_steps: 5

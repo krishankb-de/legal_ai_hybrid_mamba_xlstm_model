@@ -162,6 +162,73 @@ def test_performance_profile_single_point_and_sweep(script, tmp_path):
     assert pp.fit_log_slope([1], [1]) is None
 
 
+def test_packed_doc_ids_shift_the_layout_per_row(script):
+    pp = script("performance_profile")
+    ids = pp.packed_doc_ids(4, 40, 10, "cpu")
+    assert ids.shape == (4, 40) and ids.dtype == torch.long
+    starts = [(r[1:] != r[:-1]).nonzero().flatten().add(1).tolist() for r in ids]
+    assert starts[0] == [10, 20, 30]
+    assert all(len(s) >= 3 and all(b - a == 10 for a, b in zip(s, s[1:])) for s in starts)
+    assert len({tuple(s) for s in starts}) == 4, "every row of the batch is packed differently"
+    with pytest.raises(ValueError):
+        pp.packed_doc_ids(1, 8, 0, "cpu")
+
+
+def test_performance_profile_packed_training_rows_with_the_slab_loss(script, tmp_path, monkeypatch):
+    """P4-P's training rows: packed doc_ids, the slab-wise loss (no (B, L, V) logits), both chunk
+    sizes read back off the built module and written to every row."""
+    pp = script("performance_profile")
+    cfg = HybridConfig(
+        vocab_size=64,
+        dim=64,
+        num_layers=3,
+        layer_pattern=["mamba3", "attention", "mlstm"],
+        mamba3_d_state=16,
+        mamba3_head_dim=32,
+        num_heads=2,
+        head_dim=32,
+        max_position_embeddings=128,
+        tfla_impl="exact",
+        mamba3_chunk_size=16,
+        mlstm_chunk_size=16,
+    )
+    monkeypatch.setattr(pp, "load_config", lambda name: HybridConfig.from_dict(cfg.to_dict()))
+    rows, _ = pp.run_sweep(
+        ["tiny"], [32, 64], [2], 1, "cpu", torch.float32, True, tmp_path,
+        chunk_size=8, mlstm_chunk_size=8, doc_len=20, loss="slab",
+    )  # fmt: skip
+    assert [r["oom"] for r in rows] == [False, False]
+    for r in rows:
+        assert (r["effective_chunk_size"], r["effective_mlstm_chunk_size"]) == (8, 8)
+        assert (r["loss"], r["doc_len"], r["attn_path"]) == ("slab", 20, "packed-sdpa")
+    header = (tmp_path / "efficiency_curves.csv").read_text().splitlines()[0].split(",")
+    assert {"loss", "doc_len", "attn_path", "effective_mlstm_chunk_size"} <= set(header)
+    unpacked, _ = pp.run_sweep(["tiny"], [32], [1], 1, "cpu", torch.float32, False, None)
+    assert unpacked[0]["attn_path"] == "causal-sdpa" and unpacked[0]["loss"] == ""
+    with pytest.raises(ValueError):
+        pp.measure_point(None, 1, 8, 1, "cpu", 64, backward=True, loss="mean")
+
+
+def test_slab_training_step_is_the_pretrain_loss(script):
+    """The profiler's slab step computes what PretrainLightningModule trains on: the model's own
+    boundary-masked CE."""
+    from lexhybrid.models.hybrid_lm import boundary_masked_labels
+    from lexhybrid.training.distill import slab_ce_kl
+
+    pp = script("performance_profile")
+    cfg = HybridConfig(
+        vocab_size=64, dim=32, num_layers=2, layer_pattern=["mamba3", "mlstm"], mamba3_d_state=16,
+        mamba3_head_dim=16, num_heads=2, head_dim=16, max_position_embeddings=64, tfla_impl="exact",
+        mlstm_chunk_size=8,
+    )  # fmt: skip
+    model = HybridLanguageModel(cfg).eval()
+    ids = torch.randint(0, 64, (2, 24))
+    doc = pp.packed_doc_ids(2, 24, 10, "cpu")
+    residual, _ = model.backbone(ids, doc_ids=doc)
+    slab = slab_ce_kl(residual[:, :-1], boundary_masked_labels(ids, doc), None, model.head, slab=8)["loss"]
+    assert slab.item() == pytest.approx(model(ids, labels=ids, doc_ids=doc).loss.item(), rel=1e-5)
+
+
 def test_bootstrap_paired_ci_sign(script, tmp_path):
     a = tmp_path / "a.jsonl"
     b = tmp_path / "b.jsonl"

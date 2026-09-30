@@ -7,7 +7,9 @@ comment ``Zuletzt geändert durch Art. 3 G v. 10.12.2025 I Nr. 320``); the other
 contents, structural headings (``gliederungseinheit``) and the provisions (``enbez`` ``§ 573`` or
 ``Art 5``) with their text in ``textdaten/text/Content/P``, one ``<P>`` per Absatz.
 
-One ``Document`` per provision (``BGB §573``); its sections are the Absätze. ``valid_from`` is the
+One ``Document`` per provision (``BGB §573``); its sections are the Absätze; ``hierarchy`` holds the
+structural headings above it (``Abschnitt 1 Allgemeine Vorschriften``), outermost first: a heading's
+``gliederungskennzahl`` extends its parent's by three digits (``010`` > ``010020``). ``valid_from`` is the
 date of the last amendment named in the law's ``Stand`` comment -- the version this text is --
 falling back to the date of the law's issue. Repealed provisions (``(weggefallen)``) and empty
 headings are skipped. Licence: official work under § 5 UrhG (register row ``gii``).
@@ -20,7 +22,7 @@ import zipfile
 from collections.abc import Iterator
 from datetime import date
 
-from lexhybrid.data.corpus.collectors.base import cli, http_get, licence_flags, utc_now
+from lexhybrid.data.corpus.collectors.base import http_get, licence_flags, main, utc_now
 from lexhybrid.data.schema import Document, Section
 
 TOC_URL = "https://www.gesetze-im-internet.de/gii-toc.xml"
@@ -88,8 +90,16 @@ def parse_gii_xml(xml_bytes: bytes, slug: str, retrieved_at: str | None = None) 
     flags = licence_flags("DE-UrhG-5")
     retrieved_at = retrieved_at or utc_now()
     docs = []
+    path: list[tuple[str, str]] = []  # (gliederungskennzahl, heading) of the open structural units
     for norm in norms[1:]:
         md = norm.find("metadaten")
+        unit = md.find("gliederungseinheit")
+        if unit is not None:
+            number = (unit.findtext("gliederungskennzahl") or "").strip()
+            words = f"{unit.findtext('gliederungsbez') or ''} {unit.findtext('gliederungstitel') or ''}"
+            path = [(k, h) for k, h in path if number.startswith(k) and k != number]
+            if words.split():
+                path.append((number, " ".join(words.split())))
         enbez = " ".join((md.findtext("enbez") or "").split())
         m = _ENBEZ.match(enbez)
         content = norm.find("textdaten/text/Content")
@@ -126,6 +136,7 @@ def parse_gii_xml(xml_bytes: bytes, slug: str, retrieved_at: str | None = None) 
                 valid_from=valid_from,
                 retrieved_at=retrieved_at,
                 sections=sections,
+                hierarchy=[heading for _, heading in path],
                 **flags,
             )
         )
@@ -176,4 +187,4 @@ class GIICollector:
 
 
 if __name__ == "__main__":
-    raise SystemExit(cli(GIICollector()))
+    main(GIICollector())

@@ -16,6 +16,15 @@ Fixes of the reference's stage-0 script (defect 12) that live here:
 * ``compile_model`` is honoured (the reference read ``compile``).
 * ``resume_from_checkpoint`` (the wrapper passes ``last.ckpt`` when it exists) resumes the run; a
   requeued reference job restarted from step 0.
+
+For the SLURM wrappers (P5-B, P6-A):
+
+* DDP runs as ONE SLURM task that starts its own rank processes (``LightningEnvironment``), so a
+  4-GPU job needs ``--gpus=4`` and no ``srun``/``--ntasks-per-node``; left to itself, Lightning
+  would detect SLURM from ``SLURM_NTASKS`` and expect one srun task per GPU.
+* ``+arch_only=true`` builds the model this exact config describes, prints its ``ARCH`` line and
+  exits: the wrappers check the arm's expected tokens against it before step 0 (FL1).
+* ``StepStatsCallback`` prints ``STEPSTATS`` lines (s/step, peak GB, per rank).
 """
 
 import os
@@ -34,7 +43,7 @@ from torch.utils.data import DataLoader
 from lexhybrid.config import HybridConfig
 from lexhybrid.data.synthetic import SyntheticPackedDataset
 from lexhybrid.models.hybrid_lm import HybridLanguageModel
-from lexhybrid.training.callbacks import SignalCheckpointCallback
+from lexhybrid.training.callbacks import SignalCheckpointCallback, StepStatsCallback
 from lexhybrid.training.pretrain_module import PretrainLightningModule
 from lexhybrid.utils.run_metadata import write_run_metadata
 
@@ -63,9 +72,16 @@ def build_trainer_kwargs(trainer_cfg) -> dict:
 
 
 def build_strategy(name):
-    """The strategy object: DDP is always built explicitly with the settings the plan fixes."""
+    """The strategy object: DDP is always built explicitly with the settings the plan fixes, and
+    launches its own rank processes inside the one SLURM task (``LightningEnvironment``)."""
     if name == "ddp":
-        return DDPStrategy(find_unused_parameters=False, gradient_as_bucket_view=True)
+        from lightning_fabric.plugins.environments import LightningEnvironment
+
+        return DDPStrategy(
+            find_unused_parameters=False,
+            gradient_as_bucket_view=True,
+            cluster_environment=LightningEnvironment(),
+        )
     return name
 
 
@@ -123,6 +139,9 @@ def build_dataloaders(cfg: DictConfig, vocab_size: int):
 
 def build_callbacks(cfg: DictConfig, enable_checkpointing: bool) -> list:
     callbacks = [SignalCheckpointCallback(cfg.checkpoint_dir)]
+    stats = cfg.callbacks.get("step_stats")
+    if stats is not None and stats.get("enabled", True):
+        callbacks.append(StepStatsCallback(stats.get("every_n_steps", 500), stats.get("skip_steps", 5)))
     ck = cfg.callbacks.checkpoint
     if enable_checkpointing:
         callbacks.append(
@@ -142,13 +161,31 @@ def build_callbacks(cfg: DictConfig, enable_checkpointing: bool) -> list:
     return callbacks
 
 
-def run(cfg: DictConfig) -> pl.Trainer:
+def is_launcher_rank() -> bool:
+    """True in the process the wrapper started: Lightning's DDP launcher starts ranks 1..N-1 by
+    re-running this script with ``LOCAL_RANK`` set, so only rank 0 lacks it (or has 0)."""
+    return int(os.environ.get("LOCAL_RANK", "0")) == 0
+
+
+def print_arch(cfg: DictConfig) -> str:
+    """The ``ARCH`` line of the model ``cfg.model`` builds (on ``meta``: no weights, no memory)."""
+    with torch.device("meta"):
+        line = HybridLanguageModel(HybridConfig.from_hydra(cfg.model)).architecture_fingerprint()
+    print(line, flush=True)
+    return line
+
+
+def run(cfg: DictConfig) -> pl.Trainer | None:
     """The whole pipeline, callable from tests with a composed config."""
+    if cfg.get("arch_only"):
+        print_arch(cfg)
+        return None
     torch.set_float32_matmul_precision("high")
     pl.seed_everything(cfg.seed, workers=True)
     for key in ("output_dir", "checkpoint_dir", "log_dir"):
         Path(cfg[key]).mkdir(parents=True, exist_ok=True)
-    write_run_metadata(cfg, cfg.output_dir, extra={"entrypoint": "scripts/train_pretrain.py"})
+    if is_launcher_rank():  # the DDP ranks re-run this script; one run_metadata.json, from rank 0
+        write_run_metadata(cfg, cfg.output_dir, extra={"entrypoint": "scripts/train_pretrain.py"})
 
     model = build_model(cfg)
     print(model.architecture_fingerprint(), flush=True)  # wrappers grep this at step 0
