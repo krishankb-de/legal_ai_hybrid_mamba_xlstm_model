@@ -89,6 +89,32 @@ class FetchError(RuntimeError):
     """A request failed after every retry."""
 
 
+class SkipFailedDocuments:
+    """Fetch one document, or skip it (logged) when its fetch fails after every retry, so a crawl of
+    days does not die on one dropped connection (job 2589358_1: RII, 13,000 documents and 3.8 h in,
+    one RemoteDisconnected). ``max_consecutive`` failures in a row still raise: that is an outage,
+    not a flaky document. Listing and index requests are not wrapped: without them nothing follows.
+    """
+
+    def __init__(self, source: str, max_consecutive: int = 20):
+        self.source, self.max_consecutive = source, max_consecutive
+        self.in_a_row = self.skipped = 0
+
+    def __call__(self, fetch, url: str):
+        """``fetch(url)``'s response, or None when it raised ``FetchError``."""
+        try:
+            response = fetch(url)
+        except FetchError as e:
+            self.in_a_row += 1
+            self.skipped += 1
+            print(f"{self.source}: skipping {url}: {e}", file=sys.stderr)
+            if self.in_a_row >= self.max_consecutive:
+                raise FetchError(f"{self.source}: {self.in_a_row} document fetches failed in a row") from e
+            return None
+        self.in_a_row = 0
+        return response
+
+
 class HttpCache:
     """Successful responses on disk, keyed by the request (method, URL, query, JSON body).
 

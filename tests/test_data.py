@@ -590,9 +590,15 @@ def test_html_blocks():
 
 @pytest.mark.network
 def test_oldp_live_smoke():
+    from huggingface_hub import get_token
+
     from lexhybrid.data.corpus.collectors.oldp import OLDPCollector
 
-    docs = list(OLDPCollector(page_size=5).iter_documents(limit=2))
+    if get_token() is None:
+        pytest.skip(
+            "openlegaldata/court-decisions-germany is gated: needs an HF token that accepted its terms"
+        )
+    docs = list(OLDPCollector().iter_documents(limit=2))
     assert len(docs) == 2 and all(d.valid_from and d.text for d in docs)
 
 
@@ -737,6 +743,44 @@ def test_ris_decision_on_fixture():
     assert doc.text.startswith("Kopf\n") and "\nSpruch\n" in doc.text
     assert parse_citation(doc.citation_id) == {"kind": "decision", "court": "OGH", "docket": "7 Ob 143/26v"}
     assert docket("1Ob358/60; 4Ob639/71") == "1 Ob 358/60"
+
+
+def test_ris_stops_at_the_last_page_the_search_reports(monkeypatch):
+    """Job 2589358_4: RIS answers a page past the end with HTTP 500 ("Die Seitennummer ist höher als
+    die Anzahl der verfügbaren Seiten"), not an empty list, so the whole RIS task died after ABGB's
+    last page. The collector stops at the page count in ``Hits`` and never asks for the next page."""
+    from lexhybrid.data.corpus.collectors import ris
+    from lexhybrid.data.corpus.collectors.base import FetchError
+
+    norm_ref, norm_xml = _ris_fixture("NOR40172917")
+    dec_ref, dec_xml = _ris_fixture("JJT_20260917_OGH0002_0070OB00143_26V0000_000")
+    xml = {ris._xml_url(norm_ref): norm_xml, ris._xml_url(dec_ref): dec_xml}
+    asked = []
+
+    class _Response:
+        def __init__(self, body=None, content=b""):
+            self.body, self.content = body, content
+
+        def json(self):
+            return self.body
+
+    def fake_get(url, params=None, **kwargs):
+        if url in xml:
+            return _Response(content=xml[url])
+        kind, page = url.rsplit("/", 1)[-1], int(params["Seitennummer"])
+        asked.append((kind, page))
+        if page > 2:  # 51 hits at 50 per page: 2 pages
+            raise FetchError(f"GET {url} failed after 5 attempts (HTTP 500)")
+        hits = {"@pageNumber": str(page), "@pageSize": "50", "#text": "51"}
+        ref = norm_ref if kind == "Bundesrecht" else dec_ref
+        return _Response(
+            {"OgdSearchResult": {"OgdDocumentResults": {"Hits": hits, "OgdDocumentReference": ref}}}
+        )
+
+    monkeypatch.setattr(ris, "http_get", fake_get)
+    docs = list(ris.RISCollector(codes=("ABGB",)).iter_documents())
+    assert asked == [("Bundesrecht", 1), ("Bundesrecht", 2), ("Judikatur", 1), ("Judikatur", 2)]
+    assert [d.doc_type for d in docs] == ["statute", "statute", "decision", "decision"]
 
 
 @pytest.mark.network

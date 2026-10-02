@@ -67,7 +67,7 @@ def test_every_planned_wrapper_exists():
 @pytest.mark.parametrize("path", WRAPPERS, ids=lambda p: p.name)
 def test_header(path):
     d = directives(path)
-    assert d.get("partition") == "aisc-batch"
+    assert d.get("partition") == "pot-hpi-aisc-batch"
     assert d.get("account") == "aisc"
     assert EXCLUDED_NODES <= set(d.get("exclude", "").split(",")), (
         "ga03 is an ARM node (the x86 .venv cannot run there); gx13v1 has a faulty GPU"
@@ -89,7 +89,7 @@ def test_body(path):
 
 @pytest.mark.parametrize("path", [p for p in WRAPPERS if runs_training(p)], ids=lambda p: p.name)
 def test_training_wrappers_requeue_and_append(path):
-    """FL5: aisc-batch is preemptible. A training job is requeued, and its log is appended to (a
+    """FL5: pot-hpi-aisc-batch is preemptible. A training job is requeued, and its log is appended to (a
     requeue with the default open mode truncates the log it is resuming)."""
     d = directives(path)
     assert "requeue" in d and d.get("open-mode") == "append"
@@ -408,13 +408,32 @@ def test_train_wrapper_defaults_and_the_arch_check_before_training(sandbox):
     out = sandbox.scratch / "outputs" / "pretrain_hybrid_legal_base_s42"
     for want in (
         "model=hybrid_legal_base", "seed=42", "dataset=mixture_pretrain", "trainer=h100_single_gpu",
-        "trainer.devices=1", "distill=qwen3_1p7b", "callbacks.checkpoint.save_top_k=0",
+        "trainer.devices=1", "distill=qwen3_8b", "model.use_gradient_checkpointing=true",
+        "callbacks.checkpoint.save_top_k=0",
         "experiment_name=pretrain_hybrid_legal_base_s42", f"output_dir={out}",
     ):  # fmt: skip
         assert want in train[0], want
     assert not any(a.startswith("+resume_from_checkpoint=") for a in train[0])
     assert "ARCH CHECK OK" in res.stdout and "TRAIN DONE pretrain_hybrid_legal_base_s42" in res.stdout
     assert res.stdout.index("du") < res.stdout.index("ARCH CHECK OK")
+
+
+@pytest.mark.parametrize(
+    "env, want",
+    [
+        ({}, "true"),  # the 8B teacher: checkpointing on (OOM without it, job 2589362)
+        ({"GRAD_CKPT": "false"}, "false"),  # an explicit setting wins
+        ({"DISTILL_CFG": "qwen3_1p7b"}, None),  # the 1.7B: the model's own default
+        ({"DISTILL_CFG": "none"}, None),
+    ],
+)
+def test_train_wrapper_checkpoints_the_8b_teacher_run(sandbox, env, want):
+    """P4-U chose Qwen3-8B-Base, which fits only with gradient checkpointing (job 2589417)."""
+    res, calls = sandbox("train_pretrain_1gpu.sh", **env)
+    assert res.returncode == 0, res.stdout + res.stderr
+    (train,) = _train_calls(calls)[1]
+    got = next((a.split("=", 1)[1] for a in train if a.startswith("model.use_gradient_checkpointing=")), None)
+    assert got == want
 
 
 def test_train_wrapper_resumes_from_last_ckpt(sandbox):
@@ -454,7 +473,8 @@ def test_train_wrapper_levers_and_extra_overrides_come_last(sandbox):
     )  # fmt: skip
     assert res.returncode == 0, res.stdout + res.stderr
     (train,) = _train_calls(calls)[1]
-    assert "distill=null" in train and "dataset.row_len=2048" in train
+    assert not any(a.startswith("distill=") for a in train), "none: the config default (no teacher)"
+    assert "dataset.row_len=2048" in train
     assert train.index("trainer.max_steps=5") < train.index("trainer.max_steps=7"), "the arm's value wins"
     assert train[-1] == "dataset.batch_size=8"
     assert not any(a.startswith(("trainer.accumulate_grad_batches=", "model.learning_rate=")) for a in train)
@@ -491,13 +511,66 @@ def test_probe_ckpt_size_reports_and_deletes_its_outputs(sandbox):
     res, calls = sandbox("probe_ckpt_size.sh", SLURM_JOB_ID=77, FAKE_WRITE_CKPT=1)
     assert res.returncode == 0, res.stdout + res.stderr
     (train,) = _train_calls(calls)[1]
-    assert {"trainer.max_steps=10", "distill=null", "dataset=synthetic", "model=hybrid_legal_base"} <= set(
-        train
-    )
+    assert {"trainer.max_steps=10", "dataset=synthetic", "model=hybrid_legal_base"} <= set(train)
+    assert not any(a.startswith("distill=") for a in train)
     assert "CKPT_BYTES=4321 CKPT_GB=0.000" in res.stdout and "PROBE_CKPT DONE" in res.stdout
     assert not (sandbox.scratch / "outputs" / "probe_ckpt_77").exists(), "the probe cleans up after itself"
     res, _ = sandbox("probe_ckpt_size.sh", SLURM_JOB_ID=78)  # training "ran" but wrote nothing
     assert res.returncode == 1 and "was not written" in res.stdout
+
+
+def _compose(overrides):
+    from hydra import compose, initialize_config_dir
+    from hydra.core.global_hydra import GlobalHydra
+
+    GlobalHydra.instance().clear()
+    with initialize_config_dir(config_dir=str(REPO_ROOT / "configs"), version_base="1.3"):
+        return compose(config_name="config", overrides=list(overrides))
+
+
+@pytest.mark.parametrize(
+    "script, env",
+    [
+        ("train_pretrain_1gpu.sh", {}),
+        ("train_pretrain_1gpu.sh", {"DISTILL_CFG": "none", "MAX_STEPS": 5, "ROW_LEN": 2048}),
+        ("train_pretrain_4gpu.sh", {"FAKE_GPUS": 4}),
+        ("screen_array.sh", {"ARMS": "S1-s42", "SLURM_ARRAY_TASK_ID": 0}),
+        ("probe_ckpt_size.sh", {"SLURM_JOB_ID": 77, "FAKE_WRITE_CKPT": 1}),
+        ("kd_memory_probe.sh", {"FAKE_GPUS": 4, "SLURM_JOB_ID": 91}),
+    ],
+    ids=lambda v: v if isinstance(v, str) else ",".join(f"{k}={x}" for k, x in v.items()) or "defaults",
+)
+def test_every_train_argument_list_composes_under_real_hydra(sandbox, script, env):
+    """Job 2589359: the fake interpreter recorded `distill=null` happily; real Hydra refused it
+    ("Config group override must be a string or a list") before step 0. Every train_pretrain.py
+    argument list a wrapper builds must compose against configs/."""
+    res, calls = sandbox(script, **env)
+    assert res.returncode == 0, res.stdout + res.stderr
+    lists = [c[c.index("scripts/train_pretrain.py") + 1 :] for c in calls if "scripts/train_pretrain.py" in c]
+    assert lists
+    for args in lists:
+        cfg = _compose(args)
+        distill = next((a.split("=", 1)[1] for a in args if a.startswith("distill=")), None)
+        assert (cfg.get("distill") is None) if distill is None else cfg.distill.teacher.startswith("Qwen/")
+
+
+def test_every_teacher_loads_the_revision_fetch_hf_puts_in_the_cache():
+    """Job 2589362: fetch_hf.sh fetched Qwen3-1.7B-Base at the tokenizer's pinned commit, which
+    writes no refs/main; the teacher was loaded without a revision, so offline it resolved `main`
+    and found nothing. Each distill config names the revision its teacher was fetched at."""
+    import yaml
+
+    from lexhybrid.data.tokenizer import QWEN3_REVISION
+
+    body = code(SLURM_DIR / "fetch_hf.sh")
+    fetched = dict(re.findall(r'^\s*"([\w.-]+/[\w.-]+)\|([^"]+)"', body, flags=re.M))
+    assert fetched["Qwen/Qwen3-1.7B-Base"] == "$QWEN_REV"
+    fetched["Qwen/Qwen3-1.7B-Base"] = QWEN3_REVISION
+    configs = sorted((REPO_ROOT / "configs" / "distill").glob("*.yaml"))
+    assert configs
+    for path in configs:
+        cfg = yaml.safe_load(path.read_text())
+        assert cfg["revision"] == fetched[cfg["teacher"]], path.name
 
 
 def test_kd_probe_runs_four_shapes_and_survives_an_oom(sandbox):
@@ -519,7 +592,34 @@ def test_kd_probe_runs_four_shapes_and_survives_an_oom(sandbox):
         {"trainer=h100_multi_ddp", "trainer.devices=4", "trainer.enable_checkpointing=false"} <= set(t)
         for t in train
     )
+    assert all("model.use_gradient_checkpointing=false" in t for t in train), "the probe's own setting"
     assert "KD PROBE RUNS THAT DID NOT FINISH" in res.stdout and "KD PROBE DONE" in res.stdout
+
+
+def test_kd_probe_reruns_only_the_named_shapes(sandbox):
+    """Job 2589362: the 1.7B shapes failed on infrastructure and are rerun; the 8B OOMs are results
+    and must not be measured again."""
+    res, calls = sandbox("kd_memory_probe.sh", FAKE_GPUS=4, SLURM_JOB_ID=92, PROBES="t1p7b_L4096 t1p7b_L8192")
+    assert res.returncode == 0, res.stdout + res.stderr
+    train = _train_calls(calls)[1]
+    assert [next(a for a in t if a.startswith("distill=")) for t in train] == ["distill=qwen3_1p7b"] * 2
+    assert "t8b_" not in res.stdout.replace("RUNS THAT DID NOT FINISH", "")
+
+
+def test_kd_probe_summary_reads_its_own_log(sandbox):
+    """Jobs 2589362, 2589379, 2589417: the log is the job's own stdout, and GNU grep refuses to read
+    its output file ("input file is also the output"), so the summary said "log not found". Run the
+    wrapper the way Slurm does, stdout into logs/kd_probe_<id>.log (CI's GNU grep catches a relapse)."""
+    (sandbox.repo / "logs").mkdir(exist_ok=True)
+    _executable(
+        sandbox.repo / "scripts" / "slurm" / "as_slurm.sh",
+        '#!/usr/bin/env bash\nbash scripts/slurm/kd_memory_probe.sh > "logs/kd_probe_${SLURM_JOB_ID}.log" 2>&1\n',
+    )
+    res, _ = sandbox("as_slurm.sh", FAKE_GPUS=4, SLURM_JOB_ID=93, PROBES="t1p7b_L4096")
+    assert res.returncode == 0, res.stdout + res.stderr
+    log = (sandbox.repo / "logs" / "kd_probe_93.log").read_text()
+    summary = log[log.index("== summary") :]
+    assert "== probe t1p7b_L4096" in summary and "no probe lines" not in summary
 
 
 def test_profile_measures_one_length_per_process_with_its_own_cache(sandbox):

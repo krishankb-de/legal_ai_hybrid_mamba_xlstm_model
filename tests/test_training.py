@@ -345,6 +345,28 @@ def test_only_the_launcher_rank_writes_run_metadata(script, monkeypatch):
     assert not tp.is_launcher_rank()
 
 
+@pytest.mark.parametrize("name", ["qwen3_1p7b", "qwen3_8b"])
+def test_build_teacher_loads_the_pinned_revision_offline(name, script, monkeypatch):
+    """Job 2589362: offline, a teacher loaded without its revision resolves refs/main, which the
+    pinned 1.7B snapshot never wrote. build_teacher passes the config's revision through."""
+    import transformers
+
+    seen = {}
+
+    def fake_from_pretrained(repo, **kwargs):
+        seen.update(repo=repo, **kwargs)
+        return torch.nn.Linear(1, 1)
+
+    monkeypatch.setattr(transformers.AutoModelForCausalLM, "from_pretrained", fake_from_pretrained)
+    monkeypatch.setenv("HF_HUB_OFFLINE", "1")
+    cfg = _compose(f"distill={name}")
+    teacher = script("train_pretrain").build_teacher(cfg)
+    assert not teacher.training and not any(p.requires_grad for p in teacher.parameters())
+    assert seen["repo"] == cfg.distill.teacher and seen["local_files_only"] is True
+    assert seen["revision"] == cfg.distill.revision
+    assert _compose().get("distill") is None and script("train_pretrain").build_teacher(_compose()) is None
+
+
 def test_arch_only_prints_the_fingerprint_and_trains_nothing(tmp_path, script, capsys):
     """The wrappers' step-0 check (FL1): `+arch_only=true` prints the ARCH line of exactly the model
     the overrides describe, on meta, and writes nothing."""

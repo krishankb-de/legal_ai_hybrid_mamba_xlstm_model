@@ -1,12 +1,12 @@
 {
   "current_phase": "P4",
-  "last_updated": "2026-09-30T16:50:28+02:00",
-  "status": "P4 in progress, 12/27: A-J1 and V done; cluster in maintenance since 2026-09-29. P4-J2 fix validated on the Mac (verdict needs gpu_tests.sh); wrappers for J3, K, L (scrub_array + pack_corpus), N, P, R, T written and sandbox-tested. Ahead of phase on the user's instruction: P5-A, P5-B, P6-A, P7-A, P7-B, P7-C1, P7-C ticked. uv.lock changed (bm25s, pystemmer): setup_env.sh first on the cluster. Decision 13 amended: cross-source copies kept and linked.",
+  "last_updated": "2026-10-02T08:12:32+02:00",
+  "status": "P4 in progress, 24/27: J2 J4 O Q S U green; teacher = Qwen3-1.7B-Base. Open: L/M (corpus: eurlex, fineweb2_de, multilegalpile, dip, gii done; rii fedlex bger running (2589358); RIS rerun 2589382; OLDP from HF dump 2589414), Z. Ahead of phase: P5-A, P5-B, P6-A, P7-A, P7-B, P7-C1, P7-C.",
   "plan_of_record": "LEGAL_BUILD_PLAN.md",
   "helper": "python3 scripts/plan_state.py <cmd> (stdlib only; the ONLY writer of LEGAL_BUILD_PLAN.md checkboxes and legal_build_state.json)",
   "scope": "Build lexhybrid: port the reference backbone/kernels/decode/tests (P1), fix 18 recorded defects and add legal decoder deltas (P2), data pipeline (P3), cluster + corpus + profiling (P4), pre-registered screen (P5), full backbone (P6), retrieval/renderer/verifier (P7), post-training (P8), evaluation (P9), release (P10); P11 optional. Local only, no git until the user writes 'git go'. Reference/ deleted at P1-Z by the user.",
   "blocked_on": null,
-  "next_action": "Cluster back: bash scripts/sync_to_cluster.sh; sbatch scripts/slurm/setup_env.sh FIRST (uv.lock gained bm25s + pystemmer in P7-C1, so every job's check_env.py would fail on the old .venv; it also builds envs/scrub); verdict = SETUP_ENV DONE; then sbatch scripts/slurm/gpu_tests.sh (P4-J2 verdict); one submission per session: multigpu_tests.sh --gpus=2 (P4-J3), build_corpus_array.sh --array=0-9 (P4-K), probe_ckpt_size.sh (P4-N), profile.sh (P4-P), equivalence.sh (P4-R), kd_memory_probe.sh --gpus=4 (P4-T); after P4-K: scrub_array.sh --array=0-79, pack_corpus.sh (P4-L). Cluster down: next local P7 boxes P7-E (RRF + reranker behind an injectable scorer), P7-F (filters; index fills Chunk.copies from dedup.jsonl links), P7-G (renderer cites every copy), P7-H; P7-D's dense.py code can be written, its index job needs the GPU.",
+  "next_action": "User asked to be told the next step, not to run it (2026-10-02). Pending user answers: (1) Germany-only training corpus or keep CH (fedlex, bger) + multilegalpile's CH parts; (2) go-ahead for scrub. Then: P4-L verdict (docs + chars per source, tokens estimated from fertility; exact at pack) -> SOURCES=<agreed list> sbatch --array=0-<8n-1> scrub_array.sh (pilot one part first to time the GPU scrub) -> pack_corpus.sh afterok -> P4-M corpus_manifest.md + P6 token budget -> P4-Z (validate --full).",
   "decisions": {
     "01_init_road": "From scratch first: Qwen3 tokenizer + logit-KL from an open Qwen3-*-Base teacher. Qwen3 conversion = P11, optional, on user instruction only. (user 2026-09-27)",
     "02_corpus": "Open-licensed sources PLUS a research-exception arm; every document carries licence + commercial_safe; research_only never enters a shippable arm. (user 2026-09-27)",
@@ -31,7 +31,8 @@
     "s5_forget_bias": "3.0, the base's value; one lever per arm (user, 2026-09-27; plan decision 21)",
     "ler_scrub_env": "flair/ner-german-legal in its own uv project envs/scrub/ (own lock); main env keeps transformers 5; fallback: a transformers-5-compatible model trained on German LER, evaluated on its test split first (user, 2026-09-27; plan decision 22)",
     "dedup_cross_source": "every copy (user, 2026-09-29: 'keep both and when cited cite both so that not only 1 citetion works but many'; chose 'Every copy' for pretraining): copies of one text in DIFFERENT sources are all kept and packed, and linked in the dedup log; duplicates inside ONE source are still dropped (decision 13 amended)",
-    "cite_every_copy": "a citation names every source that holds the cited passage (user, 2026-09-29): retrieval keeps every copy; the dedup log's cross-source links group them; the renderer (P7-G) cites all of them"
+    "cite_every_copy": "a citation names every source that holds the cited passage (user, 2026-09-29): retrieval keeps every copy; the dedup log's cross-source links group them; the renderer (P7-G) cites all of them",
+    "teacher": "Qwen/Qwen3-8B-Base with gradient checkpointing (P4-U rule on P6's recipe, job 2589417: 43.18 GB <= 70, 6.104 s = 1.44x the 1.7B's 4.224 s <= 1.6x; unchecked probes 2589362 OOM). User 2026-10-01: 'teacher choice : chosse which ever would give the best result i am thinking of 8B but decide accordingly and let me know'. Wrappers: DISTILL_CFG default qwen3_8b, GRAD_CKPT=true for the 8B."
   },
   "pre_registered": {
     "rules": {
@@ -585,19 +586,19 @@
           "desc": "`scripts/slurm/gpu_tests.sh` (1 H100: `pytest -m cuda tests/`, plus `check_env.py`) submitted with `sbatch`; record the job id."
         },
         "P4-J2": {
-          "done": false,
+          "done": true,
           "desc": "Verdict on the sbatch GPU-test job: every `cuda` test passed (count and log path in evidence); a failure is fixed before any screen job is submitted."
         },
         "P4-J3": {
-          "done": false,
+          "done": true,
           "desc": "`scripts/slurm/multigpu_tests.sh` (2 H100: `pytest -m multigpu tests/`) submitted with `sbatch --gpus=2`; record the job id."
         },
         "P4-J4": {
-          "done": false,
+          "done": true,
           "desc": "Verdict on the sbatch multi-GPU job: DDP smoke passed with identical gradients across ranks; evidence records the job id and log path."
         },
         "P4-K": {
-          "done": false,
+          "done": true,
           "desc": "`scripts/slurm/build_corpus_array.sh` (CPU array, one task per collector, `--limit` unset, writes `data/raw/<src>` and manifests on scratch) submitted with `sbatch --array`."
         },
         "P4-L": {
@@ -609,35 +610,35 @@
           "desc": "Verdict on the sbatch pack job: `analysis/corpus_manifest.md` from the template with tokens per source / jurisdiction / licence / arm, dedup removal rate, scrub entity counts; token budget for P6 set to `min(5B, avail..."
         },
         "P4-N": {
-          "done": false,
+          "done": true,
           "desc": "`scripts/slurm/probe_ckpt_size.sh` (10-step `hybrid_legal_base` run on 1 GPU writing `last.ckpt` to scratch) submitted with `sbatch`."
         },
         "P4-O": {
-          "done": false,
+          "done": true,
           "desc": "Verdict on the sbatch probe job: checkpoint size in GB → storage budget row in §6 and `evidence.ckpt_gb`; probe outputs deleted."
         },
         "P4-P": {
-          "done": false,
+          "done": true,
           "desc": "`scripts/slurm/profile.sh` (port map §11 point() protocol: one length per process, fresh `TORCHINDUCTOR_CACHE_DIR`; arms: `ref_hybrid_m3` sanity at 16,384 chunk 64 / compiled chunk 128; `ref_transformer` at 16,384; `h..."
         },
         "P4-Q": {
-          "done": false,
+          "done": true,
           "desc": "Verdict on the sbatch profile job: `analysis/profile_results.md` (prediction vs outcome; chunk-size decision by the rule \"128 unless it fails R1 or loses > 5% at 4,096\"); `effective_chunk_size` checked in every row."
         },
         "P4-R": {
-          "done": false,
+          "done": true,
           "desc": "`scripts/slurm/equivalence.sh` (`check_operator_equivalence.py --chunk-sizes 64 128 --compile` on GPU) submitted with `sbatch`."
         },
         "P4-S": {
-          "done": false,
+          "done": true,
           "desc": "Verdict on the sbatch equivalence job: exit 0 at 1e-4; compile smoke on the cluster (P2-Y's test under CUDA) green."
         },
         "P4-T": {
-          "done": false,
+          "done": true,
           "desc": "`scripts/slurm/kd_memory_probe.sh` (4×H100 DDP, 20 steps each: 1.7B teacher at 4,096 and 8,192 rows; 8B teacher at 4,096 and 8,192; records s/step and peak GB per rank) submitted with `sbatch --gpus=4`."
         },
         "P4-U": {
-          "done": false,
+          "done": true,
           "desc": "Verdict on the sbatch KD probe: `decisions.teacher` set by the rule \"8B if peak ≤ 70 GB at 4,096 rows and step time ≤ 1.6× the 1.7B step; else 1.7B\"; numbers into `analysis/profile_results.md`."
         },
         "P4-V": {
@@ -663,12 +664,12 @@
         "sync_stamp": "2026-09-27T20:58:14Z b708e84f…b57f",
         "first_sync": "300 files 10.8MB to hpi-hpc:/sc/home/krishankumar.bhushan/lexhybrid",
         "ls_slurm": ".gitkeep cluster.env.example (no wrappers yet; first is P4-E setup_env.sh)",
-        "job": "2588779",
-        "log": "cluster/logs/preflight_2588758.log",
+        "job": "2589379",
+        "log": "cluster/logs/kd_probe_2589379.log",
         "state": "COMPLETED 0:0, 00:02:00, gx14",
         "python": "3.11.15",
         "torch": "2.11.0+cu128",
-        "cuda": "12.8",
+        "cuda": "10 passed incl. test_compiled_flex_attention_matches_eager_per_row; ENVIRONMENT OK",
         "lock": "0 mismatches, 0 missing",
         "check_env": "ENVIRONMENT OK",
         "shellcheck": "clean (uvx shellcheck-py)",
@@ -680,7 +681,34 @@
         "arms": "7 arms, 0 problems, ARCH identical to Mac",
         "failed_first": "2588703 (infra: rsync anchors, uv PATH)",
         "cuda_tests_collected": "9",
-        "wrappers": "14 planned wrappers + diag_compile; tests/test_slurm_wrappers.py 72 tests incl. sandbox runs"
+        "wrappers": "14 planned wrappers + diag_compile; tests/test_slurm_wrappers.py 72 tests incl. sandbox runs",
+        "submit": "sbatch --gpus=4, afterok:2589349:2589355",
+        "diag": "job 2589356 log=cluster/logs/diag_compile_2589356.log: 15/15 cases ok, max row err 7.7e-7, no DRIFT (job 2588779 compile drift gone)",
+        "multigpu": "1 passed: test_ddp_step_gradients_identical_across_ranks (torch.equal across 2 H100 ranks, NCCL)",
+        "analysis": "analysis/profile_results.md",
+        "chunk": "128 kept: R1 1.68e-6 (job 2589360 hybrid_legal_base step), 444.20 vs 648.59 ms at 4096 packed",
+        "sanity": "ref_hybrid_m3 compiled c128 121.06 ms 7.169 GB; uncompiled c64 571.43 ms (-16%, outside 10%)",
+        "effective_chunk": "printed on every hybrid row",
+        "ckpt_gb": "2.649",
+        "ckpt_bytes": "2649246111",
+        "probe": "10 steps, STEPSTATS 0.2608 s/step, peak 20.25 GB (bs 4, L 2048, synthetic); outputs deleted by the job",
+        "storage": "§6 row: <= 15 checkpoints in 40 GB",
+        "r1_ref_hybrid_m3": "chunk64 0.000e+00, chunk128 1.646e-06, compile 1.685e-06 PASS",
+        "r1_hybrid_legal_base": "chunk64 1.610e-06, compile 1.852e-06 PASS (L=2048)",
+        "compile_smoke": "2 passed (P2-Y under CUDA)",
+        "first_run": "2589360 failed on the checker (mLSTM chunk swept), fixed",
+        "job_8b": "2589362",
+        "log_8b": "cluster/logs/kd_probe_2589362.log",
+        "t1p7b_L4096": "4.144 s/step, 80.60/83.29 GB alloc/reserved",
+        "t1p7b_L8192": "9.186 s/step, 70.74/80.26 GB",
+        "t8b": "OOM at 4096 (>=82.7 GB) and 8192 (>=81.7 GB)",
+        "teacher": "Qwen/Qwen3-1.7B-Base",
+        "caveat": "model gradient checkpointing off in the probe; P6 recipe has it on",
+        "kd_ckpt_job": "2589417",
+        "kd_ckpt_1p7b_4096": "4.224 s/step 30.11/36.42 GB",
+        "kd_ckpt_1p7b_8192": "10.891 s/step 20.14/30.19 GB",
+        "kd_ckpt_8b_4096": "6.104 s/step 43.18/49.13 GB",
+        "kd_ckpt_8b_8192": "15.174 s/step 33.22/43.34 GB"
       },
       "verdict": null
     },
@@ -1104,6 +1132,150 @@
       "status": "COMPLETED",
       "log": "logs/diag_compile_2588784.log",
       "last_checked": "2026-09-28T00:03:54+02:00"
+    },
+    "2589349": {
+      "phase": "P4",
+      "box": "P4-J2",
+      "arm": "none",
+      "submitted": "2026-09-30T19:07:47+02:00",
+      "status": "COMPLETED",
+      "log": "logs/setup_env_2589349.log",
+      "last_checked": "2026-09-30T19:36:11+02:00"
+    },
+    "2589355": {
+      "phase": "P4",
+      "box": "P4-J2",
+      "arm": "none",
+      "submitted": "2026-09-30T19:31:57+02:00",
+      "status": "COMPLETED",
+      "log": "logs/gpu_tests_2589355.log",
+      "last_checked": "2026-09-30T20:38:26+02:00"
+    },
+    "2589356": {
+      "phase": "P4",
+      "box": "P4-J2",
+      "arm": "none",
+      "submitted": "2026-09-30T19:31:57+02:00",
+      "status": "COMPLETED",
+      "log": "logs/diag_compile_2589356.log",
+      "last_checked": "2026-09-30T20:38:26+02:00"
+    },
+    "2589357": {
+      "phase": "P4",
+      "box": "P4-J4",
+      "arm": "none",
+      "submitted": "2026-09-30T19:31:57+02:00",
+      "status": "COMPLETED",
+      "log": "logs/multigpu_tests_2589357.log",
+      "last_checked": "2026-09-30T20:38:26+02:00"
+    },
+    "2589358": {
+      "phase": "P4",
+      "box": "P4-L",
+      "arm": "none",
+      "submitted": "2026-09-30T19:31:57+02:00",
+      "status": "COMPLETED",
+      "log": "logs/corpus_2589358_<0-9>.log",
+      "last_checked": "2026-10-02T08:12:32+02:00"
+    },
+    "2589359": {
+      "phase": "P4",
+      "box": "P4-O",
+      "arm": "hybrid_legal_base",
+      "submitted": "2026-09-30T19:31:57+02:00",
+      "status": "FAILED",
+      "log": "logs/probe_ckpt_2589359.log",
+      "last_checked": "2026-09-30T20:38:26+02:00"
+    },
+    "2589360": {
+      "phase": "P4",
+      "box": "P4-S",
+      "arm": "none",
+      "submitted": "2026-09-30T19:31:57+02:00",
+      "status": "FAILED",
+      "log": "logs/equivalence_2589360.log",
+      "last_checked": "2026-09-30T20:38:26+02:00"
+    },
+    "2589361": {
+      "phase": "P4",
+      "box": "P4-Q",
+      "arm": "none",
+      "submitted": "2026-09-30T19:31:57+02:00",
+      "status": "COMPLETED",
+      "log": "logs/profile_2589361.log",
+      "last_checked": "2026-09-30T20:38:26+02:00"
+    },
+    "2589362": {
+      "phase": "P4",
+      "box": "P4-U",
+      "arm": "hybrid_legal_base",
+      "submitted": "2026-09-30T19:31:57+02:00",
+      "status": "COMPLETED",
+      "log": "logs/kd_probe_2589362.log",
+      "last_checked": "2026-09-30T20:38:26+02:00"
+    },
+    "2589377": {
+      "phase": "P4",
+      "box": "P4-O",
+      "arm": "hybrid_legal_base",
+      "submitted": "2026-09-30T20:38:26+02:00",
+      "status": "COMPLETED",
+      "log": "logs/probe_ckpt_2589377.log",
+      "last_checked": "2026-09-30T20:39:04+02:00"
+    },
+    "2589378": {
+      "phase": "P4",
+      "box": "P4-S",
+      "arm": "none",
+      "submitted": "2026-09-30T20:38:26+02:00",
+      "status": "COMPLETED",
+      "log": "logs/equivalence_2589378.log",
+      "last_checked": "2026-09-30T20:39:04+02:00"
+    },
+    "2589379": {
+      "phase": "P4",
+      "box": "P4-U",
+      "arm": "hybrid_legal_base",
+      "submitted": "2026-09-30T20:38:26+02:00",
+      "status": "COMPLETED",
+      "log": "logs/kd_probe_2589379.log",
+      "last_checked": "2026-09-30T21:43:37+02:00"
+    },
+    "2589382": {
+      "phase": "P4",
+      "box": "P4-L",
+      "arm": "none",
+      "submitted": "2026-09-30T20:38:26+02:00",
+      "status": "CANCELLED",
+      "log": "logs/corpus_2589382_4.log",
+      "last_checked": "2026-10-02T08:12:32+02:00"
+    },
+    "2589414": {
+      "phase": "P4",
+      "box": "P4-L",
+      "arm": "none",
+      "submitted": "2026-09-30T21:43:37+02:00",
+      "status": "COMPLETED",
+      "log": "logs/corpus_2589414_2.log",
+      "last_checked": "2026-10-02T08:12:32+02:00"
+    },
+    "2589417": {
+      "phase": "P4",
+      "box": "P4-U",
+      "arm": "hybrid_legal_base",
+      "submitted": "2026-09-30T22:08:04+02:00",
+      "status": "COMPLETED",
+      "log": "logs/kd_probe_2589417.log",
+      "last_checked": "2026-09-30T22:35:25+02:00"
+    },
+    "2589572": {
+      "phase": "P4",
+      "box": "P4-L",
+      "arm": "none",
+      "submitted": "2026-10-01T07:50:22+02:00",
+      "status": "COMPLETED",
+      "log": "logs/corpus_2589572_1.log",
+      "last_checked": "2026-10-02T08:12:32+02:00"
     }
   },
   "artifacts": {},
@@ -1234,7 +1406,19 @@
         "P7-A",
         "P7-B",
         "P7-C1",
-        "P7-C"
+        "P7-C",
+        "P4-J3",
+        "P4-K",
+        "P4-N",
+        "P4-P",
+        "P4-R",
+        "P4-T",
+        "P4-J2",
+        "P4-J4",
+        "P4-Q",
+        "P4-O",
+        "P4-S",
+        "P4-U"
       ],
       "jobs": [
         "2588677",
@@ -1242,7 +1426,23 @@
         "2588703",
         "2588758",
         "2588779",
-        "2588784"
+        "2588784",
+        "2589349",
+        "2589355",
+        "2589356",
+        "2589357",
+        "2589358",
+        "2589359",
+        "2589360",
+        "2589361",
+        "2589362",
+        "2589377",
+        "2589378",
+        "2589379",
+        "2589382",
+        "2589414",
+        "2589417",
+        "2589572"
       ]
     }
   ],
@@ -1452,7 +1652,79 @@
     "2026-09-30: P7-C1 (ahead of phase, --force; user: 'Yes proceed with P7-C'): pyproject.toml gains bm25s[stem]>=0.3.11 (decision 14; the stem extra pulls PyStemmer, cp311 wheels for macOS arm64 and Linux x86_64); uv lock: +bm25s 0.3.11, +pystemmer 3.1.0, no other change; uv sync --locked; check_env.py KEY_IMPORTS gain bm25s and Stemmer (ENVIRONMENT OK). The cluster .venv now differs from uv.lock: setup_env.sh must run before the next cluster job that runs check_env.py. validate exit 0, 960 passed, 2026-09-30.",
     "2026-09-30: P7-C (ahead of phase, --force): lexhybrid/retrieval/bm25.py (BM25Index over chunk texts with bm25s: lower-case, NLTK German stopwords, Snowball German stemmer via PyStemmer (umlauts folded), one-character tokens kept for '§ 1' / 'Art. 6' / 'lit. f'; Lucene BM25 k1 1.5 b 0.75; zero-score chunks left out; save/load with the tokenizer settings checked) and scripts/build_index.py --kind bm25 (scrubbed JSONL in -- raw/ refused per R11, scrub parts accepted; chunks.jsonl + bm25/ + index.json out; every copy of a text indexed, decision 13 as amended). Chunk.to_json/from_json. Tests: tests/test_retrieval.py::test_bm25_finds_planted_passage, ::test_build_index_writes_chunks_manifest_and_a_queryable_index. validate exit 0, 964 passed, 2026-09-30.",
     "2026-09-30: Verification pass on the Mac, 2026-09-30 (user: 'check it if each components changed is working or not'), real inputs, no cluster numbers: collectors live (GII 5, RII 2, BGer 1 docs) with --http-cache, offline replay with proxies on a closed port gave identical documents and no new cache files; live GII BGB §1 hierarchy [Buch 1, Abschnitt 1, Titel 1], live RII/BGer parts; FineWeb-2 live shuffle differs from dataset order, same seed same sample; streaming scrub (2 parts, 8 docs/call, real flair) equals the P3 scrub on gii, fedlex, ris (87/87 entity lines identical, ~800-900 chars/s CPU); streaming build_shards with amended dedup equals P3 per source at 4096 and builds 8192 (1 within-RII duplicate dropped, 0 cross-source copies in the smoke corpus); 2,048-token cut from 4096 shards + train_pretrain CLI 3 steps; 2-rank CPU DDP under simulated SLURM_NTASKS=1 starts both ranks (without LightningEnvironment: KeyError SLURM_NODEID); arch_only CLI; screen_arms verify --reduced 7 arms 0 problems; profiler packed slab step on real hybrid_legal_base, chunk 16 read back; R1 eager on hybrid_legal_base L=512: operator 2.98e-7, chunk 64 vs 128 logits 1.9e-6 PASS; torch.compile cannot run on this Mac (Inductor clang++ breaks on the spaces in the repo path; CI and cluster paths have none); chunking 174 smoke docs -> 603 chunks, 298/298 statute labels parse, decision windows median 438 max 500 tokens; BM25 on the GerLeRB/GerDaLIR fixture samples nDCG@10 0.881/0.863 (18/21 passages: a sanity check, not P7-K). Found and fixed: StepStatsCallback reset the clock to None after validation, so a run validating every step timed nothing; it now restarts the clock when validation ends (test extended). validate exit 0, 965 passed; validate --ci exit 0, 972 passed, coverage 95.44%, 2026-09-30.",
-    "2026-09-30: Bug found and fixed (P4-K code, box still open): the FineWeb-2 collector with the seeded shuffle wrote its files and printed its summary but its process never ended (hang in native teardown after Python's shutdown: faulthandler never fired; the in-order stream exits in 1 s), so the P4-K FineWeb array task would have held its slot until the 4-day limit. Every collector module now ends through base.main (cli, flush, os._exit with cli's code; errors -> traceback, exit 1). Live FineWeb --limit 3: exit 0 after 62 s. Tests: tests/test_data.py::test_collector_entry_point_ends_the_process_at_once (subprocesses with a lingering worker thread; exit codes 0/1/1/2), ::test_every_collector_module_ends_through_the_entry_point. validate exit 0, 970 passed, 2026-09-30."
+    "2026-09-30: Bug found and fixed (P4-K code, box still open): the FineWeb-2 collector with the seeded shuffle wrote its files and printed its summary but its process never ended (hang in native teardown after Python's shutdown: faulthandler never fired; the in-order stream exits in 1 s), so the P4-K FineWeb array task would have held its slot until the 4-day limit. Every collector module now ends through base.main (cli, flush, os._exit with cli's code; errors -> traceback, exit 1). Live FineWeb --limit 3: exit 0 after 62 s. Tests: tests/test_data.py::test_collector_entry_point_ends_the_process_at_once (subprocesses with a lingering worker thread; exit codes 0/1/1/2), ::test_every_collector_module_ends_through_the_entry_point. validate exit 0, 970 passed, 2026-09-30.",
+    "2026-09-30: submitted job 2589349 (P4-J2 none)",
+    "2026-09-30: Cluster back 2026-09-30. sbatch refused: partition 'aisc-batch' renamed to 'pot-hpi-aisc-batch' (account aisc unchanged; sbatch --test-only with the new name placed setup_env on gx14 and gpu_tests on gx07). All 17 wrappers, tests/test_slurm_wrappers.py::test_header and port map §11 renamed. Local .venv had lost bm25s + pystemmer (check_env failed); repaired with uv sync --locked. Local Qwen3 tokenizer cache and envs/scrub also absent (4 tests skip, not fail). validate exit 0, 966 passed, 2026-09-30. Synced; setup_env.sh submitted as job 2589349 (rebuilds cluster .venv for bm25s/pystemmer before gpu_tests.sh).",
+    "2026-09-30: submitted job 2589355 (P4-J2 none)",
+    "2026-09-30: submitted job 2589356 (P4-J2 none)",
+    "2026-09-30: submitted job 2589357 (P4-J4 none)",
+    "2026-09-30: submitted job 2589358 (P4-L none)",
+    "2026-09-30: submitted job 2589359 (P4-O hybrid_legal_base)",
+    "2026-09-30: submitted job 2589360 (P4-S none)",
+    "2026-09-30: submitted job 2589361 (P4-Q none)",
+    "2026-09-30: submitted job 2589362 (P4-U hybrid_legal_base)",
+    "2026-09-30: job 2589349 -> RUNNING",
+    "2026-09-30: ticked P4-J3",
+    "2026-09-30: ticked P4-K",
+    "2026-09-30: ticked P4-N",
+    "2026-09-30: ticked P4-P",
+    "2026-09-30: ticked P4-R",
+    "2026-09-30: ticked P4-T",
+    "2026-09-30: User 2026-09-30: 'you can submit multiple jobs per session there is no limit' (overrides one-submission-per-session). Submitted, all --kill-on-invalid-dep=yes: afterok:2589349 (setup_env) -> gpu_tests 2589355, diag_compile 2589356, multigpu_tests 2589357 (--gpus=2), corpus array 2589358 (--array=0-9), probe_ckpt 2589359; afterok:2589349:2589355 (setup_env + gpu_tests pass, so a compile regression cancels them instead of producing numbers) -> equivalence 2589360, profile 2589361, kd_probe 2589362 (--gpus=4). Held: scrub_array/pack_corpus until P4-L corpus counts are checked.",
+    "2026-09-30: job 2589349 -> COMPLETED",
+    "2026-09-30: job 2589355 -> RUNNING",
+    "2026-09-30: job 2589356 -> RUNNING",
+    "2026-09-30: job 2589357 -> RUNNING",
+    "2026-09-30: job 2589358 -> RUNNING",
+    "2026-09-30: job 2589359 -> RUNNING",
+    "2026-09-30: setup_env 2589349 COMPLETED 27m gx14 (log cluster/logs/setup_env_2589349.log): main .venv ENVIRONMENT OK (torch 2.11.0+cu128, CUDA 12.8, bm25s 0.3.11, pystemmer 3.1.0, 0 mismatches); envs/scrub ENVIRONMENT OK (scrub), flair 0.15.1, transformers 4.57.6; SETUP_ENV DONE. Dependents started: gpu_tests, diag_compile, multigpu_tests, probe_ckpt on gx07; corpus array on gx14. Corpus task 3 (eurlex) COMPLETED 17s: 567 article documents from 10 of 12 SEED_CELEX acts; 31993L0013 (Klausel-RL) and 32004R0261 (FluggastrechteVO) HTTP 404 on CELLAR German XHTML, skipped by design (tests/test_data.py:650). Coverage gap to carry into P4-L/M: those two acts are absent unless another manifestation (HTML/fmx4) is added.",
+    "2026-09-30: CLAUDE.md rules (g) and (j) reworded on the user's instruction ('yes reword it'): any number of submissions per session, dependents chained with afterok + --kill-on-invalid-dep=yes, no chaining across a human-check verdict; stop when only waiting on the queue remains.",
+    "2026-09-30: ticked P4-J2",
+    "2026-09-30: ticked P4-J4",
+    "2026-09-30: ticked P4-Q",
+    "2026-09-30: job 2589355 -> COMPLETED",
+    "2026-09-30: job 2589356 -> COMPLETED",
+    "2026-09-30: job 2589357 -> COMPLETED",
+    "2026-09-30: job 2589361 -> COMPLETED",
+    "2026-09-30: job 2589362 -> COMPLETED",
+    "2026-09-30: job 2589359 -> FAILED",
+    "2026-09-30: job 2589360 -> FAILED",
+    "2026-09-30: submitted job 2589377 (P4-O hybrid_legal_base)",
+    "2026-09-30: submitted job 2589378 (P4-S none)",
+    "2026-09-30: submitted job 2589379 (P4-U hybrid_legal_base)",
+    "2026-09-30: submitted job 2589382 (P4-L none)",
+    "2026-09-30: Verdicts from jobs 2589355-62 (logs pulled to cluster/logs/). GREEN: gpu_tests 10/10 cuda incl. new flex test (P4-J2); diag_compile 15/15 ok, max 7.7e-7, no DRIFT; multigpu 1/1 identical grads (P4-J4); profile 22/22 points, PROFILE DONE (P4-Q, analysis/profile_results.md, RESULTS block under P4-Z). INFRA FAILURES fixed + tests + resubmitted once: (1) probe_ckpt 2589359: wrapper passed distill=null, Hydra refuses null as a group override -> omit for DISTILL_CFG=none (default is already null); test composes every wrapper's recorded train_pretrain.py argv with real Hydra; rerun 2589377. (2) equivalence 2589360: R1 FAIL on ref_hybrid_m3 was the checker: it set chunk_size on every mixer incl. mLSTM (TFLA 128 in that config), so 'chunk 64' and the post-reset compile row ran mLSTM at 64 (both 4.518e-4); hybrid_legal_base step PASSED (1.68e-6 / compile 1.85e-6); checker now sweeps Mamba3Block only; test test_check_operator_equivalence_sweeps_only_the_mamba3_chunk; rerun 2589378. Side finding: legacy TFLA logits move 4.5e-4 between mLSTM chunk 64 and 128 at L=512 fp32 (ref only, never trained). (3) kd_probe 2589362: 1.7B teacher LocalEntryNotFoundError: fetch_hf.sh fetched it at QWEN3_REVISION (no refs/main), build_teacher loaded without revision -> distill yamls carry revision, build_teacher passes it; tests tie yaml revision to fetch_hf.sh and check build_teacher; PROBES env selects shapes; rerun 1.7B shapes only as 2589379. RESULT (not rerun, rule i): Qwen3-8B teacher OOM at 4096 x mb8 (77.0 GiB alloc) and 8192 x mb4 (76.1 GiB) in distill._slab_terms. kd summary printed '(log not found under logs/)' though the log has the lines locally: unexplained, cosmetic. validate exit 0, 984 passed, 2026-09-30.",
+    "2026-09-30: Corpus array 2589358: eurlex 567 docs (COMPLETED); fineweb2_de 2,000,000 docs, 17G raw, exited at once (os._exit fix held); multilegalpile 580,166 docs, 31G raw (transient HF read timeouts retried). RIS FAILED 43 min: RIS answers a page past the end with HTTP 500 ('Die Seitennummer ist höher als die Anzahl der verfügbaren Seiten'), collector expected an empty page -> died after ABGB's 52 pages; fixed (_last_page from Hits), test test_ris_stops_at_the_last_page_the_search_reports; RIS rerun alone as 2589382 (--array=4). OGH Judikatur has 283,650 hits and pages deep fine: at ~1 doc/s RIS may approach the 4-day limit. OLDP (task 2): no output, cache untouched since 19:36; API now caps paging at 10 pages ('Page 20 exceeds maximum of 10. For bulk access use https://huggingface.co/openlegaldata/datasets'; count 424,794): collector can reach at most 500 cases at page_size 50 then 404 -> fail. USER DECISION pending on the OLDP source. gii/rii/fedlex/bger/dip running.",
+    "2026-09-30: ticked P4-O",
+    "2026-09-30: ticked P4-S",
+    "2026-09-30: job 2589377 -> COMPLETED",
+    "2026-09-30: job 2589378 -> COMPLETED",
+    "2026-09-30: P4-O: last.ckpt 2,649,246,111 B = 2.649 GB (job 2589377; plan §6 storage row updated; config.yaml's '~4 GB' comment is the older estimate). P4-S: EQUIVALENCE PASSED (job 2589378) after the checker fix. Corpus task 7 dip COMPLETED 1h00: 33,398 documents, 6.1G raw.",
+    "2026-09-30: OLDP source switched on the user's choice ('HF bulk dataset (Recommended)'): collectors/oldp.py reads openlegaldata/court-decisions-germany config dump-20260520 (423,941 decisions, 54 parquet shards, 10.7 GB) at revision 408eb916fab64080580e4d67bf4242fb10cdedf5 via HfFileSystem + pyarrow, one row group at a time; rows carry the API's case fields so parse_oldp_case is unchanged. API paging test replaced by test_collect_offline.py::test_oldp_collector_reads_the_bulk_dump (real parquet shards, local fs stand-in); live smoke skips without an HF token; fixture list_page.json removed. Dataset is gated (auto-approve); card metadata declares no licence (register row oldp = ODbL-1.0; laws-germany sibling is tagged odbl) -> confirm on the card. Stalled task 2589358_2 scancelled (user: 'Yes, scancel it (Recommended)'). Not synced yet. validate exit 0, 989 passed, 2026-09-30.",
+    "2026-09-30: BLOCKED on P4-L: USER ACTION: accept the terms of https://huggingface.co/datasets/openlegaldata/court-decisions-germany with the HF account whose token is ~/.hf_token on the cluster, and confirm the licence the card states (expected ODbL-1.0). Then: sync_to_cluster.sh; sbatch --array=2 scripts/slurm/build_corpus_array.sh",
+    "2026-09-30: unblocked (P4-L)",
+    "2026-09-30: OLDP gate: user accepted openlegaldata/court-decisions-germany on HF (user: 'i have accepted the HF dataset and this is the license'). Card licence (user-pasted): decisions and official head notes not copyright-protected (UrhG § 5); 'The collection and metadata has the Open Database License (ODbL) v1.0.' -> matches register row oldp (ODbL-1.0), no licence change.",
+    "2026-09-30: submitted job 2589414 (P4-L none)",
+    "2026-09-30: job 2589379 -> COMPLETED",
+    "2026-09-30: decision teacher: Qwen/Qwen3-1.7B-Base (P4-U: 8B OOM at 4096 rows, >= 82.7 GB > 70; 1.7B 4.144 s/step, 80.60 GB peak; jobs 2589362, 2589379; probe without gradient checkpointing)",
+    "2026-09-30: ticked P4-U",
+    "2026-09-30: P4-U: KD 1.7B rerun 2589379 COMPLETED 10 min: 4096 rows 8x2x4 4.144 s/step peak 80.60 GB alloc / 83.29 reserved; 8192 rows 4x4x4 9.186 s/step 70.74 / 80.26 GB (GB = 1e9; H100 = 85.0 GB). With 8B OOM (2589362) -> decisions.teacher = Qwen3-1.7B-Base by the rule. Prediction REFUTED (35 GB / 60 GB). Caveat for the user: both probes ran with model.use_gradient_checkpointing=false (default; GRAD_CKPT unset) while P6's recipe says gradient checkpointing; 1.7B at 4096 has < 2 GB headroom as probed. Corpus: gii COMPLETED 1h42 90,255 docs 296M; RIS rerun 2589382 past the old failure point (6,000 docs at 59.5 min); OLDP from the HF dump submitted as 2589414 (--array=2) after the user accepted the gate.",
+    "2026-09-30: submitted job 2589417 (P4-U hybrid_legal_base)",
+    "2026-09-30: decision teacher: PROVISIONAL Qwen/Qwen3-1.7B-Base by the P4-U rule (8B OOM at 4096 rows without gradient checkpointing; jobs 2589362, 2589379). User 2026-09-30: 'use both and then let me decide which is best ... keep both and check it and then later on we decide based on the results': both teachers stay open; KD probe with GRAD_CKPT=true (P6's recipe) job 2589417; final choice by the user.",
+    "2026-09-30: User asked for both teachers to stay open ('use both and then let me decide which is best for the use but keep both and check it and then later on we decide based on the results acheived'). Submitted kd_memory_probe.sh with GRAD_CKPT=true (model.use_gradient_checkpointing=true, non-reentrant; P6's recipe), all four shapes (1.7B/8B x 4096/8192), job 2589417. Prediction written before the numbers: with checkpointing, 1.7B peak at 4096 rows <= 50 GB and 8B <= 70 GB; step time +20-40% over the unchecked 1.7B (4.144 s at 4096). Also: 2589368 = array task 2589358_5 (fedlex) COMPLETED 2h24: 98,038 documents, 208M raw, 0 skips/errors.",
+    "2026-09-30: job 2589414 -> COMPLETED",
+    "2026-09-30: job 2589417 -> COMPLETED",
+    "2026-09-30: KD probe with GRAD_CKPT=true, job 2589417 COMPLETED 22.6 min, log cluster/logs/kd_probe_2589417.log, all 4 command lines carry model.use_gradient_checkpointing=true. Both teachers fit at both shapes. 1.7B: 4.224 s / 30.11 GB alloc at 4096, 10.891 s / 20.14 GB at 8192. 8B: 6.104 s / 43.18 GB at 4096, 15.174 s / 33.22 GB at 8192. P4-U rule applied to these numbers selects 8B (43.18 <= 70; 1.44x <= 1.6x); the user decides (decisions.teacher stays provisional 1.7B). Prediction PARTIAL: memory bounds held; ckpt cost +1.9% at 4096 and +18.6% at 8192 (predicted +20-40%). Estimate per 5B-token P6 run: 1.7B ~23.0 h, 8B ~33.1 h. KD summary '(log not found)' explained: the log is the job's own stdout and GNU grep refuses input == output (exit 2, stderr hidden); now greps a snapshot; test test_kd_probe_summary_reads_its_own_log (Slurm-style redirect; GNU grep in CI). OLDP (HF dump) 2589414 COMPLETED 33.6 min: 423,363 docs (578 rows without text), 23G raw, transient HF read timeouts retried. validate exit 0, 991 passed, 2026-09-30.",
+    "2026-10-01: submitted job 2589572 (P4-L none)",
+    "2026-10-01: RII task 2589358_1 (= job 2589364) FAILED after 3h47: 13,000 documents in, one document (jb-KORE605312024.zip) dropped the connection on all 5 attempts (RemoteDisconnected) and the FetchError ended the whole crawl; the same URL answers 200 from the Mac now (transient). Fix: base.SkipFailedDocuments: a per-document fetch that still fails after its retries is skipped and logged, 20 failures in a row still raise (outage); listings/indexes unwrapped. Applied to rii, ris (norms + decisions), bger. Tests: test_collect_offline.py::test_rii_collector_skips_a_document_that_keeps_failing, ::test_skip_failed_documents_stops_on_an_outage. validate exit 0, 993 passed, 2026-10-01. RII rerun as 2589572 (--array=1; 13k docs replay from the http cache). Running bger 2589358_6 and RIS 2589382_4 keep the old code (loaded before the sync).",
+    "2026-10-01: Corpus progress 2026-10-01 22:23 CEST, all three running with no skips/retries/tracebacks. Totals from the sources (queried from the Mac): RII toc 84,423 items; BGer 109,294 German BGer hits (2 blocklisted); RIS norms <= 16,906 hits over the 10 seed codes + 283,650 OGH decisions. Rates (last 20k docs): BGer 58.5/min, RII 57.3/min, RIS 38.6/min. ETA: BGer 94,000 done -> <= Oct 2 ~02:40; RII 64,000 done -> Oct 2 ~04:15; RIS 59,000 done (in OGH decisions, >= 42k of them) -> needs ~97-104 h more, beyond its 4-day limit (TIMEOUT Oct 4 20:36 at ~220k docs); plan: resubmit --array=4 after the timeout (cache replay ~30 min, then ~65-80k decisions at ~39/min, ~30-35 h) -> ~Oct 6. Scrub can already start on the 7 finished sources (scrub_array indices gii 0-7, oldp 16-23, eurlex 24-31, fedlex 40-47, dip 56-63, fineweb2_de 64-71, multilegalpile 72-79): user decision.",
+    "2026-10-01: decision teacher: Qwen/Qwen3-8B-Base with gradient checkpointing (P4-U rule on P6's recipe, job 2589417: 43.18 GB <= 70, 6.104 s = 1.44x the 1.7B's 4.224 s <= 1.6x; unchecked probes 2589362 OOM). User 2026-10-01: 'teacher choice : chosse which ever would give the best result i am thinking of 8B but decide accordingly and let me know'. Wrappers: DISTILL_CFG default qwen3_8b, GRAD_CKPT=true for the 8B.",
+    "2026-10-01: Teacher set to Qwen3-8B-Base + gradient checkpointing (decision above). train_pretrain_1gpu.sh: DISTILL_CFG default qwen3_8b; the 8B turns GRAD_CKPT on unless set; kd_memory_probe.sh pins GRAD_CKPT=false by default (its jobs stay reproducible); screen_array.sh and distill yaml comments updated. Tests: test_train_wrapper_checkpoints_the_8b_teacher_run (4 cases), defaults test, kd probe asserts its own setting. Caveat recorded: quality under either teacher not measured; 36x size gap. Corpus, user 2026-10-01: 'skip the uncompleted till oct 2 07:00 AM as our current focus is on the germany region so other countries can be skipped for now' -> RIS (AT) scancelled now (could not finish by 07:00; its http cache stays on scratch for a later run); BGer (CH, ETA ~02:40) and RII (DE, ETA ~04:15) left to finish; anything still running at 07:00 is skipped. P4-L will cover gii, rii, oldp, eurlex, fedlex, bger, dip, fineweb2_de, multilegalpile (no ris): scrub/pack need SOURCES without ris and --array=0-71. validate exit 0, 997 passed, 2026-10-01.",
+    "2026-10-02: job 2589358 -> COMPLETED",
+    "2026-10-02: job 2589382 -> CANCELLED",
+    "2026-10-02: job 2589414 -> COMPLETED",
+    "2026-10-02: job 2589572 -> COMPLETED",
+    "2026-10-02: Corpus collection finished 2026-10-02 (nothing running at 08:11). Final raw per source (scratch data/raw): gii 90,255 docs 297M; rii 84,347 of 84,423 toc items 3.2G (job 2589572, 1 document skipped after its retries: jb-KSRE120181512.zip, the SkipFailedDocuments path); oldp 423,363 23G (2589414, HF dump); eurlex 567 2.5M; fedlex 98,038 213M; bger 109,233 of 109,294 hits 3.2G (2589358_6, 31h, 0 skips); dip 33,398 6.1G; fineweb2_de 2,000,000 17G; multilegalpile 580,166 31G. ris: cancelled (AT, user's Germany focus), only ris.jsonl.partial 990M + http cache (build_shards ignores it). Manifests carry n_chars, not tokens (exact tokens come from pack's build_summary.json). Scratch 310T free."
   ],
   "open_questions": []
 }

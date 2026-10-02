@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --partition=aisc-batch
+#SBATCH --partition=pot-hpi-aisc-batch
 #SBATCH --account=aisc
 #SBATCH --exclude=ga03,gx17v1,gx13v1   # ga03: ARM/Grace node; gx13v1: faulty GPU (cudaErrorContained)
 #SBATCH --constraint=GLB_SCRATCH   # it lists the checkpoints on /sc/scratch

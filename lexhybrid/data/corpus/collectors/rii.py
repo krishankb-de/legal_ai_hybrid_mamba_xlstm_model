@@ -22,7 +22,7 @@ import xml.etree.ElementTree as ET
 import zipfile
 from collections.abc import Iterator
 
-from lexhybrid.data.corpus.collectors.base import http_get, licence_flags, main, utc_now
+from lexhybrid.data.corpus.collectors.base import SkipFailedDocuments, http_get, licence_flags, main, utc_now
 from lexhybrid.data.schema import Document, Section
 
 TOC_URL = "https://www.rechtsprechung-im-internet.de/rii-toc.xml"
@@ -144,9 +144,12 @@ class RIICollector:
         items = parse_toc(http_get(TOC_URL, timeout=180).content)
         if self.newest_first:
             items.sort(key=lambda it: it["date"], reverse=True)
-        n = 0
+        n, skip = 0, SkipFailedDocuments(self.name)
         for item in items:
-            doc = parse_rii_xml(read_zip_xml(http_get(item["link"]).content), url=item["link"])
+            response = skip(http_get, item["link"])
+            if response is None:
+                continue
+            doc = parse_rii_xml(read_zip_xml(response.content), url=item["link"])
             if doc is None:
                 continue
             yield doc

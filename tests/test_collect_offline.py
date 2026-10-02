@@ -95,28 +95,88 @@ def test_rii_collector_goes_newest_first(monkeypatch):
     assert docs[0].id == "rii:JURE100055033" and len(docs) == 2
 
 
-def test_oldp_collector_pages_through_the_api(monkeypatch):
+def test_rii_collector_skips_a_document_that_keeps_failing(monkeypatch, capsys):
+    """Job 2589358_1: one document's connection dropped five times and the whole RII crawl (3.8 h,
+    13,000 documents) died. That document is now skipped and logged; the crawl goes on."""
+    from lexhybrid.data.corpus.collectors import rii
+    from lexhybrid.data.corpus.collectors.base import FetchError
+
+    xml = {p.stem.split("-", 1)[1]: p.read_bytes() for p in (FIXTURES / "rii").glob("jb-*.xml")}
+    fallback = xml["KARE600065578"]
+
+    def document(url, *a):
+        if url.endswith("jb-JURE100055033.zip"):  # the newest, so the first fetched
+            raise FetchError(f"GET {url} failed after 5 attempts (ConnectionError: RemoteDisconnected)")
+        return Resp(_zip("d.xml", xml.get(re.search(r"jb-(\w+)\.zip", url).group(1), fallback)))
+
+    web = FakeWeb([
+        (r"rii-toc\.xml$", lambda *a: Resp((FIXTURES / "rii" / "toc_excerpt.xml").read_bytes())),
+        (r"\.zip$", document),
+    ])  # fmt: skip
+    monkeypatch.setattr(rii, "http_get", web.get)
+    docs = list(rii.RIICollector().iter_documents(limit=2))
+    assert len(docs) == 2 and "rii:JURE100055033" not in {d.id for d in docs}
+    assert "rii: skipping https://" in capsys.readouterr().err
+
+
+def test_skip_failed_documents_stops_on_an_outage(capsys):
+    from lexhybrid.data.corpus.collectors.base import FetchError, SkipFailedDocuments
+
+    def fail(url):
+        raise FetchError("GET x failed after 5 attempts (HTTP 503)")
+
+    skip = SkipFailedDocuments("src", max_consecutive=3)
+    assert skip(fail, "a") is None and skip(fail, "b") is None
+    assert skip(lambda url: "ok", "c") == "ok" and skip.in_a_row == 0, "a success resets the run"
+    assert skip(fail, "d") is None and skip(fail, "e") is None
+    with pytest.raises(FetchError, match="3 document fetches failed in a row"):
+        skip(fail, "f")
+    assert skip.skipped == 5 and capsys.readouterr().err.count("src: skipping") == 5
+
+
+def test_oldp_collector_reads_the_bulk_dump(monkeypatch, tmp_path):
+    """Job 2589358_2: the OLDP API stopped paging past page 10, so the collector reads the bulk dump
+    on the hub (gated parquet shards at a pinned revision) in shard order. A row carries the API's
+    case fields, so the documents equal the parser's on the same cases."""
+    import huggingface_hub
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
     from lexhybrid.data.corpus.collectors import oldp
 
-    page1 = json.loads((FIXTURES / "oldp" / "list_page.json").read_text())
-    page1["next"] = page1["next"].replace("https://", "http://")  # the API links its next page over http
-    cases = {
-        int(p.stem.split("_")[1]): json.loads(p.read_text()) for p in (FIXTURES / "oldp").glob("case_*.json")
-    }
+    cases = [json.loads(p.read_text()) for p in sorted((FIXTURES / "oldp").glob("case_*.json"))]
+    rows = [
+        {
+            "id": c["id"],
+            "slug": c.get("slug"),
+            "court": {"name": c["court"]["name"], "slug": c["court"].get("slug")},
+            "file_number": c["file_number"],
+            "date": c["date"],
+            "content": c["content"],
+            "markdown_content": "not read",
+        }
+        for c in cases
+    ]
+    shards = tmp_path / oldp.CONFIG
+    shards.mkdir()
+    pq.write_table(pa.Table.from_pylist(rows[:2]), shards / "train-00000-of-00002.parquet", row_group_size=1)
+    pq.write_table(pa.Table.from_pylist(rows[2:]), shards / "train-00001-of-00002.parquet")
+    globs = []
 
-    def case(url, *a):
-        n = int(re.search(r"/cases/(\d+)/", url).group(1))
-        return Resp(data=cases.get(n, cases[521973]))
+    class LocalHub:
+        def glob(self, pattern):
+            globs.append(pattern)
+            return [str(p) for p in sorted(shards.glob("train-*.parquet"), reverse=True)]
 
-    def listing(url, params, _):
-        return Resp(data=page1 if "page=2" not in url else {"results": [{"id": 521941}], "next": None})
+        def open(self, path, mode):
+            return open(path, mode)
 
-    web = FakeWeb([(r"/api/cases/\d+/$", case), (r"/api/cases/", listing)])
-    monkeypatch.setattr(oldp, "http_get", web.get)
+    monkeypatch.setattr(huggingface_hub, "HfFileSystem", LocalHub)
     docs = list(oldp.OLDPCollector().iter_documents(limit=None))
-    lists = [url for _, url, _, _ in web.calls if not re.search(r"/cases/\d+/$", url)]
-    assert len(lists) == 2 and lists[1].startswith("https://") and "page=2" in lists[1]
-    assert len(docs) == 4 and docs[-1].id == "oldp:521941"
+    assert globs == [f"datasets/{oldp.REPO}@{oldp.REVISION}/{oldp.CONFIG}/train-*.parquet"]
+    assert [d.id for d in docs] == [f"oldp:{c['id']}" for c in cases]
+    assert [d.text for d in docs] == [oldp.parse_oldp_case(c).text for c in cases]
+    assert len(list(oldp.OLDPCollector().iter_documents(limit=2))) == 2
 
 
 def _ris_page(refs):

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --partition=aisc-batch
+#SBATCH --partition=pot-hpi-aisc-batch
 #SBATCH --account=aisc
 #SBATCH --gpus=1
 #SBATCH --nodes=1
@@ -11,7 +11,7 @@
 #SBATCH --job-name=train_1gpu
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.log
-#SBATCH --open-mode=append   # aisc-batch is preemptible: without this a requeue TRUNCATES the log
+#SBATCH --open-mode=append   # pot-hpi-aisc-batch is preemptible: without this a requeue TRUNCATES the log
 #SBATCH --requeue
 #
 # train_pretrain_1gpu.sh -- one run of scripts/train_pretrain.py (plan P5-B; port map §11.1, §11.2,
@@ -51,7 +51,10 @@ MODEL_CONFIG="${MODEL_CONFIG:-hybrid_legal_base}"
 SEED="${SEED:-42}"
 DATASET_CONFIG="${DATASET_CONFIG:-mixture_pretrain}"
 TRAINER_CFG="${TRAINER_CFG:-h100_single_gpu}"
-DISTILL_CFG="${DISTILL_CFG:-qwen3_1p7b}"   # decision 8's default; the run follows decisions.teacher
+DISTILL_CFG="${DISTILL_CFG:-qwen3_8b}"   # decisions.teacher (P4-U, 2026-10-01)
+# The 8B teacher fits only with gradient checkpointing: OOM without it at 4,096 x 8 (job 2589362),
+# 43.18 GB with it (job 2589417). An 8B run therefore checkpoints unless GRAD_CKPT says otherwise.
+if [[ "$DISTILL_CFG" == qwen3_8b ]]; then GRAD_CKPT="${GRAD_CKPT:-true}"; fi
 SAVE_TOP_K="${SAVE_TOP_K:-0}"             # R6: 0 on arms; pipeline runs pass 1 (+ last.ckpt)
 CKPT_EVERY="${CKPT_EVERY:-1000}"
 EXPERIMENT="${EXPERIMENT:-pretrain_${MODEL_CONFIG}_s${SEED}}"
@@ -76,7 +79,9 @@ ARGS=(
   "callbacks.checkpoint.every_n_train_steps=${CKPT_EVERY}" "callbacks.checkpoint.save_top_k=${SAVE_TOP_K}"
   "experiment_name=${EXPERIMENT}" "output_dir=${OUT}"
 )
-if [[ "$DISTILL_CFG" == none ]]; then ARGS+=("distill=null"); else ARGS+=("distill=${DISTILL_CFG}"); fi
+# none: CE only. config.yaml already defaults to `distill: null`, and Hydra refuses `distill=null` as a
+# group override (job 2589359: "Config group override must be a string or a list. Got NoneType").
+if [[ "$DISTILL_CFG" != none ]]; then ARGS+=("distill=${DISTILL_CFG}"); fi
 opt() {  # hydra_key, value: passed only when the value is set
   if [[ -n "$2" ]]; then ARGS+=("$1=$2"); fi
 }

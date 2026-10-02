@@ -294,7 +294,7 @@ Principles: CPU-collected and unconditionally run (never behind `cuda`); paramet
 Training wrapper (1 GPU), from `scripts/train_stage0_150m_h100.sh:19-31`:
 
 ```bash
-#SBATCH --partition=aisc-batch
+#SBATCH --partition=pot-hpi-aisc-batch
 #SBATCH --account=aisc
 #SBATCH --gpus=1
 #SBATCH --exclude=ga03,gx17v1,gx13v1   # ga03: ARM/Grace node; gx13v1: faulty GPU (cudaErrorContained)
@@ -304,7 +304,7 @@ Training wrapper (1 GPU), from `scripts/train_stage0_150m_h100.sh:19-31`:
 #SBATCH --job-name=h100_stage0_150m
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.log
-#SBATCH --open-mode=append   # aisc-batch is preemptible: without this a requeue TRUNCATES the log
+#SBATCH --open-mode=append   # pot-hpi-aisc-batch is preemptible: without this a requeue TRUNCATES the log
 #SBATCH --requeue
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
@@ -313,7 +313,7 @@ cd "${SLURM_SUBMIT_DIR:-.}"
 Array wrapper, from `scripts/screen_arms_h100.sh:266-278, 282-320`:
 
 ```bash
-#SBATCH --partition=aisc-batch
+#SBATCH --partition=pot-hpi-aisc-batch
 #SBATCH --account=aisc
 #SBATCH --gpus=1
 #SBATCH --exclude=ga03,gx17v1,gx13v1
@@ -340,7 +340,7 @@ bash scripts/slurm/train_pretrain_1gpu.sh
 CPU job (env setup), from `scripts/setup_env_h100.sh:453-461`:
 
 ```bash
-#SBATCH --partition=aisc-batch
+#SBATCH --partition=pot-hpi-aisc-batch
 #SBATCH --exclude=ga03   # ARM/Grace node; x86 .venv python -> "cannot execute binary file: Exec format error"
 #SBATCH --account=aisc
 #SBATCH --mem=16G
@@ -354,7 +354,7 @@ CPU job (env setup), from `scripts/setup_env_h100.sh:453-461`:
 Preflight / watch (CPU, with qos), from `scripts/preflight_mamba3_h100.sh:344-353` and `mamba3_watch.sh:542-551`:
 
 ```bash
-#SBATCH --partition=aisc-batch
+#SBATCH --partition=pot-hpi-aisc-batch
 #SBATCH --account=aisc
 #SBATCH --qos=aisc
 #SBATCH --exclude=ga03,gx17v1,gx13v1

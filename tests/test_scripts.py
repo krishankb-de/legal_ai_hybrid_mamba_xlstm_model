@@ -144,6 +144,34 @@ def test_check_operator_equivalence_passes_on_cpu(script):
     assert rc == 0
 
 
+def test_check_operator_equivalence_sweeps_only_the_mamba3_chunk(script, monkeypatch, capsys):
+    """Job 2589360: ref_hybrid_m3 runs Mamba-3 at chunk 64 and mLSTM at 128. The sweep set every
+    mixer's chunk_size, so "chunk 64 vs the chunk-64 baseline" moved the mLSTM to 64 and failed at
+    4.5e-4, and the reset left it there for the compile check. Re-running the baseline chunk must
+    reproduce the baseline exactly, and the mLSTM chunk must not move."""
+    mod = script("check_operator_equivalence")
+    cfg = HybridConfig(
+        vocab_size=64,
+        dim=64,
+        num_layers=2,
+        layer_pattern=["mamba3", "mlstm"],
+        mamba3_d_state=16,
+        mamba3_head_dim=32,
+        num_heads=2,
+        head_dim=32,
+        max_position_embeddings=128,
+        tfla_impl="exact",
+        mamba3_chunk_size=16,
+        mlstm_chunk_size=32,
+    )
+    monkeypatch.setattr(mod, "load_model_config", lambda name, **kw: HybridConfig.from_dict(cfg.to_dict()))
+    assert mod.check_model("cpu", "tiny", [16], 96, do_compile=False) == []
+    assert "chunk_size= 16 logits vs baseline : 0.000e+00" in capsys.readouterr().out
+    model = HybridLanguageModel(HybridConfig.from_dict(cfg.to_dict()))
+    mod.set_mamba3_chunk_size(model, 8)
+    assert [layer.mixer.chunk_size for layer in model.layers] == [8, 32]
+
+
 def test_performance_profile_single_point_and_sweep(script, tmp_path):
     pp = script("performance_profile")
     cfg = HybridConfig(

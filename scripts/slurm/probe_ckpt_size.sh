@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --partition=aisc-batch
+#SBATCH --partition=pot-hpi-aisc-batch
 #SBATCH --account=aisc
 #SBATCH --gpus=1
 #SBATCH --nodes=1
@@ -11,7 +11,7 @@
 #SBATCH --job-name=probe_ckpt
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.log
-#SBATCH --open-mode=append   # aisc-batch is preemptible: without this a requeue TRUNCATES the log
+#SBATCH --open-mode=append   # pot-hpi-aisc-batch is preemptible: without this a requeue TRUNCATES the log
 #SBATCH --requeue
 #
 # probe_ckpt_size.sh -- how big one hybrid_legal_base checkpoint is (plan P4-N; verdict P4-O): a

@@ -106,6 +106,7 @@ def build_teacher(cfg: DictConfig):
     dtype = getattr(torch, cfg.distill.get("dtype", "bfloat16"))
     teacher = AutoModelForCausalLM.from_pretrained(
         cfg.distill.teacher,
+        revision=cfg.distill.get("revision", "main"),  # the snapshot fetch_hf.sh put in the cache
         dtype=dtype,
         local_files_only=os.environ.get("HF_HUB_OFFLINE") == "1",
     )

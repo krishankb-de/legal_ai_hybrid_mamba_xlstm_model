@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --partition=aisc-batch
+#SBATCH --partition=pot-hpi-aisc-batch
 #SBATCH --account=aisc
 #SBATCH --gpus=4
 #SBATCH --nodes=1
@@ -11,7 +11,7 @@
 #SBATCH --job-name=train_4gpu
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.log
-#SBATCH --open-mode=append   # aisc-batch is preemptible: without this a requeue TRUNCATES the log
+#SBATCH --open-mode=append   # pot-hpi-aisc-batch is preemptible: without this a requeue TRUNCATES the log
 #SBATCH --requeue
 #
 # train_pretrain_4gpu.sh -- 4 x H100 DDP pretraining on one node (plan P6-A; port map §11.1).

@@ -35,7 +35,14 @@ import re
 from collections.abc import Iterator
 from html.parser import HTMLParser
 
-from lexhybrid.data.corpus.collectors.base import http_get, http_post, licence_flags, main, utc_now
+from lexhybrid.data.corpus.collectors.base import (
+    SkipFailedDocuments,
+    http_get,
+    http_post,
+    licence_flags,
+    main,
+    utc_now,
+)
 from lexhybrid.data.schema import Document, Section
 
 SEARCH = "https://entscheidsuche.ch/_searchV2.php"
@@ -238,7 +245,7 @@ class BGerCollector:
         self.page_size = page_size
 
     def iter_documents(self, limit: int | None = None) -> Iterator[Document]:
-        n, after = 0, None
+        n, after, skip = 0, None, SkipFailedDocuments(self.name)
         blocked = blocked_ids(http_get(BLOCKLIST).json())
         while True:
             hits = http_post(SEARCH, json=search_body(self.page_size, after)).json()["hits"]["hits"]
@@ -249,7 +256,9 @@ class BGerCollector:
                 url = (meta.get("attachment") or {}).get("content_url")
                 if not url or not meta.get("reference") or meta.get("id") in blocked:
                     continue
-                response = http_get(url)
+                response = skip(http_get, url)
+                if response is None:
+                    continue
                 response.encoding = "utf-8"
                 doc = parse_bger(response.text, meta)
                 if doc is None:

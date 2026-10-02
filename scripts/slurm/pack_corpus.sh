@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --partition=aisc-batch
+#SBATCH --partition=pot-hpi-aisc-batch
 #SBATCH --account=aisc
 #SBATCH --exclude=ga03,gx17v1,gx13v1   # ga03: ARM/Grace node (x86 .venv -> "Exec format error"); gx13v1: faulty GPU
 #SBATCH --constraint=GLB_SCRATCH   # data/scrubbed and data/shards live on /sc/scratch
@@ -9,7 +9,7 @@
 #SBATCH --job-name=pack_corpus
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.log
-#SBATCH --open-mode=append   # aisc-batch is preemptible: a requeued run appends to its log
+#SBATCH --open-mode=append   # pot-hpi-aisc-batch is preemptible: a requeued run appends to its log
 #SBATCH --requeue
 #
 # pack_corpus.sh -- dedup -> pack at 4,096 and 8,192 over the scrubbed corpus (plan P4-L, second

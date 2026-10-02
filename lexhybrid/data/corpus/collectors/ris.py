@@ -20,7 +20,7 @@ import re
 import xml.etree.ElementTree as ET
 from collections.abc import Iterator
 
-from lexhybrid.data.corpus.collectors.base import http_get, licence_flags, main, utc_now
+from lexhybrid.data.corpus.collectors.base import SkipFailedDocuments, http_get, licence_flags, main, utc_now
 from lexhybrid.data.schema import Document, Section
 
 API = "https://data.bka.gv.at/ris/api/v2.6"
@@ -169,6 +169,14 @@ def _refs(page: dict) -> list[dict]:
     return _as_list(page.get("OgdSearchResult", {}).get("OgdDocumentResults", {}).get("OgdDocumentReference"))
 
 
+def _last_page(page: dict) -> int:
+    """The search's page count. RIS answers a page past the end with HTTP 500 ("Die Seitennummer ist
+    höher als die Anzahl der verfügbaren Seiten"), not an empty list (job 2589358_4 died on it)."""
+    hits = page.get("OgdSearchResult", {}).get("OgdDocumentResults", {}).get("Hits", {})
+    n, size = int(hits.get("#text", 0)), int(hits.get("@pageSize", 50))
+    return -(-n // size)
+
+
 class RISCollector:
     name = "ris"
     licence = "CC-BY-4.0"
@@ -178,6 +186,7 @@ class RISCollector:
         self.codes, self.courts = codes, courts
 
     def norms(self) -> Iterator[Document]:
+        skip = SkipFailedDocuments(self.name)
         for code in self.codes:
             page_no = 1
             while True:
@@ -187,7 +196,8 @@ class RISCollector:
                     "DokumenteProSeite": "Fifty",
                     "Seitennummer": str(page_no),
                 }
-                refs = _refs(http_get(f"{API}/Bundesrecht", params=params).json())
+                page = http_get(f"{API}/Bundesrecht", params=params).json()
+                refs = _refs(page)
                 if not refs:
                     break
                 for ref in refs:
@@ -195,12 +205,18 @@ class RISCollector:
                     url = _xml_url(ref)
                     if brk.get("Abkuerzung") != code or url is None:
                         continue
-                    doc = parse_ris_norm(ref, http_get(url).content)
+                    response = skip(http_get, url)
+                    if response is None:
+                        continue
+                    doc = parse_ris_norm(ref, response.content)
                     if doc is not None:
                         yield doc
+                if page_no >= _last_page(page):
+                    break
                 page_no += 1
 
     def decisions(self) -> Iterator[Document]:
+        skip = SkipFailedDocuments(self.name)
         for court in self.courts:
             page_no = 1
             while True:
@@ -212,16 +228,22 @@ class RISCollector:
                     "Dokumenttyp.SucheInRechtssaetzen": "false",
                     "Dokumenttyp.SucheInEntscheidungstexten": "true",
                 }
-                refs = _refs(http_get(f"{API}/Judikatur", params=params).json())
+                page = http_get(f"{API}/Judikatur", params=params).json()
+                refs = _refs(page)
                 if not refs:
                     break
                 for ref in refs:
                     url = _xml_url(ref)
                     if url is None:
                         continue
-                    doc = parse_ris_decision(ref, http_get(url).content)
+                    response = skip(http_get, url)
+                    if response is None:
+                        continue
+                    doc = parse_ris_decision(ref, response.content)
                     if doc is not None:
                         yield doc
+                if page_no >= _last_page(page):
+                    break
                 page_no += 1
 
     def iter_documents(self, limit: int | None = None) -> Iterator[Document]:

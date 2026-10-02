@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --partition=aisc-batch
+#SBATCH --partition=pot-hpi-aisc-batch
 #SBATCH --account=aisc
 #SBATCH --gpus=4
 #SBATCH --nodes=1
@@ -11,7 +11,7 @@
 #SBATCH --job-name=kd_probe
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.log
-#SBATCH --open-mode=append   # aisc-batch is preemptible: without this a requeue TRUNCATES the log
+#SBATCH --open-mode=append   # pot-hpi-aisc-batch is preemptible: without this a requeue TRUNCATES the log
 #SBATCH --requeue
 #
 # kd_memory_probe.sh -- does the 8B teacher fit? (plan P4-T; verdict P4-U). Four 20-step 4 x H100
@@ -32,10 +32,17 @@ export SCRATCH_ROOT
 export NUM_GPUS=4 TRAINER_CFG=h100_multi_ddp MODEL_CONFIG=hybrid_legal_base DATASET_CONFIG=synthetic
 export MAX_STEPS="${PROBE_STEPS:-20}" SAVE_TOP_K=0
 RUN_ID="${SLURM_JOB_ID:-local}"
+# A subset reruns only those shapes (job 2589362: both 1.7B runs died on a cache miss, the 8B OOMs
+# are results and are not measured again).
+PROBES="${PROBES:-t1p7b_L4096 t1p7b_L8192 t8b_L4096 t8b_L8192}"
+# The probe's own setting, the same for every shape (the training default turns it on for the 8B):
+# off in jobs 2589362 / 2589379, on in job 2589417 (GRAD_CKPT=true on the sbatch line).
+export GRAD_CKPT="${GRAD_CKPT:-false}"
 
 FAILED=()
 probe() {  # name, distill config, row_len, micro-batch, accumulation
   local name="$1"
+  [[ " $PROBES " == *" $name "* ]] || return 0
   export DISTILL_CFG="$2" ROW_LEN="$3" BATCH_SIZE="$4" ACCUM="$5"
   export EXPERIMENT="kd_probe_${RUN_ID}_${name}"
   export EXTRA_OVERRIDES="trainer.limit_val_batches=0 trainer.num_sanity_val_steps=0 trainer.enable_checkpointing=false callbacks.step_stats.every_n_steps=0 callbacks.step_stats.skip_steps=5 dataset.num_rows=256 dataset.min_doc_len=512 dataset.max_doc_len=${ROW_LEN}"
@@ -55,7 +62,10 @@ probe t8b_L8192 qwen3_8b 8192 4 4
 
 echo
 echo "== summary (final STEPSTATS per rank; the verdict reads these lines)"
-grep -E '^(== probe|STEPSTATS .* final=1)' "logs/kd_probe_${RUN_ID}.log" 2>/dev/null || echo "(log not found under logs/)"
+# The log is this job's own stdout: GNU grep refuses to read its output file ("input file is also the
+# output", exit 2; jobs 2589362, 2589379, 2589417 printed "log not found"), so grep a snapshot of it.
+snapshot="$(cat "logs/kd_probe_${RUN_ID}.log" 2>/dev/null || true)"
+grep -E '^(== probe|STEPSTATS .* final=1)' <<< "$snapshot" || echo "(no probe lines in logs/kd_probe_${RUN_ID}.log)"
 if [[ ${#FAILED[@]} -gt 0 ]]; then
   echo "KD PROBE RUNS THAT DID NOT FINISH: ${FAILED[*]}"
 fi

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --partition=aisc-batch
+#SBATCH --partition=pot-hpi-aisc-batch
 #SBATCH --account=aisc
 #SBATCH --gpus=1
 #SBATCH --nodes=1
@@ -11,7 +11,7 @@
 #SBATCH --job-name=scrub
 #SBATCH --output=logs/%x_%A_%a.log
 #SBATCH --error=logs/%x_%A_%a.log
-#SBATCH --open-mode=append   # aisc-batch is preemptible: a requeued task appends to its log
+#SBATCH --open-mode=append   # pot-hpi-aisc-batch is preemptible: a requeued task appends to its log
 #SBATCH --requeue
 #
 # scrub_array.sh -- the LER scrub at corpus scale (plan P4-L, first step; R11): flair/ner-german-legal

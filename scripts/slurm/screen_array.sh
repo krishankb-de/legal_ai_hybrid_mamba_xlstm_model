@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --partition=aisc-batch
+#SBATCH --partition=pot-hpi-aisc-batch
 #SBATCH --account=aisc
 #SBATCH --gpus=1
 #SBATCH --nodes=1
@@ -11,7 +11,7 @@
 #SBATCH --job-name=screen
 #SBATCH --output=logs/%x_%A_%a.log
 #SBATCH --error=logs/%x_%A_%a.log
-#SBATCH --open-mode=append   # aisc-batch is preemptible: without this a requeue TRUNCATES the log
+#SBATCH --open-mode=append   # pot-hpi-aisc-batch is preemptible: without this a requeue TRUNCATES the log
 #SBATCH --requeue
 #
 # screen_array.sh -- the P5 screen, one array task per arm-seed (plan P5-B; port map §11.1, §11.5).
@@ -22,8 +22,8 @@
 # node once exported nothing and a 12K arm ran as a 120K default, job 2513581). The screen settings
 # and the arm's levers arrive as EXTRA_OVERRIDES; the ARCH line is checked against the arm's
 # expected and forbidden tokens before step 0 (train_pretrain_1gpu.sh), so a lever that does not
-# reach the model stops the job (FL1). The teacher follows decisions.teacher: DISTILL_CFG=qwen3_8b
-# on the sbatch line if P4-U chose the 8B.
+# reach the model stops the job (FL1). The teacher is decisions.teacher, Qwen3-8B-Base (P4-U), with
+# gradient checkpointing (train_pretrain_1gpu.sh's default for the 8B).
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
 

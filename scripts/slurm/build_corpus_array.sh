@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --partition=aisc-batch
+#SBATCH --partition=pot-hpi-aisc-batch
 #SBATCH --account=aisc
 #SBATCH --exclude=ga03,gx17v1,gx13v1   # ga03: ARM/Grace node (x86 .venv -> "Exec format error"); gx13v1: faulty GPU
 #SBATCH --constraint=GLB_SCRATCH   # data/raw, the manifests and the HTTP cache live on /sc/scratch
@@ -9,7 +9,7 @@
 #SBATCH --job-name=corpus
 #SBATCH --output=logs/%x_%A_%a.log
 #SBATCH --error=logs/%x_%A_%a.log
-#SBATCH --open-mode=append   # aisc-batch is preemptible: a requeued task appends to its log
+#SBATCH --open-mode=append   # pot-hpi-aisc-batch is preemptible: a requeued task appends to its log
 #SBATCH --requeue
 #
 # build_corpus_array.sh -- the corpus at scale, one CPU array task per collector (plan P4-K;

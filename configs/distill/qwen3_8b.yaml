@@ -1,6 +1,8 @@
-# The larger teacher of decision 8: adopted only if P4-U measures that it fits at 4,096-token rows
-# on 4 x H100 (peak <= 70 GB and step time <= 1.6x the 1.7B step). The KD probe (P4-T) uses it.
+# The teacher (decisions.teacher, P4-U, 2026-10-01): with gradient checkpointing it fits at 4,096-token
+# rows on 4 x H100 at 43.18 GB and 1.44x the 1.7B step (job 2589417); without it, OOM (job 2589362).
+# The training wrappers turn checkpointing on for it (train_pretrain_1gpu.sh).
 teacher: Qwen/Qwen3-8B-Base
+revision: main  # what fetch_hf.sh fetches (tests/test_slurm_wrappers.py ties the two)
 dtype: bfloat16
 alpha: 0.5
 temperature: 2.0

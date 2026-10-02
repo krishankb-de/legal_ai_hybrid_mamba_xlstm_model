@@ -96,7 +96,7 @@ Reference numbers (H100 80 GB, bf16, batch 4, random weights unless stated; `ana
 | SFT, 12K steps, 4×H100 | 1.5–3 h per arm; 7 arms | reference 1 h 19 m – 2 h 30 m |
 | Synthetic QA, Qwen3-32B in vLLM, 1 H100 | ~65 GB weights; hours per 50K items | |
 | Checkpoint | ≈ 4.3 GB (fp32 weights + two Adam moments for 220.8M params); P4-N measures it | |
-| Storage | `outputs/` on scratch; ≤ 40 GB of checkpoints kept at any time; 200 GB home quota untouched | reference quota incident |
+| Storage | `outputs/` on scratch; ≤ 40 GB of checkpoints kept at any time (one `hybrid_legal_base` checkpoint = 2.65 GB, P4-O job 2589377: ≤ 15 kept); 200 GB home quota untouched | reference quota incident |
 
 ## 7. Phases
 
@@ -240,22 +240,43 @@ Purpose: reach the aisc cluster from this repo without git, build the environmen
 - [x] **P4-I** `scripts/slurm/preflight.sh` (CPU job: `screen_arms.py verify --full`; `pytest -m "not cuda and not slow and not reference"`; ARCH line printed for every arm) submitted with `sbatch`.
 - [x] **P4-J** Verdict on the sbatch preflight job: "PRE-FLIGHT PASSED" in the log; test count recorded.
 - [x] **P4-J1** `scripts/slurm/gpu_tests.sh` (1 H100: `pytest -m cuda tests/`, plus `check_env.py`) submitted with `sbatch`; record the job id.
-- [ ] **P4-J2** Verdict on the sbatch GPU-test job: every `cuda` test passed (count and log path in evidence); a failure is fixed before any screen job is submitted.
-- [ ] **P4-J3** `scripts/slurm/multigpu_tests.sh` (2 H100: `pytest -m multigpu tests/`) submitted with `sbatch --gpus=2`; record the job id.
-- [ ] **P4-J4** Verdict on the sbatch multi-GPU job: DDP smoke passed with identical gradients across ranks; evidence records the job id and log path.
-- [ ] **P4-K** `scripts/slurm/build_corpus_array.sh` (CPU array, one task per collector, `--limit` unset, writes `data/raw/<src>` and manifests on scratch) submitted with `sbatch --array`.
+- [x] **P4-J2** Verdict on the sbatch GPU-test job: every `cuda` test passed (count and log path in evidence); a failure is fixed before any screen job is submitted.
+- [x] **P4-J3** `scripts/slurm/multigpu_tests.sh` (2 H100: `pytest -m multigpu tests/`) submitted with `sbatch --gpus=2`; record the job id.
+- [x] **P4-J4** Verdict on the sbatch multi-GPU job: DDP smoke passed with identical gradients across ranks; evidence records the job id and log path.
+- [x] **P4-K** `scripts/slurm/build_corpus_array.sh` (CPU array, one task per collector, `--limit` unset, writes `data/raw/<src>` and manifests on scratch) submitted with `sbatch --array`.
 - [ ] **P4-L** Verdict on the sbatch corpus array: per-source document and token counts; then `scripts/slurm/pack_corpus.sh` (scrub → dedup → pack at 4,096 and 8,192, commercial-safe and research arms as separate shard sets) submitted with `sbatch` (evidence carries both job ids).
 - [ ] **P4-M** Verdict on the sbatch pack job: `analysis/corpus_manifest.md` from the template with tokens per source / jurisdiction / licence / arm, dedup removal rate, scrub entity counts; token budget for P6 set to `min(5B, available commercial-safe)`.
-- [ ] **P4-N** `scripts/slurm/probe_ckpt_size.sh` (10-step `hybrid_legal_base` run on 1 GPU writing `last.ckpt` to scratch) submitted with `sbatch`.
-- [ ] **P4-O** Verdict on the sbatch probe job: checkpoint size in GB → storage budget row in §6 and `evidence.ckpt_gb`; probe outputs deleted.
-- [ ] **P4-P** `scripts/slurm/profile.sh` (port map §11 point() protocol: one length per process, fresh `TORCHINDUCTOR_CACHE_DIR`; arms: `ref_hybrid_m3` sanity at 16,384 chunk 64 / compiled chunk 128; `ref_transformer` at 16,384; `hybrid_legal_base` and `transformer_legal_base` inference at 2,048/8,192/16,384 and training at 2,048/4,096/8,192 with packed `doc_ids` (flex) and without) submitted with `sbatch`.
-- [ ] **P4-Q** Verdict on the sbatch profile job: `analysis/profile_results.md` (prediction vs outcome; chunk-size decision by the rule "128 unless it fails R1 or loses > 5% at 4,096"); `effective_chunk_size` checked in every row.
-- [ ] **P4-R** `scripts/slurm/equivalence.sh` (`check_operator_equivalence.py --chunk-sizes 64 128 --compile` on GPU) submitted with `sbatch`.
-- [ ] **P4-S** Verdict on the sbatch equivalence job: exit 0 at 1e-4; compile smoke on the cluster (P2-Y's test under CUDA) green.
-- [ ] **P4-T** `scripts/slurm/kd_memory_probe.sh` (4×H100 DDP, 20 steps each: 1.7B teacher at 4,096 and 8,192 rows; 8B teacher at 4,096 and 8,192; records s/step and peak GB per rank) submitted with `sbatch --gpus=4`.
-- [ ] **P4-U** Verdict on the sbatch KD probe: `decisions.teacher` set by the rule "8B if peak ≤ 70 GB at 4,096 rows and step time ≤ 1.6× the 1.7B step; else 1.7B"; numbers into `analysis/profile_results.md`.
+- [x] **P4-N** `scripts/slurm/probe_ckpt_size.sh` (10-step `hybrid_legal_base` run on 1 GPU writing `last.ckpt` to scratch) submitted with `sbatch`.
+- [x] **P4-O** Verdict on the sbatch probe job: checkpoint size in GB → storage budget row in §6 and `evidence.ckpt_gb`; probe outputs deleted.
+- [x] **P4-P** `scripts/slurm/profile.sh` (port map §11 point() protocol: one length per process, fresh `TORCHINDUCTOR_CACHE_DIR`; arms: `ref_hybrid_m3` sanity at 16,384 chunk 64 / compiled chunk 128; `ref_transformer` at 16,384; `hybrid_legal_base` and `transformer_legal_base` inference at 2,048/8,192/16,384 and training at 2,048/4,096/8,192 with packed `doc_ids` (flex) and without) submitted with `sbatch`.
+- [x] **P4-Q** Verdict on the sbatch profile job: `analysis/profile_results.md` (prediction vs outcome; chunk-size decision by the rule "128 unless it fails R1 or loses > 5% at 4,096"); `effective_chunk_size` checked in every row.
+- [x] **P4-R** `scripts/slurm/equivalence.sh` (`check_operator_equivalence.py --chunk-sizes 64 128 --compile` on GPU) submitted with `sbatch`.
+- [x] **P4-S** Verdict on the sbatch equivalence job: exit 0 at 1e-4; compile smoke on the cluster (P2-Y's test under CUDA) green.
+- [x] **P4-T** `scripts/slurm/kd_memory_probe.sh` (4×H100 DDP, 20 steps each: 1.7B teacher at 4,096 and 8,192 rows; 8B teacher at 4,096 and 8,192; records s/step and peak GB per rank) submitted with `sbatch --gpus=4`.
+- [x] **P4-U** Verdict on the sbatch KD probe: `decisions.teacher` set by the rule "8B if peak ≤ 70 GB at 4,096 rows and step time ≤ 1.6× the 1.7B step; else 1.7B"; numbers into `analysis/profile_results.md`.
 - [x] **P4-V** `scripts/slurm/watch.sh` (port map §11: squeue/sacct/preemption/per-run checkpoint listing/log error grep; `source`-able; no python) and `tests/test_slurm_wrappers.py` (every wrapper: `--partition=aisc-batch`, `--account=aisc`, `--gpus` not `--gres`, `--exclude=ga03,gx17v1,gx13v1`, `--requeue` + `--open-mode=append` on training wrappers, `%A_%a` logs on arrays, `ARM` resolved inside, no `git` call, `cd "${SLURM_SUBMIT_DIR}"`).
 - [ ] **P4-Z** Gate: P4-F, P4-J, P4-J2, P4-J4, P4-S verdicts green; `analysis/corpus_manifest.md` and `analysis/profile_results.md` written with job ids; `decisions.teacher` recorded; `bash scripts/validate.sh` exit 0; `python3 scripts/plan_state.py next`.
+
+**RESULTS — measured 2026-09-30, jobs 2589361, 2589360.** gx07, 1×H100, bf16, batch 4, 10 timed iterations per point (22-point profile ladder; R1 at fp32). P4-Q; full tables in `analysis/profile_results.md`.
+| arm | seed | val PPL | late-25% PPL | MQAR | statute-recall | multi-hop | s/step | peak GB |
+|---|---|---|---|---|---|---|---|---|
+| hybrid_legal_base train 4,096 packed, chunk 128 | – | – | – | – | – | – | 0.444 | 28.21 |
+| hybrid_legal_base train 4,096 packed, chunk 64 | – | – | – | – | – | – | 0.649 | 26.86 |
+| ref_hybrid_m3 fwd 16,384, chunk 128, compiled | – | – | – | – | – | – | 0.121 | 7.17 |
+| ref_hybrid_m3 fwd 16,384, chunk 64, uncompiled | – | – | – | – | – | – | 0.571 | 7.19 |
+*Prediction:* ported `ref_hybrid_m3` within 10% of the reference at L=16,384 (compiled chunk 128 ≈ 123 ms, 7.17 GB; uncompiled chunk 64 ≈ 680 ms); `hybrid_legal_base` at 4,096 rows within 35 GB (1.7B teacher) / 60 GB (8B teacher); flex packed path within 1.2× of unpacked SDPA → *Outcome:* PARTIAL — compiled point −1.6% / 7.169 GB; uncompiled 571 ms (−16%, outside the band); packed/unpacked 1.14/1.10/1.10 for the hybrid but 1.83/1.34/1.08 for the transformer; 8B teacher OOM at micro-batch 8 (job 2589362); 1.7B pending (P4-U).
+*Gate:* PASS — "128 unless it fails R1 or loses > 5% at 4,096", chunk 128: R1 1.68e-6 ≤ 1e-4 and 444 vs 649 ms (31.5% faster), 128 kept.
+
+**RESULTS — measured 2026-09-30, jobs 2589379, 2589362.** gx07, 4×H100, bf16-mixed, `hybrid_legal_base` + online KD, synthetic packed rows, 20 steps (15 timed), model gradient checkpointing off. P4-U; table in `analysis/profile_results.md` §4.
+| arm | seed | val PPL | late-25% PPL | MQAR | statute-recall | multi-hop | s/step | peak GB |
+|---|---|---|---|---|---|---|---|---|
+| KD 1.7B, 4,096 rows, 8 × 2 × 4 | 42 | – | – | – | – | – | 4.144 | 80.60 |
+| KD 1.7B, 8,192 rows, 4 × 4 × 4 | 42 | – | – | – | – | – | 9.186 | 70.74 |
+| KD 8B, 4,096 rows, 8 × 2 × 4 | 42 | – | – | – | – | – | OOM | ≥ 82.7 |
+| KD 8B, 8,192 rows, 4 × 4 × 4 | 42 | – | – | – | – | – | OOM | ≥ 81.7 |
+*Prediction:* `hybrid_legal_base` at 4,096 rows trains uncompiled within 35 GB per GPU with the 1.7B teacher and within 60 GB with the 8B teacher → *Outcome:* REFUTED — 1.7B peaks at 80.60 GB; 8B does not fit (both without gradient checkpointing, which P6's recipe lists).
+*Gate:* PASS (decision taken) — "8B if peak ≤ 70 GB at 4,096 rows and step time ≤ 1.6× the 1.7B step; else 1.7B", 8B ≥ 82.7 GB (OOM), above 70 → `decisions.teacher` = Qwen/Qwen3-1.7B-Base (provisional).
+*Follow-up (job 2589417, gradient checkpointing on as in P6's recipe, at the user's request):* 1.7B 4.224 s / 30.11 GB, 8B 6.104 s / 43.18 GB at 4,096 rows; the same rule passes the 8B (43.18 ≤ 70, 1.44× ≤ 1.6×). **`decisions.teacher` = Qwen/Qwen3-8B-Base with gradient checkpointing** (2026-10-01; user: "choose whichever would give the best result, I am thinking of 8B").
 
 **Gate:** env, preflight, GPU tests, multi-GPU tests and equivalence green; manifest and profile written; teacher decided by measurement.
 
