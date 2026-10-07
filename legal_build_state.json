@@ -1,12 +1,16 @@
 {
-  "current_phase": "P4",
-  "last_updated": "2026-10-02T08:12:32+02:00",
-  "status": "P4 in progress, 24/27: J2 J4 O Q S U green; teacher = Qwen3-1.7B-Base. Open: L/M (corpus: eurlex, fineweb2_de, multilegalpile, dip, gii done; rii fedlex bger running (2589358); RIS rerun 2589382; OLDP from HF dump 2589414), Z. Ahead of phase: P5-A, P5-B, P6-A, P7-A, P7-B, P7-C1, P7-C.",
+  "current_phase": "P5",
+  "last_updated": "2026-10-03T20:29:53+02:00",
+  "status": "P5 in progress (3/10: A B C). S1 seeds running: 2599890. P4 closed: teacher Qwen3-8B-Base + grad ckpt; market Germany only; eurlex out of training; corpus 6.09B cs tokens; P6 budget 5B. Ahead of phase: P6-A, P7-A, P7-B, P7-C1, P7-C (P7 chunks/BM25 to rebuild: gii ids changed 2026-10-03). For P6: decide within-legal source weights (gii 20% of rows -> ~29 passes at 5B).",
   "plan_of_record": "LEGAL_BUILD_PLAN.md",
   "helper": "python3 scripts/plan_state.py <cmd> (stdlib only; the ONLY writer of LEGAL_BUILD_PLAN.md checkboxes and legal_build_state.json)",
   "scope": "Build lexhybrid: port the reference backbone/kernels/decode/tests (P1), fix 18 recorded defects and add legal decoder deltas (P2), data pipeline (P3), cluster + corpus + profiling (P4), pre-registered screen (P5), full backbone (P6), retrieval/renderer/verifier (P7), post-training (P8), evaluation (P9), release (P10); P11 optional. Local only, no git until the user writes 'git go'. Reference/ deleted at P1-Z by the user.",
-  "blocked_on": null,
-  "next_action": "User asked to be told the next step, not to run it (2026-10-02). Pending user answers: (1) Germany-only training corpus or keep CH (fedlex, bger) + multilegalpile's CH parts; (2) go-ahead for scrub. Then: P4-L verdict (docs + chars per source, tokens estimated from fertility; exact at pack) -> SOURCES=<agreed list> sbatch --array=0-<8n-1> scrub_array.sh (pilot one part first to time the GPU scrub) -> pack_corpus.sh afterok -> P4-M corpus_manifest.md + P6 token budget -> P4-Z (validate --full).",
+  "blocked_on": {
+    "box": "P5-D",
+    "what": "S1 crashed on TFLA fp32 range guard (2599890); user decision: kernel fix vs chunk 64 vs sequential fallback",
+    "since": "2026-10-03"
+  },
+  "next_action": "Open: 2599890 (S1-s42 = _0, S1-s43 = _1). sacct -j 2599890 --format=JobID,State,Elapsed,MaxRSS,ExitCode -P. RUNNING -> tail logs for s/step; stop. COMPLETED -> pull logs/screen_2599890_{0,1}.log -> P5-D: val PPL per seed, two-seed SD, bar_value = max(2xSD, 0.10) into P5 section + pre_registered.P5.bar_value (say if floor binds) -> then P5-E (S0 S2 S3 S4 S6 x 2 seeds --array=0-9; S5 x 2 --time=24:00:00). TIMEOUT -> resubmit same ARMS (resumes from last.ckpt).",
   "decisions": {
     "01_init_road": "From scratch first: Qwen3 tokenizer + logit-KL from an open Qwen3-*-Base teacher. Qwen3 conversion = P11, optional, on user instruction only. (user 2026-09-27)",
     "02_corpus": "Open-licensed sources PLUS a research-exception arm; every document carries licence + commercial_safe; research_only never enters a shippable arm. (user 2026-09-27)",
@@ -32,7 +36,10 @@
     "ler_scrub_env": "flair/ner-german-legal in its own uv project envs/scrub/ (own lock); main env keeps transformers 5; fallback: a transformers-5-compatible model trained on German LER, evaluated on its test split first (user, 2026-09-27; plan decision 22)",
     "dedup_cross_source": "every copy (user, 2026-09-29: 'keep both and when cited cite both so that not only 1 citetion works but many'; chose 'Every copy' for pretraining): copies of one text in DIFFERENT sources are all kept and packed, and linked in the dedup log; duplicates inside ONE source are still dropped (decision 13 amended)",
     "cite_every_copy": "a citation names every source that holds the cited passage (user, 2026-09-29): retrieval keeps every copy; the dedup log's cross-source links group them; the renderer (P7-G) cites all of them",
-    "teacher": "Qwen/Qwen3-8B-Base with gradient checkpointing (P4-U rule on P6's recipe, job 2589417: 43.18 GB <= 70, 6.104 s = 1.44x the 1.7B's 4.224 s <= 1.6x; unchecked probes 2589362 OOM). User 2026-10-01: 'teacher choice : chosse which ever would give the best result i am thinking of 8B but decide accordingly and let me know'. Wrappers: DISTILL_CFG default qwen3_8b, GRAD_CKPT=true for the 8B."
+    "teacher": "Qwen/Qwen3-8B-Base with gradient checkpointing (P4-U rule on P6's recipe, job 2589417: 43.18 GB <= 70, 6.104 s = 1.44x the 1.7B's 4.224 s <= 1.6x; unchecked probes 2589362 OOM). User 2026-10-01: 'teacher choice : chosse which ever would give the best result i am thinking of 8B but decide accordingly and let me know'. Wrappers: DISTILL_CFG default qwen3_8b, GRAD_CKPT=true for the 8B.",
+    "market": "Germany only (user 2026-10-02: 'lets keep the process only for the german market'): training corpus = gii rii oldp eurlex dip fineweb2_de + multilegalpile DE rows (research arm); ris, fedlex, bger and multilegalpile CH rows out; eurlex kept (EU law applies in DE). Scrub go-ahead given, pilot first.",
+    "eurlex_training": "out of the training pack (user 2026-10-03, after pack 2599610: 565 docs, ~0.3M tokens cannot give the plan's >=2,000-doc validation split); stays collected and scrubbed for retrieval/citation (P7)",
+    "p6_token_budget": "5,000,000,000 = min(5B, 6,092,655,089 commercial-safe train tokens; pack 2599735, analysis/corpus_manifest.md); legal 4.23B, fineweb2_de 1.87B cover the 70/30 mix"
   },
   "pre_registered": {
     "rules": {
@@ -539,7 +546,7 @@
     },
     "P4": {
       "title": "Cluster bring-up, corpus at scale, profiling",
-      "status": "in_progress",
+      "status": "complete",
       "checkboxes": {
         "P4-A": {
           "done": true,
@@ -602,11 +609,11 @@
           "desc": "`scripts/slurm/build_corpus_array.sh` (CPU array, one task per collector, `--limit` unset, writes `data/raw/<src>` and manifests on scratch) submitted with `sbatch --array`."
         },
         "P4-L": {
-          "done": false,
+          "done": true,
           "desc": "Verdict on the sbatch corpus array: per-source document and token counts; then `scripts/slurm/pack_corpus.sh` (scrub → dedup → pack at 4,096 and 8,192, commercial-safe and research arms as separate shard sets) submitt..."
         },
         "P4-M": {
-          "done": false,
+          "done": true,
           "desc": "Verdict on the sbatch pack job: `analysis/corpus_manifest.md` from the template with tokens per source / jurisdiction / licence / arm, dedup removal rate, scrub entity counts; token budget for P6 set to `min(5B, avail..."
         },
         "P4-N": {
@@ -646,7 +653,7 @@
           "desc": "`scripts/slurm/watch.sh` (port map §11: squeue/sacct/preemption/per-run checkpoint listing/log error grep; `source`-able; no python) and `tests/test_slurm_wrappers.py` (every wrapper: `--partition=aisc-batch`, `--acco..."
         },
         "P4-Z": {
-          "done": false,
+          "done": true,
           "desc": "Gate: P4-F, P4-J, P4-J2, P4-J4, P4-S verdicts green; `analysis/corpus_manifest.md` and `analysis/profile_results.md` written with job ids; `decisions.teacher` recorded; `bash scripts/validate.sh` exit 0; `python3 scri..."
         }
       },
@@ -660,12 +667,12 @@
         "home": "101G/200G",
         "date": "2026-09-27",
         "P4-C_user_confirmed": "P4-C is confirmed as tested",
-        "validate": "exit 0, 933 passed, 2026-09-29",
+        "validate": "exit 0 (--full), 1016 passed, 2026-10-03",
         "sync_stamp": "2026-09-27T20:58:14Z b708e84f…b57f",
         "first_sync": "300 files 10.8MB to hpi-hpc:/sc/home/krishankumar.bhushan/lexhybrid",
         "ls_slurm": ".gitkeep cluster.env.example (no wrappers yet; first is P4-E setup_env.sh)",
-        "job": "2589379",
-        "log": "cluster/logs/kd_probe_2589379.log",
+        "job": "2599735",
+        "log": "cluster/logs/pack_corpus_2599735.log",
         "state": "COMPLETED 0:0, 00:02:00, gx14",
         "python": "3.11.15",
         "torch": "2.11.0+cu128",
@@ -702,15 +709,29 @@
         "t1p7b_L4096": "4.144 s/step, 80.60/83.29 GB alloc/reserved",
         "t1p7b_L8192": "9.186 s/step, 70.74/80.26 GB",
         "t8b": "OOM at 4096 (>=82.7 GB) and 8192 (>=81.7 GB)",
-        "teacher": "Qwen/Qwen3-1.7B-Base",
+        "teacher": "Qwen3-8B-Base",
         "caveat": "model gradient checkpointing off in the probe; P6 recipe has it on",
         "kd_ckpt_job": "2589417",
         "kd_ckpt_1p7b_4096": "4.224 s/step 30.11/36.42 GB",
         "kd_ckpt_1p7b_8192": "10.891 s/step 20.14/30.19 GB",
         "kd_ckpt_8b_4096": "6.104 s/step 43.18/49.13 GB",
-        "kd_ckpt_8b_8192": "15.174 s/step 33.22/43.34 GB"
+        "kd_ckpt_8b_8192": "15.174 s/step 33.22/43.34 GB",
+        "scrub": "2593479+2593360",
+        "pack": "2593480",
+        "docs_cs": "2631930",
+        "est_tokens_cs": "6.37e9",
+        "est_tokens_research": "7.79e9",
+        "cs_train_tokens": "6092655089",
+        "research_train_tokens": "7474326564",
+        "dedup_dropped": "30597",
+        "linked": "241242",
+        "scrub_entities": "15960418",
+        "p6_budget": "5e9",
+        "manifest": "analysis/corpus_manifest.md",
+        "corpus_manifest": "analysis/corpus_manifest.md",
+        "profile": "analysis/profile_results.md"
       },
-      "verdict": null
+      "verdict": "P4-Z PASS: env/preflight/GPU/multi-GPU/equivalence green; profile + corpus manifest written with job ids; teacher Qwen3-8B-Base (grad ckpt); corpus 6.09B cs tokens, P6 budget 5B"
     },
     "P5": {
       "title": "Pre-registered screen",
@@ -725,7 +746,7 @@
           "desc": "`scripts/slurm/screen_array.sh` (port map §11 array header; `ARMS` env list; `ARM` resolved on the compute node by `screen_arms.py env`; `unset EXPERIMENT`; `SAVE_TOP_K=0`; greps the ARCH line at step 0 against the ar..."
         },
         "P5-C": {
-          "done": false,
+          "done": true,
           "desc": "Submit S1 seeds 42 and 43 with `sbatch --array=0-1` (`ARMS=\"S1-s42 S1-s43\"`); record both job ids; end the session."
         },
         "P5-D": {
@@ -760,7 +781,10 @@
       "evidence": {
         "prereg": "pre_registered.P5.prediction + bar_rule, 2026-09-29T14:44",
         "results_file": "analysis/screen_results.md",
-        "validate": "exit 0, 935 passed, 2026-09-29"
+        "validate": "exit 0, 1011 passed, 2026-10-03",
+        "job": "2599890",
+        "tasks": "0=S1-s42 1=S1-s43",
+        "time": "16:00:00"
       },
       "verdict": null
     },
@@ -1276,6 +1300,105 @@
       "status": "COMPLETED",
       "log": "logs/corpus_2589572_1.log",
       "last_checked": "2026-10-02T08:12:32+02:00"
+    },
+    "2593359": {
+      "phase": "P4",
+      "box": "P4-L",
+      "arm": "corpus_counts",
+      "submitted": "2026-10-02T08:29:02+02:00",
+      "status": "COMPLETED",
+      "log": "logs/corpus_counts_2593359.log",
+      "last_checked": "2026-10-02T08:49:51+02:00"
+    },
+    "2593360": {
+      "phase": "P4",
+      "box": "P4-L",
+      "arm": "scrub_pilot_oldp_p0",
+      "submitted": "2026-10-02T08:29:02+02:00",
+      "status": "COMPLETED",
+      "log": "logs/scrub_2593360_16.log",
+      "last_checked": "2026-10-02T13:42:35+02:00"
+    },
+    "2593479": {
+      "phase": "P4",
+      "box": "P4-L",
+      "arm": "scrub_array_de",
+      "submitted": "2026-10-02T08:49:51+02:00",
+      "status": "FAILED",
+      "log": "logs/scrub_2593479_%a.log",
+      "last_checked": "2026-10-02T13:42:35+02:00"
+    },
+    "2593480": {
+      "phase": "P4",
+      "box": "P4-M",
+      "arm": "pack_corpus",
+      "submitted": "2026-10-02T08:49:51+02:00",
+      "status": "CANCELLED",
+      "log": "logs/pack_corpus_2593480.log",
+      "last_checked": "2026-10-02T13:42:35+02:00"
+    },
+    "2594823": {
+      "phase": "P4",
+      "box": "P4-L",
+      "arm": "scrub_array_de_retry",
+      "submitted": "2026-10-02T13:42:35+02:00",
+      "status": "COMPLETED",
+      "log": "logs/scrub_2594823_%a.log",
+      "last_checked": "2026-10-03T09:45:57+02:00"
+    },
+    "2594824": {
+      "phase": "P4",
+      "box": "P4-M",
+      "arm": "pack_corpus",
+      "submitted": "2026-10-02T13:42:35+02:00",
+      "status": "FAILED",
+      "log": "logs/pack_corpus_2594824.log",
+      "last_checked": "2026-10-03T09:45:57+02:00"
+    },
+    "2599608": {
+      "phase": "P4",
+      "box": "P4-M",
+      "arm": "collect_gii_fix",
+      "submitted": "2026-10-03T09:45:57+02:00",
+      "status": "COMPLETED",
+      "log": "logs/corpus_2599608_0.log",
+      "last_checked": "2026-10-03T14:31:35+02:00"
+    },
+    "2599609": {
+      "phase": "P4",
+      "box": "P4-M",
+      "arm": "scrub_gii_force",
+      "submitted": "2026-10-03T09:45:57+02:00",
+      "status": "COMPLETED",
+      "log": "logs/scrub_2599609_%a.log",
+      "last_checked": "2026-10-03T14:31:35+02:00"
+    },
+    "2599610": {
+      "phase": "P4",
+      "box": "P4-M",
+      "arm": "pack_corpus",
+      "submitted": "2026-10-03T09:45:57+02:00",
+      "status": "FAILED",
+      "log": "logs/pack_corpus_2599610.log",
+      "last_checked": "2026-10-03T14:31:35+02:00"
+    },
+    "2599735": {
+      "phase": "P4",
+      "box": "P4-M",
+      "arm": "pack_corpus",
+      "submitted": "2026-10-03T14:38:10+02:00",
+      "status": "COMPLETED",
+      "log": "logs/pack_corpus_2599735.log",
+      "last_checked": "2026-10-03T19:33:24+02:00"
+    },
+    "2599890": {
+      "phase": "P5",
+      "box": "P5-C",
+      "arm": "S1-s42,S1-s43",
+      "submitted": "2026-10-03T19:42:47+02:00",
+      "status": "FAILED",
+      "log": "logs/screen_2599890_%a.log",
+      "last_checked": "2026-10-03T20:29:53+02:00"
     }
   },
   "artifacts": {},
@@ -1418,7 +1541,11 @@
         "P4-Q",
         "P4-O",
         "P4-S",
-        "P4-U"
+        "P4-U",
+        "P4-L",
+        "P4-M",
+        "P4-Z",
+        "P5-C"
       ],
       "jobs": [
         "2588677",
@@ -1442,7 +1569,18 @@
         "2589382",
         "2589414",
         "2589417",
-        "2589572"
+        "2589572",
+        "2593359",
+        "2593360",
+        "2593479",
+        "2593480",
+        "2594823",
+        "2594824",
+        "2599608",
+        "2599609",
+        "2599610",
+        "2599735",
+        "2599890"
       ]
     }
   ],
@@ -1724,7 +1862,52 @@
     "2026-10-02: job 2589382 -> CANCELLED",
     "2026-10-02: job 2589414 -> COMPLETED",
     "2026-10-02: job 2589572 -> COMPLETED",
-    "2026-10-02: Corpus collection finished 2026-10-02 (nothing running at 08:11). Final raw per source (scratch data/raw): gii 90,255 docs 297M; rii 84,347 of 84,423 toc items 3.2G (job 2589572, 1 document skipped after its retries: jb-KSRE120181512.zip, the SkipFailedDocuments path); oldp 423,363 23G (2589414, HF dump); eurlex 567 2.5M; fedlex 98,038 213M; bger 109,233 of 109,294 hits 3.2G (2589358_6, 31h, 0 skips); dip 33,398 6.1G; fineweb2_de 2,000,000 17G; multilegalpile 580,166 31G. ris: cancelled (AT, user's Germany focus), only ris.jsonl.partial 990M + http cache (build_shards ignores it). Manifests carry n_chars, not tokens (exact tokens come from pack's build_summary.json). Scratch 310T free."
+    "2026-10-02: Corpus collection finished 2026-10-02 (nothing running at 08:11). Final raw per source (scratch data/raw): gii 90,255 docs 297M; rii 84,347 of 84,423 toc items 3.2G (job 2589572, 1 document skipped after its retries: jb-KSRE120181512.zip, the SkipFailedDocuments path); oldp 423,363 23G (2589414, HF dump); eurlex 567 2.5M; fedlex 98,038 213M; bger 109,233 of 109,294 hits 3.2G (2589358_6, 31h, 0 skips); dip 33,398 6.1G; fineweb2_de 2,000,000 17G; multilegalpile 580,166 31G. ris: cancelled (AT, user's Germany focus), only ris.jsonl.partial 990M + http cache (build_shards ignores it). Manifests carry n_chars, not tokens (exact tokens come from pack's build_summary.json). Scratch 310T free.",
+    "2026-10-02: decision market: Germany only (user 2026-10-02: 'lets keep the process only for the german market'): training corpus = gii rii oldp eurlex dip fineweb2_de + multilegalpile DE rows (research arm); ris, fedlex, bger and multilegalpile CH rows out; eurlex kept (EU law applies in DE). Scrub go-ahead given, pilot first.",
+    "2026-10-02: User decision 2026-10-02: German market only; scrub go-ahead (pilot one part first). multilegalpile manifest: 254,573 DE rows, 325,593 CH rows (grep -c).",
+    "2026-10-02: submitted job 2593359 (P4-L corpus_counts)",
+    "2026-10-02: submitted job 2593360 (P4-L scrub_pilot_oldp_p0)",
+    "2026-10-02: scrub_ler --jurisdictions (stride over kept rows, order preserved) + scrub/pack/counts wrappers default to the German market (gii rii oldp eurlex dip fineweb2_de multilegalpile; DE EU). New scripts/corpus_counts.py + slurm/corpus_counts.sh (docs/chars per source x jurisdiction x licence from manifests; tokens estimated from a 2,000-doc stride sample per source). validate.sh exit 0, 1003 passed. Submitted 2593359 (counts, CPU) and 2593360 (scrub pilot = array idx 16 = oldp part 0/8, largest part; output reused if PARTS stays 8).",
+    "2026-10-02: job 2593359 -> COMPLETED",
+    "2026-10-02: job 2593360 -> RUNNING",
+    "2026-10-02: submitted job 2593479 (P4-L scrub_array_de)",
+    "2026-10-02: submitted job 2593480 (P4-M pack_corpus)",
+    "2026-10-02: ticked P4-L",
+    "2026-10-02: verdict P4: P4-L: German-market corpus 2.89M docs / 24.8B chars (~7.79B est tokens; commercial-safe ~6.37B pre-dedup); scrub 2593479(+2593360) -> pack 2593480 afterok",
+    "2026-10-02: job 2593360 -> COMPLETED",
+    "2026-10-02: job 2593479 -> FAILED",
+    "2026-10-02: job 2593480 -> CANCELLED",
+    "2026-10-02: submitted job 2594823 (P4-L scrub_array_de_retry)",
+    "2026-10-02: submitted job 2594824 (P4-M pack_corpus)",
+    "2026-10-02: scrub pilot 2593360 COMPLETED: oldp 0/8 52,921 docs, 487,627 entities, 12,609 s (1.208e9 chars, ~96k chars/s). Array 2593479: 37 tasks COMPLETED; 10 FAILED: 9 x KeyError ' ' in scrub_text (tasks 9 11 17 22 41-44 54: a span of punctuation tokens like '„ “' trims to whitespace, placeholders() skips it, scrub_text looked it up) and 1 x CUDA OOM (35, dip: flair char-LM asked 32 GiB for a ~33k-char piece; chunker capped tokens not chars). Fix: scrub_document drops whitespace-only spans (no completed doc can have had one); worker caps pieces at --max-chars 4096 (cap at last space, else hard). Tests added (2), validate.sh exit 0, 1006 passed. Cancelled the 8 still-running old-code tasks (45-47 fineweb2_de, 50-53 55 multilegalpile; 4/5 finished fineweb tasks had failed) + pack 2593480. Resubmitted once (rule g): 2594823 --array=9,11,17,22,35,41-47,50-55 (18 parts; 38 done parts on scratch) -> pack 2594824 afterok.",
+    "2026-10-02: job 2594823 -> RUNNING",
+    "2026-10-02: retry 2594823: 10/18 COMPLETED (9 11 17 22 35 41-45; dip part 3 now done, 4,175 docs, 107,472 entities, 2.8 h: the 4,096-char cap fixed the OOM), 46-47 RUNNING, 50-55 PENDING (Priority); pack 2594824 waits (Dependency). No failures.",
+    "2026-10-03: job 2594823 -> COMPLETED",
+    "2026-10-03: job 2594824 -> FAILED",
+    "2026-10-03: submitted job 2599608 (P4-M collect_gii_fix)",
+    "2026-10-03: submitted job 2599609 (P4-M scrub_gii_force)",
+    "2026-10-03: submitted job 2599610 (P4-M pack_corpus)",
+    "2026-10-03: scrub retry 2594823 all 18 COMPLETED (56/56 parts). Pack 2594824 FAILED after 19 min in dedup: datasketch 'The given key already exists' = duplicate document ids. grep of manifest ids/sha256: dip eurlex oldp rii fineweb2_de 0 dups; gii 137 ids naming 2-23 different provisions in 32 laws (bgbeg 21, eginso 11, besvng_1 10, intpat_bkg 8, ...): 128 are a § under an article heading (EGBGB Art 229 § 6 vs Art 231 § 6; Roman Art II in IntPatÜG), 9 are numbers the XML itself repeats (RückAbzinsV two § 8; verkfing Art 1-6). Citations were ambiguous ('BGBEG §6') and URLs 404 (__6.html; site: art_229__6.html, __8_1.html). Fix: gii collector qualifies § under an article (id gii:bgbeg:art229:6, citation 'BGBEG Art. 229 §6', url art_229__6.html, Roman lowercased) and suffixes XML repeats (_1 like the site); citation grammar accepts 'Art. <a> §<n>' (article+paragraph); multihop probe skips such docs (numbering restarts per article, like ZGB SchlT); dedup refuses repeated ids up front with the ids named; scrub_array FORCE=1. 1,132 gii docs change id (704 non-dup under an article). Tests +4, validate.sh exit 0, 1008 passed. Chain: 2599608 gii recollect (replays 335M http cache) -> 2599609 FORCE=1 gii scrub 0-7 -> 2599610 pack. NOTE for P7: retrieval chunks/BM25 built ahead of phase must be rebuilt from the recollected gii (ids changed).",
+    "2026-10-03: job 2599608 -> COMPLETED",
+    "2026-10-03: job 2599609 -> COMPLETED",
+    "2026-10-03: job 2599610 -> FAILED",
+    "2026-10-03: gii recollect 2599608 COMPLETED from cache (90,255 docs, 1 min); FORCE gii scrub 2599609 0-7 COMPLETED (~3.5 min each; part 0: 11,282 docs, 694 entities). Pack 2599610 FAILED at 17:51: dedup OK this time (2,886,503 docs, 30,599 within-source duplicates dropped, 241,243 cross-source copies linked), then split_by_document: 'eurlex: 565 documents cannot give a validation split of 2000 (fraction 0.001, minimum 2000)'. Only eurlex is below MIN_VAL_DOCS. Not a code bug: the plan's split rule vs a 0.3M-token source. Asked user: drop eurlex from the training pack (kept for retrieval) vs other options.",
+    "2026-10-03: decision eurlex_training: out of the training pack (user 2026-10-03, after pack 2599610: 565 docs, ~0.3M tokens cannot give the plan's >=2,000-doc validation split); stays collected and scrubbed for retrieval/citation (P7)",
+    "2026-10-03: submitted job 2599735 (P4-M pack_corpus)",
+    "2026-10-03: user chose to drop eurlex from the training pack (decisions.eurlex_training); pack_corpus.sh default SOURCES = gii rii oldp dip fineweb2_de multilegalpile; wrapper test updated; validate.sh exit 0. Pack resubmitted: 2599735 (dedup already proven to pass on this input in 2599610).",
+    "2026-10-03: job 2599735 -> COMPLETED",
+    "2026-10-03: decision p6_token_budget: 5,000,000,000 = min(5B, 6,092,655,089 commercial-safe train tokens; pack 2599735, analysis/corpus_manifest.md); legal 4.23B, fineweb2_de 1.87B cover the 70/30 mix",
+    "2026-10-03: ticked P4-M",
+    "2026-10-03: verdict P4: P4-M: corpus packed (2599735): 6.09B commercial-safe / 7.47B research train tokens; dedup 1.06% dropped, 8.36% linked; P6 budget 5B",
+    "2026-10-03: ticked P4-Z",
+    "2026-10-03: verdict P4: P4-Z PASS: env/preflight/GPU/multi-GPU/equivalence green; profile + corpus manifest written with job ids; teacher Qwen3-8B-Base (grad ckpt); corpus 6.09B cs tokens, P6 budget 5B",
+    "2026-10-03: P4 complete -> current_phase P5",
+    "2026-10-03: submitted job 2599890 (P5-C S1-s42,S1-s43)",
+    "2026-10-03: ticked P5-C",
+    "2026-10-03: before P5-C: configs/dataset/mixture_pretrain.yaml still admitted eurlex ris fedlex bger, which have no shards -> shard_directory would raise at data load in every run. Sources now = pack_corpus.sh's (gii rii oldp dip fineweb2_de + multilegalpile research); test_the_shipped_mixture_admits_only_packed_sources added. Weights as written in the yaml: commercial-safe rows gii .2 rii .2 oldp .2 dip .1 fineweb2_de .3 (screen: 192k rows of 2,048 -> ~2.3 passes over gii's 16,848 sub-rows; at P6's 5B budget gii would be seen ~29x -> decide the within-legal weights at P6). Val pass = every val row once: 36,640 rows of 2,048, 61% dip by tokens (pooled val PPL). S1 submitted 2599890 (--array=0-1, ARMS='S1-s42 S1-s43', --time=16:00:00 instead of 12 h: est. ~3 s/step from 8B KD probe 2589417 -> ~10.2 h + val; walltime changes no measurement).",
+    "2026-10-03: job 2599890 -> FAILED",
+    "2026-10-03: S1 2599890 FAILED both seeds: TFLAFallbackError in mlstm_block (exact TFLA, chunk 128, fallback=error): per-chunk log-decay half-range 43.2 (s42, after step 838, 20 min) and 54.6 (s43, step 419, 10 min) >= 40 (fp32 guard of the factorised intra-chunk scores). Training was healthy until then: 0.70 it/s = ~1.43 s/step (12k steps ~4.8 h). Learned per-dimension forget gates sharpen past what one factorisation per 128-chunk holds. Options per the guard: smaller mlstm_chunk_size, or tfla_fallback: sequential (exact, slow); or a kernel fix (blockwise re-centring inside the chunk: every exponent <= 0, exact at 128). All change either the arms' ARCH tokens or the operator -> asked user.",
+    "2026-10-03: BLOCKED on P5-D: S1 crashed on TFLA fp32 range guard (2599890); user decision: kernel fix vs chunk 64 vs sequential fallback"
   ],
   "open_questions": []
 }

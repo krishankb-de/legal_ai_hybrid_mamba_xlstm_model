@@ -291,6 +291,8 @@ case "$1" in
     fi
     if [[ " $* " != *" +arch_only=true "* ]]; then exit "${FAKE_TRAIN_EXIT:-0}"; fi
     exit 0 ;;
+  scripts/corpus_counts.py)
+    record "$@"; exit 0 ;;
   scripts/performance_profile.py | scripts/check_operator_equivalence.py | scripts/check_env.py)
     record "INDUCTOR=${TORCHINDUCTOR_CACHE_DIR:-}" "$@"; exit "${FAKE_TOOL_EXIT:-0}" ;;
   scripts/build_shards.py)
@@ -696,6 +698,7 @@ def test_scrub_array_task_scrubs_its_part_with_one_key(sandbox):
     assert (flags["--source"], flags["--part"], flags["--parts"]) == ("rii", "1", "3")
     assert flags["--out"] == str(sandbox.scratch / "data" / "scrubbed" / "rii.part-1-of-3.jsonl")
     assert flags["--log"] == str(sandbox.scratch / "data" / "manifests" / "scrub_rii.part-1-of-3.jsonl")
+    assert call[-3:] == ["--jurisdictions", "DE", "EU"], "decisions.market: multilegalpile's Swiss rows out"
     key_file = sandbox.scratch / ".secrets" / "scrub_hmac.key"
     key = key_file.read_text()
     assert re.fullmatch(r"[0-9a-f]{64}", key) and call[0] == f"KEY={key}"
@@ -704,6 +707,8 @@ def test_scrub_array_task_scrubs_its_part_with_one_key(sandbox):
     assert res.returncode == 0 and calls[0][0] == f"KEY={key}", "the second task reuses the key"
     res, calls = sandbox("scrub_array.sh", SLURM_ARRAY_TASK_ID=4, **env)
     assert res.returncode == 0 and calls == [] and "already scrubbed" in res.stdout
+    res, calls = sandbox("scrub_array.sh", SLURM_ARRAY_TASK_ID=4, FORCE=1, **env)
+    assert res.returncode == 0 and len(calls) == 1, "FORCE=1 scrubs a recollected source again"
     res, _ = sandbox("scrub_array.sh", SLURM_ARRAY_TASK_ID=6, **env)
     assert res.returncode == 1 and "only 6 tasks" in res.stdout
     res, _ = sandbox("scrub_array.sh", SLURM_ARRAY_TASK_ID=0, SOURCES="dip", PARTS=1)
@@ -719,3 +724,40 @@ def test_pack_corpus_packs_both_row_lengths_from_the_scrubbed_parts(sandbox):
     assert call[i + 1 : i + 3] == ["4096", "8192"] and call[call.index("--workers") + 1] == "32"
     assert call[call.index("--scrubbed") + 1] == str(sandbox.scratch / "data" / "scrubbed")
     assert "--allow-unscrubbed" not in call, "R11: only scrubbed documents are packed"
+    i = call.index("--sources")
+    assert call[i + 1 :] == ["gii", "rii", "oldp", "dip", "fineweb2_de", "multilegalpile"], (
+        "decisions.market: ris, fedlex and bger are collected but never packed; decisions.eurlex_training"
+    )
+
+
+def test_scrub_and_pack_and_counts_default_to_one_source_list():
+    """The scrub array and the counts read the same German-market sources; the pack reads them all
+    but eurlex (decisions.eurlex_training: too small for a validation split, kept for retrieval)."""
+    lists = {
+        name: re.search(r'SOURCES="\$\{SOURCES:-([^}]+)\}"', code(SLURM_DIR / name)).group(1).split()
+        for name in ("scrub_array.sh", "pack_corpus.sh", "corpus_counts.sh")
+    }
+    assert lists["scrub_array.sh"] == lists["corpus_counts.sh"]
+    assert lists["pack_corpus.sh"] == [s for s in lists["scrub_array.sh"] if s != "eurlex"], lists
+
+
+def test_the_shipped_mixture_admits_only_packed_sources():
+    """A source in configs/dataset/mixture_pretrain.yaml without shards stops every training run at
+    data load (shard_directory raises): the mixture names exactly the sources pack_corpus.sh packs."""
+    import yaml
+
+    shipped = yaml.safe_load((REPO_ROOT / "configs" / "dataset" / "mixture_pretrain.yaml").read_text())
+    packed = (
+        re.search(r'SOURCES="\$\{SOURCES:-([^}]+)\}"', code(SLURM_DIR / "pack_corpus.sh")).group(1).split()
+    )
+    assert set(shipped["sources"]) == set(packed)
+
+
+def test_corpus_counts_reads_the_manifests_on_scratch(sandbox):
+    res, calls = sandbox("corpus_counts.sh")
+    assert res.returncode == 0 and "CORPUS COUNTS DONE" in res.stdout, res.stdout + res.stderr
+    (call,) = calls
+    assert call[0] == "scripts/corpus_counts.py"
+    assert call[call.index("--manifests") + 1] == str(sandbox.scratch / "data" / "manifests")
+    i = call.index("--jurisdictions")
+    assert call[i + 1 : i + 3] == ["DE", "EU"] and call[call.index("--sample") + 1] == "2000"

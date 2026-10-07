@@ -20,6 +20,9 @@
 # research-only source (multilegalpile) is a shard set of its own, which only the research arm
 # admits. Submit from the Mac once every scrub task is COMPLETED:
 #   ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch scripts/slurm/pack_corpus.sh"
+# SOURCES defaults to scrub_array.sh's list, the German market (decisions.market), without eurlex
+# (decisions.eurlex_training: 565 documents cannot give the >= 2,000-document validation split; job
+# 2599610); a collected but unscrubbed source outside it (ris, fedlex, bger) is never read.
 # Writes $SCRATCH_ROOT/data/shards/{4096,8192}/<src>/{train,val}/ + meta.json, <row_len>/dedup.jsonl
 # and build_summary.json (the numbers of analysis/corpus_manifest.md, P4-M). A requeued run starts
 # over (it rewrites every shard). The log ends in "PACK CORPUS DONE".
@@ -33,15 +36,19 @@ export PYTHONUNBUFFERED=1
 export TOKENIZERS_PARALLELISM=false   # one tokenizer per worker process
 SHARDS="${SCRATCH_ROOT}/data/shards"
 WORKERS="${WORKERS:-${SLURM_CPUS_PER_TASK:-8}}"
+SOURCES="${SOURCES:-gii rii oldp dip fineweb2_de multilegalpile}"
+read -r -a SOURCE_LIST <<< "${SOURCES}"
 mkdir -p logs "$SHARDS"
 
 echo "host: $(hostname)  job: ${SLURM_JOB_ID:-none}  restart: ${SLURM_RESTART_COUNT:-0}  workers: $WORKERS"
+echo "sources: ${SOURCES}"
 echo "sync_stamp: $(cat .sync_stamp 2>/dev/null || echo missing)"
 df -h "$SCRATCH_ROOT" | tail -n 1
 echo "scrubbed parts: $(find "${SCRATCH_ROOT}/data/scrubbed" -name '*.jsonl' | wc -l | tr -d ' ')  unfinished: $(find "${SCRATCH_ROOT}/data/scrubbed" -name '*.partial' | wc -l | tr -d ' ')"
 
 .venv/bin/python scripts/build_shards.py --root "$SHARDS" --row-len 4096 8192 \
-  --scrubbed "${SCRATCH_ROOT}/data/scrubbed" --raw "${SCRATCH_ROOT}/data/raw" --workers "$WORKERS"
+  --scrubbed "${SCRATCH_ROOT}/data/scrubbed" --raw "${SCRATCH_ROOT}/data/raw" --workers "$WORKERS" \
+  --sources "${SOURCE_LIST[@]}"
 
 du -sh "$SHARDS"/4096 "$SHARDS"/8192
 cat "$SHARDS/build_summary.json"

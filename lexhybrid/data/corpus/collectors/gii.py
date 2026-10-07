@@ -13,6 +13,13 @@ structural headings above it (``Abschnitt 1 Allgemeine Vorschriften``), outermos
 date of the last amendment named in the law's ``Stand`` comment -- the version this text is --
 falling back to the date of the law's issue. Repealed provisions (``(weggefallen)``) and empty
 headings are skipped. Licence: official work under § 5 UrhG (register row ``gii``).
+
+Introductory and omnibus laws number their paragraphs afresh inside each article (EGBGB ``Art 229``
+``§ 6``, ``Art 231`` ``§ 6``; ``Art II`` ``§ 1`` in the IntPatÜG): a ``§`` under an article heading is
+``gii:bgbeg:art229:6``, ``BGBEG Art. 229 §6``, ``.../bgbeg/art_229__6.html``. A number the XML
+itself repeats (RückAbzinsV's two ``§ 8``) gets the site's suffix on its repeats: ``gii:r_ckabzinsv:8_1``,
+``.../__8_1.html``. So every id is unique within the source (job 2594824: 137 ids named two or more
+provisions, and the deduplication's index refused them).
 """
 
 import io
@@ -30,6 +37,7 @@ BASE_URL = "https://www.gesetze-im-internet.de"
 _ABSATZ = re.compile(r"^\((\d+[a-z]?)\)\s*")
 _DATE = re.compile(r"v\.\s*(\d{1,2})\.(\d{1,2})\.(\d{4})")
 _ENBEZ = re.compile(r"^(§|Art\.?)\s*(\d+[a-z]*)$")
+_ARTICLE_UNIT = re.compile(r"^Art(?:ikel)?\.?\s*(\d+[a-z]*|[IVXLC]+)\b")  # a heading that opens an article
 # Inline block elements: a line break after each, so lists and tables stay readable.
 _BREAK_AFTER = {"DD", "LA", "row", "Title", "Ident"}
 
@@ -90,16 +98,18 @@ def parse_gii_xml(xml_bytes: bytes, slug: str, retrieved_at: str | None = None) 
     flags = licence_flags("DE-UrhG-5")
     retrieved_at = retrieved_at or utc_now()
     docs = []
-    path: list[tuple[str, str]] = []  # (gliederungskennzahl, heading) of the open structural units
+    path: list[tuple[str, str, str | None]] = []  # (kennzahl, heading, article) of the open units
+    seen: dict[str, int] = {}  # id tail -> times used, for the repeats the XML itself contains
     for norm in norms[1:]:
         md = norm.find("metadaten")
         unit = md.find("gliederungseinheit")
         if unit is not None:
             number = (unit.findtext("gliederungskennzahl") or "").strip()
             words = f"{unit.findtext('gliederungsbez') or ''} {unit.findtext('gliederungstitel') or ''}"
-            path = [(k, h) for k, h in path if number.startswith(k) and k != number]
+            path = [(k, h, a) for k, h, a in path if number.startswith(k) and k != number]
             if words.split():
-                path.append((number, " ".join(words.split())))
+                article = _ARTICLE_UNIT.match(" ".join((unit.findtext("gliederungsbez") or "").split()))
+                path.append((number, " ".join(words.split()), article.group(1) if article else None))
         enbez = " ".join((md.findtext("enbez") or "").split())
         m = _ENBEZ.match(enbez)
         content = norm.find("textdaten/text/Content")
@@ -122,21 +132,36 @@ def parse_gii_xml(xml_bytes: bytes, slug: str, retrieved_at: str | None = None) 
         if not sections or all(s.text in ("-", "(weggefallen)") for s in sections):
             continue
         symbol, number = m.groups()
-        citation = f"{code} §{number}" if symbol == "§" else f"{code} Art. {number}"
+        article = next((a for _, _, a in reversed(path) if a), None) if symbol == "§" else None
+        if article:
+            a = article.lower()
+            tail, citation, page = (
+                f"art{a}:{number}",
+                f"{code} Art. {article} §{number}",
+                f"art_{a}__{number}",
+            )
+        elif symbol == "§":
+            tail, citation, page = number, f"{code} §{number}", f"__{number}"
+        else:
+            tail, citation, page = f"art{number}", f"{code} Art. {number}", f"art_{number}"
+        repeat = seen.get(tail, 0)
+        seen[tail] = repeat + 1
+        if repeat:
+            tail, page = f"{tail}_{repeat}", f"{page}_{repeat}"
         head = f"{enbez} {heading}".strip()
         docs.append(
             Document(
-                id=f"gii:{slug}:{'art' if symbol != '§' else ''}{number}",
+                id=f"gii:{slug}:{tail}",
                 source="gii",
                 jurisdiction="DE",
                 doc_type=doc_type,
                 text=head + "\n" + "\n".join(s.text for s in sections),
                 citation_id=citation,
-                url=f"{BASE_URL}/{slug}/{'__' if symbol == '§' else 'art_'}{number}.html",
+                url=f"{BASE_URL}/{slug}/{page}.html",
                 valid_from=valid_from,
                 retrieved_at=retrieved_at,
                 sections=sections,
-                hierarchy=[heading for _, heading in path],
+                hierarchy=[heading for _, heading, _ in path],
                 **flags,
             )
         )

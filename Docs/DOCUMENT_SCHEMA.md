@@ -54,6 +54,7 @@ abbreviation (or `SR <number>`) and may be followed by `SchlT`; then, optionally
 - `BGB §573 Abs. 2 Nr. 1`: German Civil Code
 - `ABGB §1295`: Austrian General Civil Code
 - `OR Art. 97`: Swiss Code of Obligations
+- `BGBEG Art. 229 §6`: a paragraph of an article that numbers its own paragraphs (introductory and omnibus laws)
 - `DSGVO Art. 6 Abs. 1 lit. f`: GDPR, in its German short name
 - `ZGB SchlT Art. 1`: an article of the Swiss Civil Code's final title (Schlusstitel)
 - `SR 221.214.111 Art. 3`: a Swiss act without an abbreviation, cited by its SR number

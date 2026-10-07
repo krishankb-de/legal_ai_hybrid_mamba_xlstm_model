@@ -450,6 +450,68 @@ def test_gii_parser_on_fixture():
         parse_citation(d.citation_id)
 
 
+def _gii_law(*norms: str) -> bytes:
+    head = (
+        "<norm><metadaten><jurabk>BGBEG</jurabk><amtabk>BGBEG</amtabk><langue>Einführungsgesetz</langue>"
+        "<ausfertigung-datum>1896-08-18</ausfertigung-datum></metadaten></norm>"
+    )
+    return f"<dokumente>{head}{''.join(norms)}</dokumente>".encode()
+
+
+def _gii_unit(number: str, bez: str, title: str = "") -> str:
+    return (
+        f"<norm><metadaten><gliederungseinheit><gliederungskennzahl>{number}</gliederungskennzahl>"
+        f"<gliederungsbez>{bez}</gliederungsbez><gliederungstitel>{title}</gliederungstitel>"
+        "</gliederungseinheit></metadaten></norm>"
+    )
+
+
+def _gii_norm(enbez: str, text: str) -> str:
+    return (
+        f"<norm><metadaten><enbez>{enbez}</enbez><titel>T</titel></metadaten>"
+        f"<textdaten><text><Content><P>{text}</P></Content></text></textdaten></norm>"
+    )
+
+
+def test_gii_ids_are_unique_when_articles_number_their_own_paragraphs():
+    """Job 2594824 (137 gii ids named 2-23 provisions): a § under an article heading is cited and
+    linked as that article's (EGBGB Art. 229 § 6, art_229__6.html, Roman numerals lowercased in the
+    URL); a number the XML itself repeats gets the site's suffix (__8_1.html); every id is unique."""
+    from lexhybrid.data.corpus.collectors.gii import parse_gii_xml
+
+    xml = _gii_law(
+        _gii_norm("§ 1", "Erster."),
+        _gii_unit("010", "Art 229", "Übergangsvorschriften"),
+        _gii_norm("§ 6", "(1) Verjährung."),
+        _gii_unit("020", "Art 231"),
+        _gii_norm("§ 6", "(1) Anderes."),
+        _gii_unit("030", "Art II"),
+        _gii_norm("§ 1", "Patent."),
+        _gii_unit("040", "Siebter Teil Schlussvorschriften"),
+        _gii_norm("§ 8", "Inkrafttreten."),
+        _gii_norm("§ 8", "Übergang."),
+        _gii_norm("Art 5", "Ein Artikel."),
+    )
+    docs = parse_gii_xml(xml, "bgbeg", retrieved_at="2026-10-03T00:00:00+00:00")
+    got = [(d.id, d.citation_id, d.url.rsplit("/", 1)[1]) for d in docs]
+    assert got == [
+        ("gii:bgbeg:1", "BGBEG §1", "__1.html"),
+        ("gii:bgbeg:art229:6", "BGBEG Art. 229 §6", "art_229__6.html"),
+        ("gii:bgbeg:art231:6", "BGBEG Art. 231 §6", "art_231__6.html"),
+        ("gii:bgbeg:artii:1", "BGBEG Art. II §1", "art_ii__1.html"),
+        ("gii:bgbeg:8", "BGBEG §8", "__8.html"),
+        ("gii:bgbeg:8_1", "BGBEG §8", "__8_1.html"),
+        ("gii:bgbeg:art5", "BGBEG Art. 5", "art_5.html"),
+    ]
+    assert docs[1].hierarchy == ["Art 229 Übergangsvorschriften"] and docs[4].hierarchy == [
+        "Siebter Teil Schlussvorschriften"
+    ]
+    assert parse_citation("BGBEG Art. 229 §6 Abs. 1") == {
+        "kind": "statute", "code": "BGBEG", "article": "229", "paragraph": "6", "absatz": "1",
+    }  # fmt: skip
+    assert parse_citation(docs[3].citation_id)["article"] == "II"
+
+
 def test_gii_toc_and_zip():
     import io
     import zipfile
@@ -1443,6 +1505,37 @@ def test_scrub_short_forms_are_replaced_only_where_tagged():
     )
 
 
+def test_scrub_skips_a_span_that_trims_to_whitespace():
+    """Job 2593479 (9 tasks, KeyError ' '): a span of punctuation tokens (`„ “`, `( )`) trims to a
+    space; it gets no placeholder and must not be replaced, while the real names still are."""
+    from lexhybrid.data.corpus.scrub_ler import Entity, scrub_document
+
+    doc = _doc(text="Herr Müller sagte „ “ und ( ) nichts; Müller ging.")
+    text = doc.text
+    entities = [
+        Entity(*_find(text, "„ “"), "PER", 0.6),
+        Entity(*_find(text, "( )"), "RR", 0.6),
+        Entity(*_find(text, "Müller"), "PER", 0.99),
+    ]
+    scrubbed, log = scrub_document(doc, entities, key=b"k" * 32)
+    assert scrubbed.text == "Herr [PER_1] sagte „ “ und ( ) nichts; [PER_1] ging."
+    assert [(r["label"], r["placeholder"]) for r in log] == [("PER", "[PER_1]")]
+
+
+def test_scrub_worker_caps_every_piece_in_characters(script):
+    """Job 2593479_35 (CUDA OOM, 32 GiB): flair's character LM allocates per character, so a DIP
+    table line of 200 long "words" or one 30,000-character run must reach the tagger in pieces of
+    at most --max-chars characters, each at its own offset into the text."""
+    worker = script("scrub_ner_worker")
+    text = "Herr Müller klagt.\n" + " ".join(["x" * 150] * 200) + "\n  " + "y" * 9000 + " Ende."
+    pieces = worker.chunks(text, max_tokens=200, max_chars=1000)
+    assert all(0 < len(p) <= 1000 and p.strip() == p for _, p in pieces)
+    assert all(text[off : off + len(p)] == p for off, p in pieces)
+    assert "".join(p for _, p in pieces).replace(" ", "") == text.replace(" ", "").replace("\n", "")
+    assert pieces[0] == (0, "Herr Müller klagt.")
+    assert worker.chunks("Herr Müller klagt.", 200) == [(0, "Herr Müller klagt.")], "short text unchanged"
+
+
 def test_scrub_worker_tags_the_model_card_example():
     """The real worker in the scrub environment (skipped until envs/scrub and the model are present)."""
     from lexhybrid.data.corpus.scrub_ler import REPO_ROOT, SCRUB_PYTHON, run_worker
@@ -1643,6 +1736,34 @@ def test_scrub_streams_parts_through_one_worker(tmp_path):
     assert not dead.exists() and (tmp_path / "scrubbed" / "dead.jsonl.partial").exists()
 
 
+def test_scrub_parts_keep_only_the_market_jurisdictions(tmp_path, script):
+    """decisions.market (Germany only): with jurisdictions, a Swiss row is never scrubbed, the
+    stride runs over the kept rows, and build_shards' round-robin read restores their order."""
+    import sys
+
+    from lexhybrid.data.corpus.scrub_ler import iter_part, part_name, scrub_file
+
+    jur = ["CH"] * 7 + ["DE", "CH", "DE", "DE", "EU"] * 5  # the Swiss rows first, as in multilegalpile
+    docs = [_doc(id=f"gii:x:{i}", jurisdiction=j, text=f"Herr Müller {i}.") for i, j in enumerate(jur)]
+    raw = tmp_path / "gii.jsonl"
+    raw.write_text("".join(d.to_json() + "\n" for d in docs) + "\n")
+    want = [d.id for d in docs if d.jurisdiction in ("DE", "EU")]
+    assert [d.id for d in iter_part(raw, 0, 1, ["DE", "EU"])] == want
+    assert [d.id for d in iter_part(raw, 2, 3, ["DE", "EU"])] == want[2::3]
+    assert [d.id for d in iter_part(raw, 2, 3)] == [d.id for d in docs][2::3], "no filter: lines as before"
+
+    fake = tmp_path / "fake_worker.py"
+    fake.write_text(FAKE_SCRUB_WORKER)
+    out = tmp_path / "scrubbed"
+    for k in range(3):
+        name = part_name("gii", k, 3)
+        s = scrub_file("gii", raw, out / name, tmp_path / "manifests" / f"scrub_{name}",
+                       python=sys.executable, part=k, parts=3, worker=fake, jurisdictions=["DE", "EU"])  # fmt: skip
+        assert s["jurisdictions"] == ["DE", "EU"] and s["docs"] == len(want[k::3])
+    paths = [out / part_name("gii", k, 3) for k in range(3)]
+    assert [d.id for d in script("build_shards").iter_documents(paths)] == want
+
+
 # -- deduplication (P3-S) ----------------------------------------------------------------------
 
 
@@ -1722,6 +1843,21 @@ def test_dedup_at_scale_makes_the_same_decisions(tmp_path):
     (linked,) = [e for e in log if not e.dropped]
     assert {linked.id, linked.duplicate_of} == {"fineweb2_de:copy", docs[2].id} and linked.kind == "near"
     assert "fineweb2_de:copy" in {d.id for d in kept}
+
+
+def test_dedup_refuses_an_id_that_names_two_documents():
+    """Job 2594824: two gii provisions under one id reached the LSH index ("The given key already
+    exists"); the deduplication now names the repeated ids before any work."""
+    import dataclasses
+
+    from lexhybrid.data.corpus.dedup import deduplicate_stream
+
+    a = _doc(id="gii:bgbeg:6", text="§ 6 Überleitungsvorschrift zum Verjährungsrecht nach dem Gesetz.")
+    b = dataclasses.replace(
+        a, text="§ 6 Ganz andere Vorschrift über das Grundbuch im Beitrittsgebiet.", sha256=""
+    )
+    with pytest.raises(ValueError, match=r"1 document ids occur more than once: \['gii:bgbeg:6'\]"):
+        deduplicate_stream(iter([a, b, _doc(id="gii:bgbeg:7")]))
 
 
 def test_dedup_shingles():
@@ -2127,6 +2263,44 @@ def test_mixture_cuts_stored_rows_for_a_shorter_row_len(tmp_path):
     assert len(val) == len(val_cut) == 2 * len(SourceShards(tmp_path / "64" / "oldp", "val"))
     tail = val_cut.row(len(val_cut) - 1)["length"]  # val reads every sub-row once, in order
     assert torch.all(val[len(val) - 1]["labels"][tail:] == -100)
+
+
+def test_corpus_counts_per_source_jurisdiction_and_arm(tmp_path, script, capsys):
+    """P4-L verdict (scripts/corpus_counts.py): documents and characters from the manifests, tokens
+    estimated per jurisdiction from a stride sample; rows outside the market are reported but not
+    totalled; the research total includes the commercial-safe one; a missing manifest fails."""
+    import json
+
+    from lexhybrid.data.corpus.manifest import write_manifest
+
+    cc = script("corpus_counts")
+    gii = [_doc(id=f"gii:bgb:{i}", text="a b c d " * (i + 1)) for i in range(10)]
+    mlp = [
+        _doc(id=f"multilegalpile:x:{i}", source="multilegalpile", jurisdiction=j, licence="CC-BY-NC-SA-4.0",
+             commercial_safe=False, research_only=True, text="w " * 50)
+        for i, j in enumerate(["CH"] * 4 + ["DE"] * 6)
+    ]  # fmt: skip
+    for name, docs in (("gii", gii), ("multilegalpile", mlp)):
+        (tmp_path / "raw" / name).mkdir(parents=True)
+        (tmp_path / "raw" / name / f"{name}.jsonl").write_text("".join(d.to_json() + "\n" for d in docs))
+        write_manifest(docs, tmp_path / "manifests" / f"{name}.jsonl")
+    argv = ["--manifests", str(tmp_path / "manifests"), "--raw", str(tmp_path / "raw"), "--sample", "5"]
+    words = lambda: str.split  # noqa: E731 -- one "token" per whitespace word
+    assert cc.main(argv + ["--sources", "gii", "multilegalpile"], encoder_factory=words) == 0
+    summary = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    rows = {(r["source"], r["jurisdiction"]): r for r in summary["rows"]}
+    assert rows["gii", "DE"]["documents"] == 10 and rows["gii", "DE"]["chars"] == sum(
+        len(d.text) for d in gii
+    )
+    assert rows["gii", "DE"]["sample_documents"] == 5 and rows["gii", "DE"]["tokens_per_char"] == 0.5
+    ch, de = rows["multilegalpile", "CH"], rows["multilegalpile", "DE"]
+    assert not ch["included"] and de["included"] and not de["commercial_safe"]
+    assert (ch["documents"], de["documents"], de["tokens_per_char"]) == (4, 6, 0.5)
+    t = summary["totals"]
+    assert t["commercial_safe"]["documents"] == 10 and t["research"]["documents"] == 16
+    assert t["research"]["est_tokens"] == t["commercial_safe"]["est_tokens"] + de["est_tokens"]
+    assert cc.main(argv + ["--sources", "gii", "bger"], encoder_factory=words) == 1
+    assert "no manifest for: bger" in capsys.readouterr().out
 
 
 # -- probes: MQAR and statute recall (P3-W) ----------------------------------------------------

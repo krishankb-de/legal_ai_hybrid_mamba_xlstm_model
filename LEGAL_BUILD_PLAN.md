@@ -244,8 +244,8 @@ Purpose: reach the aisc cluster from this repo without git, build the environmen
 - [x] **P4-J3** `scripts/slurm/multigpu_tests.sh` (2 H100: `pytest -m multigpu tests/`) submitted with `sbatch --gpus=2`; record the job id.
 - [x] **P4-J4** Verdict on the sbatch multi-GPU job: DDP smoke passed with identical gradients across ranks; evidence records the job id and log path.
 - [x] **P4-K** `scripts/slurm/build_corpus_array.sh` (CPU array, one task per collector, `--limit` unset, writes `data/raw/<src>` and manifests on scratch) submitted with `sbatch --array`.
-- [ ] **P4-L** Verdict on the sbatch corpus array: per-source document and token counts; then `scripts/slurm/pack_corpus.sh` (scrub → dedup → pack at 4,096 and 8,192, commercial-safe and research arms as separate shard sets) submitted with `sbatch` (evidence carries both job ids).
-- [ ] **P4-M** Verdict on the sbatch pack job: `analysis/corpus_manifest.md` from the template with tokens per source / jurisdiction / licence / arm, dedup removal rate, scrub entity counts; token budget for P6 set to `min(5B, available commercial-safe)`.
+- [x] **P4-L** Verdict on the sbatch corpus array: per-source document and token counts; then `scripts/slurm/pack_corpus.sh` (scrub → dedup → pack at 4,096 and 8,192, commercial-safe and research arms as separate shard sets) submitted with `sbatch` (evidence carries both job ids).
+- [x] **P4-M** Verdict on the sbatch pack job: `analysis/corpus_manifest.md` from the template with tokens per source / jurisdiction / licence / arm, dedup removal rate, scrub entity counts; token budget for P6 set to `min(5B, available commercial-safe)`.
 - [x] **P4-N** `scripts/slurm/probe_ckpt_size.sh` (10-step `hybrid_legal_base` run on 1 GPU writing `last.ckpt` to scratch) submitted with `sbatch`.
 - [x] **P4-O** Verdict on the sbatch probe job: checkpoint size in GB → storage budget row in §6 and `evidence.ckpt_gb`; probe outputs deleted.
 - [x] **P4-P** `scripts/slurm/profile.sh` (port map §11 point() protocol: one length per process, fresh `TORCHINDUCTOR_CACHE_DIR`; arms: `ref_hybrid_m3` sanity at 16,384 chunk 64 / compiled chunk 128; `ref_transformer` at 16,384; `hybrid_legal_base` and `transformer_legal_base` inference at 2,048/8,192/16,384 and training at 2,048/4,096/8,192 with packed `doc_ids` (flex) and without) submitted with `sbatch`.
@@ -255,7 +255,7 @@ Purpose: reach the aisc cluster from this repo without git, build the environmen
 - [x] **P4-T** `scripts/slurm/kd_memory_probe.sh` (4×H100 DDP, 20 steps each: 1.7B teacher at 4,096 and 8,192 rows; 8B teacher at 4,096 and 8,192; records s/step and peak GB per rank) submitted with `sbatch --gpus=4`.
 - [x] **P4-U** Verdict on the sbatch KD probe: `decisions.teacher` set by the rule "8B if peak ≤ 70 GB at 4,096 rows and step time ≤ 1.6× the 1.7B step; else 1.7B"; numbers into `analysis/profile_results.md`.
 - [x] **P4-V** `scripts/slurm/watch.sh` (port map §11: squeue/sacct/preemption/per-run checkpoint listing/log error grep; `source`-able; no python) and `tests/test_slurm_wrappers.py` (every wrapper: `--partition=aisc-batch`, `--account=aisc`, `--gpus` not `--gres`, `--exclude=ga03,gx17v1,gx13v1`, `--requeue` + `--open-mode=append` on training wrappers, `%A_%a` logs on arrays, `ARM` resolved inside, no `git` call, `cd "${SLURM_SUBMIT_DIR}"`).
-- [ ] **P4-Z** Gate: P4-F, P4-J, P4-J2, P4-J4, P4-S verdicts green; `analysis/corpus_manifest.md` and `analysis/profile_results.md` written with job ids; `decisions.teacher` recorded; `bash scripts/validate.sh` exit 0; `python3 scripts/plan_state.py next`.
+- [x] **P4-Z** Gate: P4-F, P4-J, P4-J2, P4-J4, P4-S verdicts green; `analysis/corpus_manifest.md` and `analysis/profile_results.md` written with job ids; `decisions.teacher` recorded; `bash scripts/validate.sh` exit 0; `python3 scripts/plan_state.py next`.
 
 **RESULTS — measured 2026-09-30, jobs 2589361, 2589360.** gx07, 1×H100, bf16, batch 4, 10 timed iterations per point (22-point profile ladder; R1 at fp32). P4-Q; full tables in `analysis/profile_results.md`.
 | arm | seed | val PPL | late-25% PPL | MQAR | statute-recall | multi-hop | s/step | peak GB |
@@ -277,6 +277,38 @@ Purpose: reach the aisc cluster from this repo without git, build the environmen
 *Prediction:* `hybrid_legal_base` at 4,096 rows trains uncompiled within 35 GB per GPU with the 1.7B teacher and within 60 GB with the 8B teacher → *Outcome:* REFUTED — 1.7B peaks at 80.60 GB; 8B does not fit (both without gradient checkpointing, which P6's recipe lists).
 *Gate:* PASS (decision taken) — "8B if peak ≤ 70 GB at 4,096 rows and step time ≤ 1.6× the 1.7B step; else 1.7B", 8B ≥ 82.7 GB (OOM), above 70 → `decisions.teacher` = Qwen/Qwen3-1.7B-Base (provisional).
 *Follow-up (job 2589417, gradient checkpointing on as in P6's recipe, at the user's request):* 1.7B 4.224 s / 30.11 GB, 8B 6.104 s / 43.18 GB at 4,096 rows; the same rule passes the 8B (43.18 ≤ 70, 1.44× ≤ 1.6×). **`decisions.teacher` = Qwen/Qwen3-8B-Base with gradient checkpointing** (2026-10-01; user: "choose whichever would give the best result, I am thinking of 8B").
+
+**RESULTS — measured 2026-10-02, jobs 2593359 (counts); collection 2589358, 2589414, 2589572.** gx14, CPU, collection manifests streamed; tokens ESTIMATED as characters × Qwen3 tokens/char of a 2,000-document stride sample per source (exact tokens at pack, P4-M). P4-L; log `cluster/logs/corpus_counts_2593359.log`. Scope per `decisions.market` (user 2026-10-02, Germany only): ris (cancelled), fedlex (98,038 docs) and bger (109,233 docs) collected but out; multilegalpile's CH rows out.
+| source | jurisdiction | licence | arm | documents | characters | tokens/char | est. tokens |
+|---|---|---|---|---:|---:|---:|---:|
+| gii | DE | DE-UrhG-5 | commercial-safe | 90,255 | 117,665,070 | 0.3058 | 36.0 M |
+| rii | DE | DE-UrhG-5 | commercial-safe | 84,347 | 1,497,684,183 | 0.3302 | 494.5 M |
+| oldp | DE | ODbL-1.0 | commercial-safe | 423,363 | 9,679,619,333 | 0.3256 | 3,151.9 M |
+| eurlex | EU | CC-BY-4.0 | commercial-safe | 567 | 1,050,704 | 0.2834 | 0.3 M |
+| dip | DE | DE-UrhG-5 | commercial-safe | 33,398 | 2,578,740,818 | 0.3209 | 827.6 M |
+| fineweb2_de | DE | ODC-By-1.0 | commercial-safe | 2,000,000 | 6,502,869,015 | 0.2856 | 1,857.4 M |
+| multilegalpile | DE | CC-BY-NC-SA-4.0 | research | 254,573 | 4,394,911,794 | 0.3244 | 1,425.7 M |
+| multilegalpile | CH | CC-BY-NC-SA-4.0 | excluded | 325,593 | 7,331,867,014 | 0.3310 | (2,427.2 M) |
+| **commercial-safe total** | | | | **2,631,930** | **20,377,629,123** | | **~6.37 B** |
+| **research total (+ multilegalpile DE)** | | | | **2,886,503** | **24,772,540,917** | | **~7.79 B** |
+*Prediction:* none pre-registered for the corpus counts (P4's prediction covers profiling) → *Outcome:* n/a — before dedup the commercial-safe estimate (~6.37 B, of which fineweb2_de ~1.86 B general German) exceeds the 5 B cap; P4-M sets the budget from the pack's exact post-dedup tokens.
+*Gate:* n/a — P4-L records counts and submits the pack; scrub array 2593479 (+ pilot 2593360 = oldp part 0/8; pilot rate ~8.5% of a 3.0 GB part in 18 min, so PARTS = 8 keeps the largest part near 3.6 h) → `pack_corpus.sh` 2593480 (`afterok` on both).
+*Follow-up:* 2593480 never ran (10 scrub tasks failed: whitespace-only spans, one 32 GiB OOM; fixed, retried as 2594823). Pack 2594824 FAILED (137 repeated gii ids; gii collector fixed, recollected 2599608, rescrubbed 2599609); pack 2599610 FAILED (eurlex 565 docs < 2,000 validation docs; user: eurlex out of training). Record: pack **2599735**.
+
+**RESULTS — measured 2026-10-03, job 2599735 (pack); scrub 2593360, 2593479, 2594823, 2599609.** gx08, CPU (32 workers), 1 h 44 min, 22.9 GB peak RSS; Qwen3 tokenizer; 6 sources packed at 4,096 and 8,192 (identical tokens). P4-M; full tables in `analysis/corpus_manifest.md`, log `cluster/logs/pack_corpus_2599735.log`.
+| source | licence | arm | train docs | train tokens | val tokens | dropped within source |
+|---|---|---|---:|---:|---:|---:|
+| gii | DE-UrhG-5 | commercial-safe | 83,650 | 34,500,954 | 823,607 | 4,605 (5.10%) |
+| rii | DE-UrhG-5 | commercial-safe | 78,473 | 456,813,003 | 11,582,466 | 3,874 (4.59%) |
+| oldp | ODbL-1.0 | commercial-safe | 411,588 | 3,054,572,288 | 15,217,411 | 9,775 (2.31%) |
+| dip | DE-UrhG-5 | commercial-safe | 27,297 | 679,127,415 | 45,542,409 | 4,101 (12.28%) |
+| fineweb2_de | ODC-By-1.0 | commercial-safe | 1,997,381 | 1,867,641,429 | 1,860,692 | 619 (0.03%) |
+| **commercial-safe** | | | **2,598,389** | **6,092,655,089** | **75,026,585** | |
+| multilegalpile (DE) | CC-BY-NC-SA-4.0 | research | 244,950 | 1,381,671,475 | 11,092,158 | 7,623 (2.99%) |
+| **research** | | | **2,843,339** | **7,474,326,564** | **86,118,743** | 30,597 (1.06%) total |
+Cross-source copies kept and linked: 241,242 (8.36%). Scrub: 15,960,418 entities over 2,886,503 documents (7 sources), 83.0 H100-hours.
+*Prediction:* none pre-registered for the corpus → *Outcome:* n/a — 6.09 B commercial-safe training tokens; 73% of rii and 74% of multilegalpile documents also exist in oldp/gii (both kept, decision 13 as amended).
+*Gate:* n/a (decision rule) — "token budget for P6 set to `min(5B, available commercial-safe)`", 6,092,655,089 > 5 B → **P6 budget = 5 B** (legal 3.5 B of 4.23 B available, general German 1.5 B of 1.87 B, decision 13's 70/30).
 
 **Gate:** env, preflight, GPU tests, multi-GPU tests and equivalence green; manifest and profile written; teacher decided by measurement.
 
@@ -300,7 +332,7 @@ Decision rule, written before the numbers: the **simplest** arm (S1 unless a lev
 
 - [x] **P5-A** Write the prediction above and the bar rule into `pre_registered.P5` (`plan_state.py evidence P5 prediction=... bar_rule=...`) before any submission; `analysis/screen_results.md` created from the template with the prediction and an empty table.
 - [x] **P5-B** `scripts/slurm/screen_array.sh` (port map §11 array header; `ARMS` env list; `ARM` resolved on the compute node by `screen_arms.py env`; `unset EXPERIMENT`; `SAVE_TOP_K=0`; greps the ARCH line at step 0 against the arm's `expect` tokens and exits non-zero on mismatch) and `scripts/slurm/train_pretrain_1gpu.sh` it delegates to. `tests/test_slurm_wrappers.py` extended.
-- [ ] **P5-C** Submit S1 seeds 42 and 43 with `sbatch --array=0-1` (`ARMS="S1-s42 S1-s43"`); record both job ids; end the session.
+- [x] **P5-C** Submit S1 seeds 42 and 43 with `sbatch --array=0-1` (`ARMS="S1-s42 S1-s43"`); record both job ids; end the session.
 - [ ] **P5-D** Verdict on the sbatch S1 jobs: val PPL per seed, two-seed SD, `bar_value = max(2×SD, 0.10)` written into this section and `pre_registered.P5.bar_value`; if the floor binds, say so.
 - [ ] **P5-E** Submit S0, S2, S3, S4, S6 × seeds 42/43 with `sbatch --array=0-9` and S5 × 2 seeds separately with its own walltime (`sbatch --array=0-1 --time=24:00:00`); record job ids; end the session.
 - [ ] **P5-F** Verdict on the sbatch arm jobs: per-arm, per-seed val PPL and late-25% PPL, s/step, peak GB into `analysis/screen_results.md`; requeued/failed arms noted with the `sacct` state.

@@ -31,6 +31,7 @@ import argparse
 import dataclasses
 import hashlib
 import hmac
+import itertools
 import json
 import os
 import queue
@@ -141,7 +142,8 @@ def scrub_document(
     A section found verbatim in the text gets the tagged spans that fall inside it; every section
     gets the propagating forms."""
     entities = [trim(e, doc.text) for e in entities if e.label in SCRUB_TAGS]
-    entities = [e for e in entities if e.end > e.start]
+    # a span of punctuation tokens (`„ “`, `( )`) trims to whitespace: no name, and no placeholder
+    entities = [e for e in entities if doc.text[e.start : e.end].strip()]
     mapping = placeholders(doc.text, entities)
     if not mapping:
         return doc, []
@@ -257,15 +259,26 @@ def run_worker(
     return entities, stats
 
 
-def iter_part(path: Path, part: int = 0, parts: int = 1) -> Iterator[Document]:
+def iter_part(
+    path: Path, part: int = 0, parts: int = 1, jurisdictions: Iterable[str] | None = None
+) -> Iterator[Document]:
     """The documents on lines ``part, part + parts, part + 2 * parts, ...`` of ``path``: a source
-    split across ``parts`` array tasks, each streaming its own share (P4-L)."""
+    split across ``parts`` array tasks, each streaming its own share (P4-L). With ``jurisdictions``
+    only those documents count (decisions.market: Germany only, so multilegalpile's Swiss rows are
+    never scrubbed) and the stride runs over them, so the parts still read back in collection
+    order; every line is then parsed for its jurisdiction."""
     if not 0 <= part < parts:
         raise ValueError(f"part {part} is not in 0..{parts - 1}")
     with open(path, encoding="utf-8") as f:
-        for i, line in enumerate(f):
-            if i % parts == part and line.strip():
-                yield Document.from_json(line)
+        if jurisdictions is None:
+            for i, line in enumerate(f):
+                if i % parts == part and line.strip():
+                    yield Document.from_json(line)
+            return
+        keep = set(jurisdictions)
+        lines = (ln for ln in f if ln.strip() and json.loads(ln).get("jurisdiction") in keep)
+        for line in itertools.islice(lines, part, None, parts):
+            yield Document.from_json(line)
 
 
 def part_name(source: str, part: int, parts: int) -> str:
@@ -285,6 +298,7 @@ def scrub_file(
     worker: Path = WORKER,
     in_flight: int = 1024,
     progress_every: int = 10_000,
+    jurisdictions: Iterable[str] | None = None,
 ) -> dict:
     """Scrub one source (or one part of it) as a stream: documents in, scrubbed documents and the
     scrub log out, both written to ``*.partial`` and renamed only when the part is complete."""
@@ -293,7 +307,7 @@ def scrub_file(
     log_path.parent.mkdir(parents=True, exist_ok=True)
     out_tmp, log_tmp = (p.with_name(p.name + ".partial") for p in (out_path, log_path))
     n_docs, n_entities, key, worker_stats = 0, 0, scrub_key(), {}
-    docs = iter_part(in_path, part, parts)
+    docs = iter_part(in_path, part, parts, jurisdictions)
     with open(out_tmp, "w", encoding="utf-8") as out, open(log_tmp, "w", encoding="utf-8") as log:
         for doc, entities in stream_worker(docs, python, worker_args, worker, in_flight, worker_stats):
             scrubbed, rows = scrub_document(doc, entities, key)
@@ -308,6 +322,7 @@ def scrub_file(
     log_tmp.replace(log_path)
     seconds = time.perf_counter() - t0
     return {"source": source, "part": part, "parts": parts, "docs": n_docs, "entities": n_entities,
+            "jurisdictions": sorted(jurisdictions) if jurisdictions is not None else None,
             "seconds": round(seconds, 1), "docs_per_s": round(n_docs / seconds, 3) if seconds else None,
             "worker": worker_stats}  # fmt: skip
 
@@ -323,6 +338,7 @@ def main(argv=None) -> int:
     parser.add_argument("--docs-per-batch", type=int, default=1, help="documents per NER call (GPU: 64)")
     parser.add_argument("--batch-size", type=int, default=32, help="sentences per NER mini-batch")
     parser.add_argument("--cache-dir", help="the worker's model cache (default: its HF_HOME rule)")
+    parser.add_argument("--jurisdictions", nargs="+", help="scrub only these (default: every document)")
     args = parser.parse_args(argv)
     name = part_name(args.source, args.part, args.parts)
     in_path = args.in_path or REPO_ROOT / "data" / "raw" / args.source / f"{args.source}.jsonl"
@@ -334,7 +350,7 @@ def main(argv=None) -> int:
     in_flight = max(1024, 4 * args.docs_per_batch)
     stats = scrub_file(
         args.source, in_path, out, log, part=args.part, parts=args.parts, worker_args=worker_args,
-        in_flight=in_flight,
+        in_flight=in_flight, jurisdictions=args.jurisdictions,
     )  # fmt: skip
     print(json.dumps(stats))
     return 0

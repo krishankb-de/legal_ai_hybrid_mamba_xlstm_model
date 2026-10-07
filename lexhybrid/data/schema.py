@@ -141,7 +141,7 @@ _NUM = r"\d+[a-z]*"  # 573, 573a, 334bis
 _STATUTE = re.compile(
     rf"^(?P<code>SR \d+(?:\.\d+)*|[A-ZÄÖÜ][\wÄÖÜäöüß\-/]*(?: \([A-Z]+\) \d{{4}}/\d+)?)"
     rf"(?: (?P<part>SchlT))? "
-    rf"(?:§ ?(?P<paragraph>{_NUM})|Art\. (?P<article>{_NUM}))"
+    rf"(?:(?:Art\. (?P<within>{_NUM}|[IVXLC]+) )?§ ?(?P<paragraph>{_NUM})|Art\. (?P<article>{_NUM}))"
     rf"(?: Abs\. (?P<absatz>{_NUM}))?(?: (?:S\.|Satz) (?P<satz>\d+))?"
     rf"(?: Nr\. (?P<nummer>{_NUM}))?(?: lit\. (?P<litera>[a-z]{{1,2}}))?$"
 )
@@ -159,7 +159,9 @@ _PAPER = re.compile(
 def parse_citation(citation_id: str) -> dict:
     """The parts of a citation id; raises ``ValueError`` if it matches neither grammar.
 
-    Statutes: ``<code> [SchlT] §<n>|Art. <n> [Abs. <k>] [Satz|S. <s>] [Nr. <m>] [lit. <x>]``
+    Statutes: ``<code> [SchlT] [Art. <a>] §<n>|Art. <n> [Abs. <k>] [Satz|S. <s>] [Nr. <m>] [lit. <x>]``
+    (``Art. <a> §<n>``: a paragraph of an article that numbers its own, ``BGBEG Art. 229 §6``; the
+    result then has both ``article`` and ``paragraph``)
     (``BGB §573 Abs. 2 Nr. 1``, ``ABGB §1295``, ``OR Art. 97``, ``DSGVO Art. 6 Abs. 1 lit. f``,
     ``ZGB SchlT Art. 1``, ``SR 221.214.111 Art. 3``, ``ZGB Art. 334bis``).
     Decisions: ``<court> <docket> [Rn.|Rz. <n>] [E. <n.n>]`` (``BGH VIII ZR 12/20 Rn. 14``,
@@ -168,7 +170,10 @@ def parse_citation(citation_id: str) -> dict:
     """
     m = _STATUTE.match(citation_id)
     if m:
-        return {"kind": "statute", **{k: v for k, v in m.groupdict().items() if v is not None}}
+        parts = {k: v for k, v in m.groupdict().items() if v is not None}
+        if "within" in parts:
+            parts["article"] = parts.pop("within")
+        return {"kind": "statute", **parts}
     m = _DECISION.match(citation_id)
     if m:
         return {"kind": "decision", **{k: v.strip() for k, v in m.groupdict().items() if v is not None}}

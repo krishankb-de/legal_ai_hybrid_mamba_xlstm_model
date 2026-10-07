@@ -28,6 +28,7 @@ the decisions need -- its visiting order, id, source, text hash and 128 MinHash 
 """
 
 import re
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 from functools import partial
@@ -94,6 +95,11 @@ def deduplicate_signatures(
     import numpy as np
     from datasketch import LeanMinHash, MinHash, MinHashLSH
 
+    signatures = list(signatures)
+    counts = Counter(s.id for s in signatures)  # ids carry their source: "<source>:..."
+    repeated = sorted(i for i, n in counts.items() if n > 1)
+    if repeated:  # the index, the drop list and the split all key on ids (job 2594824)
+        raise ValueError(f"{len(repeated)} document ids occur more than once: {repeated[:10]}")
     scheme = MinHash(num_perm=num_perm, seed=1).scheme  # the scheme ``minhash`` hashes with
     kept: list[str] = []
     log: list[DedupLog] = []

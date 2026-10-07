@@ -10,14 +10,12 @@ groups:
   legal: 0.7
   general: 0.3
 # Weights within a group. `arm: research` marks a source that only the research arm admits.
+# The sources pack_corpus.sh packs (P4-M, job 2599735): the German market (decisions.market: ris,
+# fedlex, bger out) without eurlex (decisions.eurlex_training); a source without shards stops the run.
 sources:
   gii: {group: legal, weight: 1.0}
   rii: {group: legal, weight: 1.0}
   oldp: {group: legal, weight: 1.0}
-  eurlex: {group: legal, weight: 1.0}
-  ris: {group: legal, weight: 1.0}
-  fedlex: {group: legal, weight: 1.0}
-  bger: {group: legal, weight: 1.0}
   dip: {group: legal, weight: 0.5}
   multilegalpile: {group: legal, weight: 1.0, arm: research}
   fineweb2_de: {group: general, weight: 1.0}

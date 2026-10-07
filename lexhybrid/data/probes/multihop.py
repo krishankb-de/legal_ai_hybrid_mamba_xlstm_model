@@ -76,11 +76,16 @@ def same_act_references(doc: Document) -> set[str]:
 def build_items(
     documents: Sequence[Document], n_items: int = 200, distractors: int = 2, seed: int = 0
 ) -> list[MultihopItem]:
-    # The ZGB's final title (``ZGB SchlT Art. 1``) numbers its articles afresh; it is left out so that
-    # an article number always names one provision of an act.
+    # The ZGB's final title (``ZGB SchlT Art. 1``) numbers its articles afresh, and so does an article
+    # that holds its own paragraphs (``BGBEG Art. 229 §6``); both are left out so that a number always
+    # names one provision of an act.
+    def numbered_once(citation_id: str) -> bool:
+        c = parse_citation(citation_id)
+        return "part" not in c and not ("article" in c and "paragraph" in c)
+
     docs = [
         d for d in documents
-        if d.source in SOURCES and d.citation_id and title(d) and "part" not in parse_citation(d.citation_id)
+        if d.source in SOURCES and d.citation_id and title(d) and numbered_once(d.citation_id)
     ]  # fmt: skip
     by_act: dict[str, dict[str, Document]] = {}
     for d in docs:
