@@ -158,6 +158,8 @@ Mechanics to keep: `log_f = log(f.clamp(min=1e-6))`, `f_cum = cumsum(log_f)` per
 
 **At init with `forget_gate_bias_init 0.0` and chunk 128, `half_range ≈ 44.4 > 40`: the exact path starts on the sequential fallback** (defect 9). Decision 10 sets the bias to 3.0 (f ≈ 0.95, half-range ≈ 3.1).
 
+**Trained gates widen it again (job 2599890, 2026-10-03):** both S1 seeds reached half-ranges of 43.2 and 54.6 at chunk 128 within 840 steps and raised under `tfla_fallback: error`. `decisions.tfla_overflow` (user, 2026-10-09): a too-wide chunk is factorised per row block (`_row_block` picks the largest divisor of the chunk whose own half-range fits; `_blockwise_scores` re-centres each block on its midpoint, keys after the block set to 0 before the exponential), exact and with the configured chunk kept. The plain, non-restarted cumulative log-decay serves there because it only decreases. `fallback` applies only when no block of at least `min_block` (default 1) fits, which the 1e-6 gate clamp makes impossible for blocks of up to 6 rows.
+
 fp64 oracle, from `tests/test_mamba3_numerics.py:287-314`, moves into `tfla_reference.py`:
 
 ```python

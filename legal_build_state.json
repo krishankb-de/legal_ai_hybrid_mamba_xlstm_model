@@ -1,16 +1,12 @@
 {
   "current_phase": "P5",
-  "last_updated": "2026-10-09T08:11:05+02:00",
-  "status": "P5 in progress (3/10: A B C). S1 attempt 2599890 FAILED both seeds (TFLA fp32 range guard, exact chunk 128); P5-D blocked on the user's operator decision. P4 closed: teacher Qwen3-8B-Base + grad ckpt; market Germany only; eurlex out of training; corpus 6.09B cs tokens; P6 budget 5B. Ahead of phase: P6-A, P7-A, P7-B, P7-C1, P7-C (P7 chunks/BM25 to rebuild: gii ids changed 2026-10-03). For P6: decide within-legal source weights (gii 20% of rows -> ~29 passes at 5B).",
+  "last_updated": "2026-10-09T18:41:28+02:00",
+  "status": "P5 in progress (3/10: A B C). S1 retry 2626202 queued behind gpu_tests 2626201 (TFLA per-block fix, decisions.tfla_overflow). P4 closed: teacher Qwen3-8B-Base + grad ckpt; market Germany only; eurlex out of training; corpus 6.09B cs tokens; P6 budget 5B. Ahead of phase: P6-A, P7-A, P7-B, P7-C1, P7-C (P7 chunks/BM25 to rebuild: gii ids changed 2026-10-03). For P6: decide within-legal source weights (gii 20% of rows -> ~29 passes at 5B).",
   "plan_of_record": "LEGAL_BUILD_PLAN.md",
   "helper": "python3 scripts/plan_state.py <cmd> (stdlib only; the ONLY writer of LEGAL_BUILD_PLAN.md checkboxes and legal_build_state.json)",
   "scope": "Build lexhybrid: port the reference backbone/kernels/decode/tests (P1), fix 18 recorded defects and add legal decoder deltas (P2), data pipeline (P3), cluster + corpus + profiling (P4), pre-registered screen (P5), full backbone (P6), retrieval/renderer/verifier (P7), post-training (P8), evaluation (P9), release (P10); P11 optional. Local only, no git until the user writes 'git go'. Reference/ deleted at P1-Z by the user.",
-  "blocked_on": {
-    "box": "P5-D",
-    "what": "S1 crashed on TFLA fp32 range guard (2599890); user decision: kernel fix vs chunk 64 vs sequential fallback",
-    "since": "2026-10-03"
-  },
-  "next_action": "Blocked on user: TFLA overflow fix for every arm -- (a) kernel fix keeping chunk 128 (blockwise re-centring inside a chunk; code + fp64 equivalence tests; S1 resubmitted afterok a gpu_tests job), (b) mlstm_chunk_size 64, or (c) tfla_fallback sequential. After the decision: implement, validate.sh, sync, resubmit S1 (ARMS='S1-s42 S1-s43' --array=0-1 --time=16:00:00), job add, then P5-D when both complete.",
+  "blocked_on": null,
+  "next_action": "Open: 2626201 (gpu_tests), 2626202 (S1-s42 = _0, S1-s43 = _1; afterok 2626201). sacct -j 2626201,2626202 -X. gpu_tests FAILED -> pull log, fix, S1 is auto-cancelled; resubmit both. S1 RUNNING -> tail logs (it/s; no TFLAFallbackError); stop. S1 COMPLETED -> pull logs/screen_2626202_{0,1}.log -> P5-D: val PPL per seed, two-seed SD, bar_value = max(2xSD, 0.10) into P5 section + pre_registered.P5.bar_value -> P5-E. Uncommitted: the TFLA fix (user decides commit).",
   "decisions": {
     "01_init_road": "From scratch first: Qwen3 tokenizer + logit-KL from an open Qwen3-*-Base teacher. Qwen3 conversion = P11, optional, on user instruction only. (user 2026-09-27)",
     "02_corpus": "Open-licensed sources PLUS a research-exception arm; every document carries licence + commercial_safe; research_only never enters a shippable arm. (user 2026-09-27)",
@@ -39,7 +35,8 @@
     "teacher": "Qwen/Qwen3-8B-Base with gradient checkpointing (P4-U rule on P6's recipe, job 2589417: 43.18 GB <= 70, 6.104 s = 1.44x the 1.7B's 4.224 s <= 1.6x; unchecked probes 2589362 OOM). User 2026-10-01: 'teacher choice : chosse which ever would give the best result i am thinking of 8B but decide accordingly and let me know'. Wrappers: DISTILL_CFG default qwen3_8b, GRAD_CKPT=true for the 8B.",
     "market": "Germany only (user 2026-10-02: 'lets keep the process only for the german market'): training corpus = gii rii oldp eurlex dip fineweb2_de + multilegalpile DE rows (research arm); ris, fedlex, bger and multilegalpile CH rows out; eurlex kept (EU law applies in DE). Scrub go-ahead given, pilot first.",
     "eurlex_training": "out of the training pack (user 2026-10-03, after pack 2599610: 565 docs, ~0.3M tokens cannot give the plan's >=2,000-doc validation split); stays collected and scrubbed for retrieval/citation (P7)",
-    "p6_token_budget": "5,000,000,000 = min(5B, 6,092,655,089 commercial-safe train tokens; pack 2599735, analysis/corpus_manifest.md); legal 4.23B, fineweb2_de 1.87B cover the 70/30 mix"
+    "p6_token_budget": "5,000,000,000 = min(5B, 6,092,655,089 commercial-safe train tokens; pack 2599735, analysis/corpus_manifest.md); legal 4.23B, fineweb2_de 1.87B cover the 70/30 mix",
+    "tfla_overflow": "kernel fix keeping chunk 128: when one factorisation per 128-chunk would overflow fp32, re-centre per row block inside the chunk (exact; ARCH unchanged) (user 2026-10-09: 'yes proceed with this and fix it')"
   },
   "pre_registered": {
     "rules": {
@@ -1399,6 +1396,24 @@
       "status": "FAILED",
       "log": "logs/screen_2599890_%a.log",
       "last_checked": "2026-10-03T20:29:53+02:00"
+    },
+    "2626201": {
+      "phase": "P5",
+      "box": "P5-C",
+      "arm": "gpu_tests_tfla_blockwise",
+      "submitted": "2026-10-09T08:23:08+02:00",
+      "status": "SUBMITTED",
+      "log": "logs/gpu_tests_2626201.log",
+      "last_checked": null
+    },
+    "2626202": {
+      "phase": "P5",
+      "box": "P5-C",
+      "arm": "S1-s42,S1-s43 (retry)",
+      "submitted": "2026-10-09T08:23:08+02:00",
+      "status": "SUBMITTED",
+      "log": "logs/screen_2626202_%a.log",
+      "last_checked": null
     }
   },
   "artifacts": {},
@@ -1580,7 +1595,9 @@
         "2599609",
         "2599610",
         "2599735",
-        "2599890"
+        "2599890",
+        "2626201",
+        "2626202"
       ]
     }
   ],
@@ -1908,7 +1925,13 @@
     "2026-10-03: job 2599890 -> FAILED",
     "2026-10-03: S1 2599890 FAILED both seeds: TFLAFallbackError in mlstm_block (exact TFLA, chunk 128, fallback=error): per-chunk log-decay half-range 43.2 (s42, after step 838, 20 min) and 54.6 (s43, step 419, 10 min) >= 40 (fp32 guard of the factorised intra-chunk scores). Training was healthy until then: 0.70 it/s = ~1.43 s/step (12k steps ~4.8 h). Learned per-dimension forget gates sharpen past what one factorisation per 128-chunk holds. Options per the guard: smaller mlstm_chunk_size, or tfla_fallback: sequential (exact, slow); or a kernel fix (blockwise re-centring inside the chunk: every exponent <= 0, exact at 128). All change either the arms' ARCH tokens or the operator -> asked user.",
     "2026-10-03: BLOCKED on P5-D: S1 crashed on TFLA fp32 range guard (2599890); user decision: kernel fix vs chunk 64 vs sequential fallback",
-    "2026-10-09: sub-phase closed for commit: state/status refreshed (S1 failure, block), analysis/screen_results.md records attempt 2599890 with sacct states; validate.sh --ci all green except local shellcheck (not installed; CI run 37647942568 on cc27e3d green incl. shellcheck)."
+    "2026-10-09: sub-phase closed for commit: state/status refreshed (S1 failure, block), analysis/screen_results.md records attempt 2599890 with sacct states; validate.sh --ci all green except local shellcheck (not installed; CI run 37647942568 on cc27e3d green incl. shellcheck).",
+    "2026-10-09: decision tfla_overflow: kernel fix keeping chunk 128: when one factorisation per 128-chunk would overflow fp32, re-centre per row block inside the chunk (exact; ARCH unchanged) (user 2026-10-09: 'yes proceed with this and fix it')",
+    "2026-10-09: unblocked (P5-D)",
+    "2026-10-09: submitted job 2626201 (P5-C gpu_tests_tfla_blockwise)",
+    "2026-10-09: submitted job 2626202 (P5-C S1-s42,S1-s43 (retry))",
+    "2026-10-09: TFLA fix per decisions.tfla_overflow: exact path keeps the one-factor re-centring when it fits; otherwise _row_block picks the largest divisor of the chunk whose own half-range < 40 and _blockwise_scores re-centres each row block on its midpoint (plain non-increasing cumsum; keys after the block -inf before exp; earlier-block key factors <= 1). fallback (error|sequential) applies only when no block >= min_block (default 1) fits -- impossible for blocks <= 6 rows under the 1e-6 gate clamp. fp64: forward/backward equal the sequential scan (<= 1e-12 / 1e-10); fp32 finite; grad_f rel err 3.8e-6 at half-range 50 (S1 regime), 5e-5 at bias -4, 1.2e-3 at bias -8. ARCH unchanged (chunk 128, fallback=error). Tests: 3 updated (old raise-on-wide-chunk behaviour now via min_block=chunk), 3 new CPU + 1 CUDA; port map section 4 updated. validate.sh exit 0, 1029 passed. Leftover interrupt.ckpt (2.6 GB each) in outputs/screen_S1_s4{2,3}/checkpoints from 2599890: never resumed (only last.ckpt is). Submitted gpu_tests 2626201 -> S1 retry 2626202 (afterok, --array=0-1, --time=16:00:00).",
+    "2026-10-09: Docs/HANDOFF.md added (branch goal, decisions, done, next steps, checks); CLAUDE.md points to it after resume. Correction to the 2026-10-03 note: 0.70 it/s is the progress-bar rate of attempt 2599890; whether it counts optimizer steps or micro-batches (accum 2) is unconfirmed, so '~1.43 s/step, ~4.8 h' was not established."
   ],
   "open_questions": []
 }

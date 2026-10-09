@@ -12,6 +12,8 @@ It prints the current phase id, `blocked_on`, `next_action`, open cluster jobs, 
 awk -v h="### $(python3 -c "import json;print(json.load(open('legal_build_state.json'))['current_phase'])") —" 'index($0,h)==1{f=1} f&&/^(### |## )/&&index($0,h)!=1{exit} f' LEGAL_BUILD_PLAN.md
 ```
 
+**Then read `Docs/HANDOFF.md`**: what this branch is trying to achieve, the decisions taken, what is done, the next steps in order and the checks to run while processing. `resume` wins where they disagree. Before a session ends with a change to the goal, a decision, what is done or the next step, update its dated sections so the next session starts from it.
+
 ## What this project is
 
 A DACH legal, citation-faithful, retrieval-gated language model: a corrected Mamba-3 + mLSTM + sparse-attention decoder (`lexhybrid`) that cites by pointer into retrieved passages and is gated by a verifier. Plan of record: `LEGAL_BUILD_PLAN.md` (phases P0–P11). State: `legal_build_state.json`. Port spec: `Docs/REFERENCE_PORT_MAP.md`. Blueprint: `Docs/Hybrid Mamba–xLSTM Codebase Review and DACH Legal AI Blueprint.md` (do not re-read it wholesale; the port map cites the sections that matter). Results go under `analysis/` using `Docs/analysis_TEMPLATE.md`.

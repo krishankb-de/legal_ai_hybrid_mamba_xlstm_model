@@ -259,26 +259,93 @@ def test_tfla_clamp_hit_rate_is_documented(forget_bias):
     assert abs(hit_rate - expected) < 0.05, f"forget_bias={forget_bias}: clamp hit-rate {hit_rate:.3f}"
 
 
+@pytest.mark.parametrize("path", ["per-block", "sequential"])
 @pytest.mark.parametrize("forget_bias", [-4.0, -2.0])
 @pytest.mark.parametrize("chunk_size", [64, 128])
-def test_tfla_exact_survives_extreme_decay(forget_bias, chunk_size):
-    """The overflow guard: re-centring alone produced NaN here; the sequential fallback does not."""
+def test_tfla_exact_survives_extreme_decay(forget_bias, chunk_size, path):
+    """The overflow guard: re-centring the whole chunk produced NaN here; re-centring per row block
+    does not, nor does the sequential fallback (reached when no block may be used)."""
     q, k, v, i_gate, f_gate = _tfla_fixture(forget_bias)
+    min_block = 1 if path == "per-block" else chunk_size
     got = tfla_forward_parallel(
-        q, k, v, i_gate, f_gate, chunk_size=chunk_size, tfla_impl="exact", fallback="sequential"
-    )
+        q, k, v, i_gate, f_gate, chunk_size=chunk_size, tfla_impl="exact", fallback="sequential",
+        min_block=min_block,
+    )  # fmt: skip
     assert torch.isfinite(got).all()
     assert rel_max_err(got, sequential_mlstm_reference(q, k, v, i_gate, f_gate)) <= TOL
 
 
 @pytest.mark.parametrize("chunk_size", [64, 128])
 def test_tfla_fallback_is_an_error_unless_configured(chunk_size):
-    """P2-C: the slow path is a configured choice; by default a too-wide chunk raises."""
+    """P2-C: the slow path is a configured choice. A too-wide chunk is factorised per row block;
+    only when no block may be used (min_block = the chunk) does it raise by default."""
     q, k, v, i_gate, f_gate = _tfla_fixture(-2.0)
+    got = tfla_forward_parallel(q, k, v, i_gate, f_gate, chunk_size=chunk_size, tfla_impl="exact")
+    assert rel_max_err(got, sequential_mlstm_reference(q, k, v, i_gate, f_gate)) <= TOL
     with pytest.raises(TFLAFallbackError, match="half-range"):
-        tfla_forward_parallel(q, k, v, i_gate, f_gate, chunk_size=chunk_size, tfla_impl="exact")
+        tfla_forward_parallel(
+            q, k, v, i_gate, f_gate, chunk_size=chunk_size, tfla_impl="exact", min_block=chunk_size
+        )
     with pytest.raises(ValueError, match="fallback"):
         tfla_forward_parallel(q, k, v, i_gate, f_gate, chunk_size=chunk_size, fallback="silent")
+
+
+def _wide_tfla_inputs(forget_bias: float, docs: bool, dtype=torch.float64):
+    """256 positions (two chunks of 128), two rows, boundaries inside and on chunk edges."""
+    q, k, v, i_gate, f_gate, doc_ids = _packed_tfla_inputs(256, {0: [50, 170], 1: [128]}, forget_bias)
+    return [t.to(dtype) for t in (q, k, v, i_gate, f_gate)], (doc_ids if docs else None)
+
+
+def _tfla_grads(tensors, doc_ids, **kw):
+    tensors = [t.clone().requires_grad_(True) for t in tensors]
+    out = tfla_forward_parallel(*tensors, chunk_size=128, tfla_impl="exact", doc_ids=doc_ids, **kw)
+    weights = torch.linspace(-1.0, 1.0, out.numel(), dtype=out.dtype).reshape(out.shape)
+    (out * weights).sum().backward()
+    return out.detach(), [t.grad for t in tensors]
+
+
+@pytest.mark.parametrize("docs", [False, True], ids=["contiguous", "packed"])
+@pytest.mark.parametrize("forget_bias", [-8.0, -4.0, -2.0, 0.0])
+def test_tfla_wide_chunks_factorise_per_block_exactly(forget_bias, docs):
+    """Job 2599890: trained forget gates widened a 128-chunk's log-decay past fp32 (half-range 43.2
+    and 54.6). The chunk is now split into row blocks, each re-centred on its own range: the same
+    function as the fp64 recurrence, forward and backward, with no error raised."""
+    from lexhybrid.kernels.tfla.tfla_interface import _row_block
+
+    tensors, doc_ids = _wide_tfla_inputs(forget_bias, docs)
+    log_f = torch.log(tensors[4].clamp(min=1e-6)).unflatten(2, (2, 128)).cumsum(3)
+    assert 0.5 * log_f.amin(dim=3).abs().max() >= 40.0, "the fixture must defeat the one-factor path"
+    assert _row_block(log_f) < 128
+    got, grads = _tfla_grads(tensors, doc_ids)
+    assert rel_max_err(got, sequential_mlstm_reference(*tensors, doc_ids=doc_ids)) <= TOL
+    want, want_grads = _tfla_grads(tensors, doc_ids, fallback="sequential", min_block=128)
+    assert rel_max_err(got, want) <= 1e-12
+    assert max(rel_max_err(g, w) for g, w in zip(grads, want_grads)) <= 1e-10
+
+
+@pytest.mark.parametrize("forget_bias,grad_tol", [(0.0, 1e-5), (-2.0, 1e-4), (-4.0, 1e-4), (-8.0, 1e-2)])
+def test_tfla_per_block_path_is_finite_and_close_in_fp32(forget_bias, grad_tol):
+    """In fp32 the per-block path forms no inf, forward or backward (a masked inf would still give
+    NaN gradients). Measured against the fp64 sequential scan: outputs and the q/k/v/input-gate
+    gradients at the fp32 floor; the forget-gate gradient loses precision as the cumulative
+    log-decay grows (3.8e-6 at half-range 50, the S1 regime; 1.2e-3 at bias -8, every gate ~3e-4)."""
+    tensors, doc_ids = _wide_tfla_inputs(forget_bias, docs=True)
+    got, grads = _tfla_grads([t.float() for t in tensors], doc_ids)
+    want, want_grads = _tfla_grads(tensors, doc_ids, fallback="sequential", min_block=128)
+    assert torch.isfinite(got).all() and all(torch.isfinite(g).all() for g in grads)
+    assert rel_max_err(got, want) <= 1e-5
+    assert max(rel_max_err(g, w) for g, w in zip(grads[:4], want_grads[:4])) <= 1e-5
+    assert rel_max_err(grads[4], want_grads[4]) <= grad_tol
+
+
+def test_tfla_a_small_row_block_always_fits():
+    """Forget gates are clamped at 1e-6 (log >= -13.82), so b rows span at most (b - 1) * 13.82 and a
+    block of at most 6 rows always fits; the fallback needs min_block above that."""
+    from lexhybrid.kernels.tfla.tfla_interface import _row_block
+
+    worst = torch.full((1, 1, 1, 128, 1), float(torch.log(torch.tensor(1e-6)))).cumsum(3)
+    assert _row_block(worst) == 4 and _row_block(worst, min_block=8) is None
+    assert _row_block(torch.zeros(1, 1, 1, 50, 1)) == 25, "a divisor of the chunk, the largest that fits"
 
 
 def _packed_tfla_inputs(seq_len: int, boundaries: dict, forget_bias: float = 1.0, seed: int = 0):
@@ -350,8 +417,9 @@ def test_tfla_sequential_fallback_resets_at_boundaries():
     """The fallback, when configured, honours document boundaries too."""
     q, k, v, i_gate, f_gate, doc_ids = _packed_tfla_inputs(64, {0: [10, 37], 1: [32]}, forget_bias=-3.0)
     got = tfla_forward_parallel(
-        q, k, v, i_gate, f_gate, chunk_size=64, tfla_impl="exact", fallback="sequential", doc_ids=doc_ids
-    )
+        q, k, v, i_gate, f_gate, chunk_size=64, tfla_impl="exact", fallback="sequential", doc_ids=doc_ids,
+        min_block=64,
+    )  # fmt: skip
     assert rel_max_err(got, sequential_mlstm_reference(q, k, v, i_gate, f_gate, doc_ids=doc_ids)) <= TOL
 
 
@@ -402,12 +470,23 @@ def test_tfla_fast_path_at_init(chunk_size, forget_bias):
     assert torch.isfinite(out).all()
 
 
-def test_tfla_needed_the_fallback_at_init_with_the_reference_forget_bias():
+def test_tfla_reference_forget_bias_factorises_per_block(monkeypatch):
     """The record behind defect 9: forget bias 0 gives f = 0.5 and a half-range of
-    0.5 * 128 * ln 2 = 44.4 > 40 at chunk 128, so the reference ran the fallback from step 0."""
-    model = _tfla_model(128, 0.0)
-    with torch.no_grad(), pytest.raises(TFLAFallbackError, match=r"half-range is 4[45]\.[0-9]"):
-        model(torch.randint(0, 128, (2, 512)))
+    0.5 * 128 * ln 2 = 44.4 > 40 at chunk 128, so the reference ran the fallback from step 0. The
+    exact path now factorises such a chunk per row block (job 2599890's fix): no error with
+    tfla_fallback="error", and the same logits as chunk 64, whose one-factor path fits."""
+    import lexhybrid.kernels.tfla.tfla_interface as tfla
+
+    calls = []
+    real = tfla._blockwise_scores
+    monkeypatch.setattr(tfla, "_blockwise_scores", lambda *a: calls.append(a[3]) or real(*a))
+    tokens = torch.randint(0, 128, (2, 512), generator=torch.Generator().manual_seed(0))
+    with torch.no_grad():
+        wide = _tfla_model(128, 0.0)(tokens).logits
+        assert calls and all(block < 128 for block in calls)
+        calls.clear()
+        narrow = _tfla_model(64, 0.0)(tokens).logits
+    assert not calls and rel_max_err(wide, narrow) <= 1e-5
 
 
 def test_tfla_chunk_size_reaches_kernel(monkeypatch):

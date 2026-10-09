@@ -103,6 +103,28 @@ def test_ssd_tfla_under_bf16_autocast_match_fp32(kind):
     assert _rel(got, want) < 5e-2
 
 
+@pytest.mark.parametrize("autocast", [False, True], ids=["fp32", "bf16-autocast"])
+def test_tfla_wide_chunk_factorises_per_block_on_gpu(autocast):
+    """Job 2599890's regime on the GPU: a 128-chunk whose log-decay overflows one factorisation
+    (forget bias -1: half-range ~84) runs per row block, matches the fp64 recurrence (within bf16
+    noise under autocast) and back-propagates finite gradients."""
+    from lexhybrid.kernels.tfla import sequential_mlstm_reference, tfla_forward_parallel
+
+    torch.manual_seed(0)
+    shape = (2, 4, 1024, 64)
+    q, k, v = torch.randn(shape), torch.randn(shape) / 8.0, torch.randn(shape)
+    i_gate = torch.exp(torch.randn(shape) * 0.5 - 1.0)
+    f_gate = torch.sigmoid(torch.randn(shape) * 0.5 - 1.0)
+    doc = _packed_doc_ids(2, 1024, "cpu")
+    want = sequential_mlstm_reference(*(t.double() for t in (q, k, v, i_gate, f_gate)), doc_ids=doc)
+    ins = [t.cuda().requires_grad_(True) for t in (q, k, v, i_gate, f_gate)]
+    with torch.autocast("cuda", dtype=torch.bfloat16, enabled=autocast):
+        got = tfla_forward_parallel(*ins, chunk_size=128, tfla_impl="exact", doc_ids=doc.cuda())
+    got.float().pow(2).mean().backward()
+    assert all(torch.isfinite(t.grad).all() for t in ins)
+    assert _rel(got.float().cpu().double(), want) < (5e-2 if autocast else 1e-4)
+
+
 def test_compile_equals_eager_on_gpu():
     """P2-Y's CUDA variant: the compiled legal base equals eager at 1e-4 in fp32 (TF32 off)."""
     torch.backends.cuda.matmul.allow_tf32 = False
