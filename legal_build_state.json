@@ -1,7 +1,7 @@
 {
   "current_phase": "P5",
-  "last_updated": "2026-10-03T20:29:53+02:00",
-  "status": "P5 in progress (3/10: A B C). S1 seeds running: 2599890. P4 closed: teacher Qwen3-8B-Base + grad ckpt; market Germany only; eurlex out of training; corpus 6.09B cs tokens; P6 budget 5B. Ahead of phase: P6-A, P7-A, P7-B, P7-C1, P7-C (P7 chunks/BM25 to rebuild: gii ids changed 2026-10-03). For P6: decide within-legal source weights (gii 20% of rows -> ~29 passes at 5B).",
+  "last_updated": "2026-10-09T08:11:05+02:00",
+  "status": "P5 in progress (3/10: A B C). S1 attempt 2599890 FAILED both seeds (TFLA fp32 range guard, exact chunk 128); P5-D blocked on the user's operator decision. P4 closed: teacher Qwen3-8B-Base + grad ckpt; market Germany only; eurlex out of training; corpus 6.09B cs tokens; P6 budget 5B. Ahead of phase: P6-A, P7-A, P7-B, P7-C1, P7-C (P7 chunks/BM25 to rebuild: gii ids changed 2026-10-03). For P6: decide within-legal source weights (gii 20% of rows -> ~29 passes at 5B).",
   "plan_of_record": "LEGAL_BUILD_PLAN.md",
   "helper": "python3 scripts/plan_state.py <cmd> (stdlib only; the ONLY writer of LEGAL_BUILD_PLAN.md checkboxes and legal_build_state.json)",
   "scope": "Build lexhybrid: port the reference backbone/kernels/decode/tests (P1), fix 18 recorded defects and add legal decoder deltas (P2), data pipeline (P3), cluster + corpus + profiling (P4), pre-registered screen (P5), full backbone (P6), retrieval/renderer/verifier (P7), post-training (P8), evaluation (P9), release (P10); P11 optional. Local only, no git until the user writes 'git go'. Reference/ deleted at P1-Z by the user.",
@@ -10,7 +10,7 @@
     "what": "S1 crashed on TFLA fp32 range guard (2599890); user decision: kernel fix vs chunk 64 vs sequential fallback",
     "since": "2026-10-03"
   },
-  "next_action": "Open: 2599890 (S1-s42 = _0, S1-s43 = _1). sacct -j 2599890 --format=JobID,State,Elapsed,MaxRSS,ExitCode -P. RUNNING -> tail logs for s/step; stop. COMPLETED -> pull logs/screen_2599890_{0,1}.log -> P5-D: val PPL per seed, two-seed SD, bar_value = max(2xSD, 0.10) into P5 section + pre_registered.P5.bar_value (say if floor binds) -> then P5-E (S0 S2 S3 S4 S6 x 2 seeds --array=0-9; S5 x 2 --time=24:00:00). TIMEOUT -> resubmit same ARMS (resumes from last.ckpt).",
+  "next_action": "Blocked on user: TFLA overflow fix for every arm -- (a) kernel fix keeping chunk 128 (blockwise re-centring inside a chunk; code + fp64 equivalence tests; S1 resubmitted afterok a gpu_tests job), (b) mlstm_chunk_size 64, or (c) tfla_fallback sequential. After the decision: implement, validate.sh, sync, resubmit S1 (ARMS='S1-s42 S1-s43' --array=0-1 --time=16:00:00), job add, then P5-D when both complete.",
   "decisions": {
     "01_init_road": "From scratch first: Qwen3 tokenizer + logit-KL from an open Qwen3-*-Base teacher. Qwen3 conversion = P11, optional, on user instruction only. (user 2026-09-27)",
     "02_corpus": "Open-licensed sources PLUS a research-exception arm; every document carries licence + commercial_safe; research_only never enters a shippable arm. (user 2026-09-27)",
@@ -1907,7 +1907,8 @@
     "2026-10-03: before P5-C: configs/dataset/mixture_pretrain.yaml still admitted eurlex ris fedlex bger, which have no shards -> shard_directory would raise at data load in every run. Sources now = pack_corpus.sh's (gii rii oldp dip fineweb2_de + multilegalpile research); test_the_shipped_mixture_admits_only_packed_sources added. Weights as written in the yaml: commercial-safe rows gii .2 rii .2 oldp .2 dip .1 fineweb2_de .3 (screen: 192k rows of 2,048 -> ~2.3 passes over gii's 16,848 sub-rows; at P6's 5B budget gii would be seen ~29x -> decide the within-legal weights at P6). Val pass = every val row once: 36,640 rows of 2,048, 61% dip by tokens (pooled val PPL). S1 submitted 2599890 (--array=0-1, ARMS='S1-s42 S1-s43', --time=16:00:00 instead of 12 h: est. ~3 s/step from 8B KD probe 2589417 -> ~10.2 h + val; walltime changes no measurement).",
     "2026-10-03: job 2599890 -> FAILED",
     "2026-10-03: S1 2599890 FAILED both seeds: TFLAFallbackError in mlstm_block (exact TFLA, chunk 128, fallback=error): per-chunk log-decay half-range 43.2 (s42, after step 838, 20 min) and 54.6 (s43, step 419, 10 min) >= 40 (fp32 guard of the factorised intra-chunk scores). Training was healthy until then: 0.70 it/s = ~1.43 s/step (12k steps ~4.8 h). Learned per-dimension forget gates sharpen past what one factorisation per 128-chunk holds. Options per the guard: smaller mlstm_chunk_size, or tfla_fallback: sequential (exact, slow); or a kernel fix (blockwise re-centring inside the chunk: every exponent <= 0, exact at 128). All change either the arms' ARCH tokens or the operator -> asked user.",
-    "2026-10-03: BLOCKED on P5-D: S1 crashed on TFLA fp32 range guard (2599890); user decision: kernel fix vs chunk 64 vs sequential fallback"
+    "2026-10-03: BLOCKED on P5-D: S1 crashed on TFLA fp32 range guard (2599890); user decision: kernel fix vs chunk 64 vs sequential fallback",
+    "2026-10-09: sub-phase closed for commit: state/status refreshed (S1 failure, block), analysis/screen_results.md records attempt 2599890 with sacct states; validate.sh --ci all green except local shellcheck (not installed; CI run 37647942568 on cc27e3d green incl. shellcheck)."
   ],
   "open_questions": []
 }

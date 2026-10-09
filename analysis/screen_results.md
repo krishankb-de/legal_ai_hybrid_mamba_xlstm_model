@@ -1,7 +1,7 @@
 # P5 results — pre-registered architecture screen
 
 > **Written:** 2026-09-29, plan item P5-A (prediction and bar rule registered before any P5 submission; no number below exists yet). **Plan:** `LEGAL_BUILD_PLAN.md` · **State:** `legal_build_state.json` (`pre_registered.P5`).
-> **Measured:** pending — aisc, 1×H100 80 GB per arm, bf16, 12,000 steps, 2,048-token rows, micro-batch 8 × accum 2 (32,768 tokens/step), warmup 500, LR 4e-4, clip 1.0, WSD, `SAVE_TOP_K=0`, `VAL_EVERY` 4,000, seeds 42 and 43, teacher per `decisions.teacher`, commercial-safe shards (`scripts/slurm/screen_array.sh`, arms from `scripts/screen_arms.py`). Jobs: pending. Logs under `cluster/logs/screen_<array>_<task>.log`.
+> **Measured:** pending — aisc, 1×H100 80 GB per arm, bf16, 12,000 steps, 2,048-token rows, micro-batch 8 × accum 2 (32,768 tokens/step), warmup 500, LR 4e-4, clip 1.0, WSD, `SAVE_TOP_K=0`, `VAL_EVERY` 4,000, seeds 42 and 43, teacher per `decisions.teacher` (Qwen3-8B-Base, gradient checkpointing), commercial-safe shards of pack 2599735 (gii, rii, oldp, dip, fineweb2_de; 2,048-token rows cut from the 4,096 shards) (`scripts/slurm/screen_array.sh`, arms from `scripts/screen_arms.py`). Jobs: 2599890 (S1, FAILED — §7); no arm has a result yet. Logs under `cluster/logs/screen_<array>_<task>.log`.
 > **Precedence:** where a summary line elsewhere disagrees with this document, the seed tables below are the record. Where an earlier number in this repo disagrees, the reason is stated here rather than the older number quietly replaced.
 
 ## 1. Summary
@@ -76,7 +76,8 @@ s/step and peak GB come from the `STEPSTATS … final=1` line of each arm's log 
 
 ## 7. Open limitations
 
-- Pending.
+- **S1 attempt 1 failed, job 2599890 (2026-10-03), no result.** `sacct`: `2599890_0` (S1-s42) FAILED 00:22:49 exit 1, `2599890_1` (S1-s43) FAILED 00:12:25 exit 1, both on gx07. Both raised `TFLAFallbackError` in `mlstm_block` (exact TFLA, chunk 128, `fallback=error`): a chunk's log-decay half-range reached 43.2 (s42, step 838) and 54.6 (s43, step 419), above the factorised path's fp32 limit of 40. Training was healthy until then at 0.70 it/s (about 1.4 s/step). No validation ran, so no number from it enters any table. The operator change that resolves it (kernel fix at chunk 128, chunk 64, or the sequential fallback) is the user's decision and applies to every arm; logs `cluster/logs/screen_2599890_{0,1}.log`.
+- Validation reads every validation row once (36,640 rows of 2,048 tokens); dip's long papers are about 61% of those tokens, so the pooled val PPL leans on dip. It is the same for every arm.
 
 ## 8. Reproduction
 
