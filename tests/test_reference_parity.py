@@ -1,12 +1,11 @@
-"""The port computes exactly what the reference computed (plan P1-Y). Never skipped.
+"""The port computes exactly what the reference computed. Never skipped.
 
 Each fixture in ``tests/fixtures/reference_parity/`` was produced by the REFERENCE code
 (``scripts/dump_reference_parity.py``): a state dict, a packed input with document ids, and the
 outputs. Here the state dict is loaded strictly into the NEW block or model and every output must
 agree to 1e-6 in fp32 (whole-model logits to 5e-6, see ``MODEL_TOL``); cached beam search must
-produce the identical tokens. P2 fixes defects on
-paths these fixtures pin; a fix that moves one of them updates the fixture in the same box, with a
-note saying why.
+produce the identical tokens. Fixes to defects on
+paths these fixtures pin update the fixture in the same change, with a note saying why.
 """
 
 import dataclasses
@@ -26,18 +25,18 @@ FIXTURES = REPO_ROOT / "tests" / "fixtures" / "reference_parity"
 TOL = 1e-6
 # Whole-model outputs (4 blocks, MLPs, LM head) carry cross-platform fp32 BLAS differences: the
 # fixtures were generated on macOS arm64, and on Linux x86_64 the logits differ by up to 1.4e-6
-# (CI run 36322991795) while every block still agrees to 1e-6. A port error moves logits by 1e-3+.
+# while every block still agrees to 1e-6. A port error moves logits by 1e-3+.
 MODEL_TOL = 5e-6
 BLOCKS = {"mamba3": Mamba3Block, "mlstm": mLSTMBlock, "attention": AttentionBlock, "mamba": MambaBlock}
 
 # ---- what the fixtures were computed with --------------------------------------------------------
-# P2 changes defaults on purpose. The fixtures hold the reference's computation, so the parity test
+# Defaults changed on purpose. The fixtures hold the reference's computation, so the parity test
 # pins the reference's value wherever a default moved (PINS), and says why a new option cannot move
 # a fixture (NEUTRAL). `test_every_changed_default_is_pinned_or_neutral` fails when a default changes
 # or an option appears without an entry here: that is the moment to decide, not a surprise later.
 
-# Defaults as the P1 port (== the reference) had them.
-P1_CONFIG_DEFAULTS = {
+# Defaults as the original port (== the reference) had them.
+PORT_CONFIG_DEFAULTS = {
     "vocab_size": 50257, "dim": 768, "num_layers": 12, "layer_pattern": ["mamba", "mamba", "mlstm"],
     "state_size": 16, "conv_size": 4, "expand_factor": 2, "dt_rank": None, "use_fast_path": True,
     "scan_impl": "legacy", "dt_init_strategy": "none", "dt_min": 0.001, "dt_max": 0.1,
@@ -54,7 +53,7 @@ P1_CONFIG_DEFAULTS = {
     "max_position_embeddings": 2048, "dropout": 0.1, "initializer_range": 0.02,
     "tie_word_embeddings": False, "use_gradient_checkpointing": False, "model_type": "lexhybrid",
 }  # fmt: skip
-P1_BLOCK_DEFAULTS = {
+PORT_BLOCK_DEFAULTS = {
     "mamba": {
         "state_size": 16, "conv_size": 4, "expand_factor": 2, "dt_rank": None, "use_fast_path": True,
         "use_hybrid_norm": False, "scan_impl": "legacy", "dt_init_strategy": "none",
@@ -78,16 +77,16 @@ P1_BLOCK_DEFAULTS = {
     },
 }  # fmt: skip
 
-# Reference values passed explicitly wherever P2 changed a default.
+# Reference values passed explicitly wherever a default changed.
 CONFIG_PINS = {
     # The reference chose the TFLA chunk from the length: 32 for L <= 128 (the fixtures' L is 96).
     # Exact TFLA is chunk-invariant up to rounding; legacy is not (its clamp restarts per chunk).
     "mlstm_chunk_size": 32,
-    # Overwritten by every fixture's state dict; pinned so the default change (P2-C) is visible.
+    # Overwritten by every fixture's state dict; pinned so the default change is visible.
     "mlstm_forget_gate_bias_init": 0.0,
-    # RoPE's base frequency changes every attention output; the reference used 10,000 (P2-H).
+    # RoPE's base frequency changes every attention output; the reference used 10,000.
     "rope_theta": 10000.0,
-    # Tying changes the state dict (no separate lm_head.weight); the reference was untied (P2-M).
+    # Tying changes the state dict (no separate lm_head.weight); the reference was untied.
     "tie_word_embeddings": False,
 }
 BLOCK_PINS = {
@@ -144,10 +143,11 @@ def _unpinned(current: dict, p1: dict, pins: dict) -> list[str]:
 
 
 def test_every_changed_default_is_pinned_or_neutral():
-    problems = _unpinned(_config_defaults(), P1_CONFIG_DEFAULTS, CONFIG_PINS)
+    problems = _unpinned(_config_defaults(), PORT_CONFIG_DEFAULTS, CONFIG_PINS)
     for name, cls in BLOCKS.items():
         problems += [
-            f"{name}.{p}" for p in _unpinned(_block_defaults(cls), P1_BLOCK_DEFAULTS[name], BLOCK_PINS[name])
+            f"{name}.{p}"
+            for p in _unpinned(_block_defaults(cls), PORT_BLOCK_DEFAULTS[name], BLOCK_PINS[name])
         ]
     assert not problems, "decide how each fixture sees these:\n  " + "\n  ".join(problems)
 
@@ -195,7 +195,7 @@ def test_block_matches_the_reference(name, index):
     block.load_state_dict(case["state_dict"], strict=True)
     with torch.no_grad():
         if name == "mlstm" and kwargs.get("tfla_impl", "legacy") == "legacy":
-            # P2-D moved document resets into the TFLA kernel. The reference ran each document on
+            # Document resets into the TFLA kernel. The reference ran each document on
             # its own; legacy TFLA's clamp restarts per chunk, so its packed output depends on
             # where a document sits in the chunk grid (3.6e-4 on this fixture's second document).
             # The reference's computation is the per-document one, and that is what is pinned.
@@ -225,7 +225,7 @@ def test_model_matches_the_reference(index):
     assert (with_doc.logits - case["logits_doc"]).abs().max().item() <= MODEL_TOL
     assert (without_doc.logits - case["logits_nodoc"]).abs().max().item() <= MODEL_TOL
     assert abs(without_doc.loss.item() - case["loss_nodoc"].item()) <= MODEL_TOL
-    # P2-L fixed defect 6: the packed loss no longer supervises the cross-document prediction. The
+    # The packed loss no longer supervises the cross-document prediction. The
     # expected value is the boundary-masked cross-entropy of the REFERENCE's own logits; the
     # reference's unmasked loss must now differ from ours.
     ids, doc = case["input_ids"], case["doc_ids"]

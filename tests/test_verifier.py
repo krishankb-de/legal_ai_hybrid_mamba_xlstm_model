@@ -1,4 +1,4 @@
-"""The verifier (plan P7-H, P7-J; lexhybrid/verifier/), on chunks of the collectors' fixtures.
+"""The verifier (lexhybrid/verifier/), on chunks of the collectors' fixtures.
 
 No NLI or LER model is loaded: the NLI step is a stand-in callable (a claim containing "erfunden" is
 not entailed, every other one is), the LER step a stand-in name finder.
@@ -65,11 +65,11 @@ def retrieved(chunks) -> list[Chunk]:
     ]
 
 
-# -- P7-H: pointers and quotes -----------------------------------------------------------------
+# -- pointers and quotes -----------------------------------------------------------------
 
 
 def test_pointer_and_quote_checks_adversarial(retrieved):
-    """P7-H: every pointer resolves (missing chunk, sentence past the end, gaps, repeats fail), and a
+    """Every pointer resolves (missing chunk, sentence past the end, gaps, repeats fail), and a
     rendered quote equals its source after NFC + whitespace normalisation: an off-by-one sentence,
     altered Unicode (homoglyph, ß -> ss, an invisible character), an added or dropped word, a
     mislabelled or missing quote fail; NFD and whitespace-only differences pass."""
@@ -188,11 +188,11 @@ def test_quotes_with_quotation_marks_inside_or_around_them(retrieved):
     assert extract_quotes("a „b „c“ d“ e „f“ „g") == ["b „c“ d", "f"]
 
 
-# -- P7-J: the verifier ------------------------------------------------------------------------
+# -- the verifier ------------------------------------------------------------------------
 
 
 def test_party_identity_refusal(retrieved):
-    """P7-J: a question asking who a party was is refused; so is an answer whose text or quoted
+    """A question asking who a party was is refused; so is an answer whose text or quoted
     sentences hold a [PER_n] placeholder or a name the LER model finds. A normal answer passes."""
     answer = "Die Kündigung bedarf der Schriftform. <|q|><|c1|><|s1|>"
     ok = verify(QUESTION, answer, retrieved, _entails)
@@ -270,7 +270,7 @@ def _named_decision(doc_id: str, text: str) -> Document:
 
 
 def test_no_scrub_log_entity_in_index_chunks():
-    """P7-J: no entity of the scrub log is left in an index chunk. A name planted in a decision is
+    """No entity of the scrub log is left in an index chunk. A name planted in a decision is
     found among the fixture corpus' chunks by its HMAC under the test key (the log never holds the
     name); after the scrub replaced it, nothing is found; under another key nothing matches."""
     name = "Hans Müller"
@@ -560,7 +560,7 @@ def _stub_transformers(monkeypatch) -> SimpleNamespace:
 
 
 def test_nli_threshold_is_pre_registered_and_labels_are_read_by_name(monkeypatch):
-    """ENTAILMENT_THRESHOLD is the pre-registered 0.5; MDebertaNLI loads lazily and takes the
+    """ENTAILMENT_THRESHOLD is the fixed 0.5 threshold; MDebertaNLI loads lazily and takes the
     entailment probability at the index config.id2label names, whatever the order (stand-in model)."""
     assert ENTAILMENT_THRESHOLD == 0.5
     assert entailment_index({"0": "ENTAILMENT", "1": "neutral", "2": "contradiction"}) == 0

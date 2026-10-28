@@ -1,4 +1,4 @@
-"""The answer grammar the renderer and the verifier share (lexhybrid/renderer/segments.py; P7-G/H/J)."""
+"""The answer grammar the renderer and the verifier share (lexhybrid/renderer/segments.py)."""
 
 import pytest
 

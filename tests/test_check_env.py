@@ -1,4 +1,4 @@
-"""scripts/check_env.py: the environment-equals-lock check (plan P1-W1)."""
+"""scripts/check_env.py: the environment-equals-lock check."""
 
 import shutil
 import subprocess
@@ -79,7 +79,7 @@ def test_this_environment_passes():
 
 
 def test_parse_export_ignores_ansi_colour():
-    """CI run 36322586655: FORCE_COLOR=1 made uv colour its "# via" lines, and they failed to parse."""
+    """FORCE_COLOR=1 made uv colour its "# via" lines, and they failed to parse."""
     coloured = "absl-py==2.5.0\n\x1b[32m    # via tensorboard\x1b[39m\n\x1b[1mpyyaml==6.0.3\x1b[0m\n"
     assert [str(r) for r in CE.parse_export(coloured)] == ["absl-py==2.5.0", "pyyaml==6.0.3"]
 
@@ -109,7 +109,7 @@ def test_live_export_parses_under_force_color(monkeypatch):
     assert {"torch", "numpy", "pytorch-lightning"} <= names
 
 
-# -- the scrub environment (decision 22, plan P3-R1) --------------------------------------------
+# -- the scrub environment --------------------------------------------
 
 
 def test_scrub_environment_is_its_own_uv_project():

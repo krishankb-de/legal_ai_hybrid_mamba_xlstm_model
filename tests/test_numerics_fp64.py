@@ -1,7 +1,6 @@
-"""Operator-level numerical correctness against float64 sequential oracles (plan P1-U).
+"""Operator-level numerical correctness against float64 sequential oracles.
 
-Ported from the reference's ``tests/test_mamba3_numerics.py`` (M1-M4) and
-``tests/test_scan_correctness.py`` (Phase 14C). These tests PIN known defects as well as prove the
+Ported from the upstream implementation's Mamba-3 numerics and scan-correctness tests. These tests PIN known defects as well as prove the
 fixes: every ``legacy`` case that is broken is ``xfail(strict=True)``, so it fails loudly the moment
 it starts passing, and every ``exact`` case must pass. Everything is CPU-collected and runs
 unconditionally -- the reference's old kernel tests asserted only shape/NaN and were CUDA-gated,
@@ -32,8 +31,8 @@ CHUNKS = [8, 64]
 TOL = 1e-6
 
 _FLIPS = "strict=True, so it fails loudly the moment it starts passing."
-DEFECT_SCAN = f"reference M1: divide-and-clamp in the legacy selective scan. {_FLIPS}"
-DEFECT_TFLA = f"reference M1: divide-and-clamp in the legacy TFLA intra-chunk term. {_FLIPS}"
+DEFECT_SCAN = f"upstream reference: divide-and-clamp in the legacy selective scan. {_FLIPS}"
+DEFECT_TFLA = f"upstream reference: divide-and-clamp in the legacy TFLA intra-chunk term. {_FLIPS}"
 SCAN_IMPLS = ("legacy", "exact")
 
 
@@ -135,7 +134,7 @@ def test_legacy_scan_path_is_unchanged():
     assert torch.equal(selective_scan(x, dt, A, B, C, D, scan_impl="legacy"), direct)
 
 
-# Scan error bound (reference Phase 14C-1): one-sided regression guards on the known defect.
+# Scan error bound (upstream reference): one-sided regression guards on the known defect.
 EXACT_TOL = 1e-5  # fp32 floor ~1e-7; the smallest defect signal on the grid is 5.6e-2
 DEFECTIVE_CEILING = 2.0  # the defect must not exceed this; it is ~1.08 in the reference
 
@@ -277,7 +276,7 @@ def test_tfla_exact_survives_extreme_decay(forget_bias, chunk_size, path):
 
 @pytest.mark.parametrize("chunk_size", [64, 128])
 def test_tfla_fallback_is_an_error_unless_configured(chunk_size):
-    """P2-C: the slow path is a configured choice. A too-wide chunk is factorised per row block;
+    """The slow path is a configured choice. A too-wide chunk is factorised per row block;
     only when no block may be used (min_block = the chunk) does it raise by default."""
     q, k, v, i_gate, f_gate = _tfla_fixture(-2.0)
     got = tfla_forward_parallel(q, k, v, i_gate, f_gate, chunk_size=chunk_size, tfla_impl="exact")
@@ -307,7 +306,7 @@ def _tfla_grads(tensors, doc_ids, **kw):
 @pytest.mark.parametrize("docs", [False, True], ids=["contiguous", "packed"])
 @pytest.mark.parametrize("forget_bias", [-8.0, -4.0, -2.0, 0.0])
 def test_tfla_wide_chunks_factorise_per_block_exactly(forget_bias, docs):
-    """Job 2599890: trained forget gates widened a 128-chunk's log-decay past fp32 (half-range 43.2
+    """Trained forget gates widened a 128-chunk's log-decay past fp32 (half-range 43.2
     and 54.6). The chunk is now split into row blocks, each re-centred on its own range: the same
     function as the fp64 recurrence, forward and backward, with no error raised."""
     from lexhybrid.kernels.tfla.tfla_interface import _row_block
@@ -388,7 +387,7 @@ PACKED_CASES = [
     "chunk_size,seq_len,boundaries", PACKED_CASES, ids=[f"chunk{c}-L{n}" for c, n, _ in PACKED_CASES]
 )
 def test_tfla_packed_equals_per_document(chunk_size, seq_len, boundaries):
-    """Defect 15 (P2-D): resets inside the kernel equal running every document alone, and equal
+    """Resets inside the kernel equal running every document alone, and equal
     the fp64 oracle with resets, at 1e-6."""
     q, k, v, i_gate, f_gate, doc_ids = _packed_tfla_inputs(seq_len, boundaries)
     kw = dict(chunk_size=chunk_size, tfla_impl="exact")
@@ -426,7 +425,7 @@ def test_tfla_sequential_fallback_resets_at_boundaries():
 @pytest.mark.parametrize("docs", [False, True], ids=["contiguous", "packed"])
 @pytest.mark.parametrize("seq_len", [1, 15, 16, 17, 50])
 def test_tfla_final_state_matches_oracle(seq_len, docs):
-    """`return_state` gives the (C, n) the step recurrence continues from (P2-G), on partial chunks."""
+    """`return_state` gives the (C, n) the step recurrence continues from, on partial chunks."""
     q, k, v, i_gate, f_gate, doc_ids = _packed_tfla_inputs(
         seq_len, {0: [seq_len // 2] if seq_len > 2 else [], 1: []}
     )
@@ -462,7 +461,7 @@ def _tfla_model(chunk_size: int, forget_bias: float):
 
 @pytest.mark.parametrize("chunk_size,forget_bias", [(128, 3.0)], ids=["chunk=128, forget_bias=3.0"])
 def test_tfla_fast_path_at_init(chunk_size, forget_bias):
-    """Defect 9: the shipped configuration runs exact TFLA on its factorised path at init. With
+    """The shipped configuration runs exact TFLA on its factorised path at init. With
     tfla_fallback="error" the forward would raise if any chunk needed the fallback."""
     model = _tfla_model(chunk_size, forget_bias)
     with torch.no_grad():
@@ -471,9 +470,9 @@ def test_tfla_fast_path_at_init(chunk_size, forget_bias):
 
 
 def test_tfla_reference_forget_bias_factorises_per_block(monkeypatch):
-    """The record behind defect 9: forget bias 0 gives f = 0.5 and a half-range of
+    """The record behind the fp32 range limit: forget bias 0 gives f = 0.5 and a half-range of
     0.5 * 128 * ln 2 = 44.4 > 40 at chunk 128, so the reference ran the fallback from step 0. The
-    exact path now factorises such a chunk per row block (job 2599890's fix): no error with
+    exact path now factorises such a chunk per row block: no error with
     tfla_fallback="error", and the same logits as chunk 64, whose one-factor path fits."""
     import lexhybrid.kernels.tfla.tfla_interface as tfla
 
@@ -490,7 +489,7 @@ def test_tfla_reference_forget_bias_factorises_per_block(monkeypatch):
 
 
 def test_tfla_chunk_size_reaches_kernel(monkeypatch):
-    """Defect 9: the block's chunk size, not the sequence length, sets the kernel's chunk."""
+    """The block's chunk size, not the sequence length, sets the kernel's chunk."""
     import lexhybrid.kernels.tfla.tfla_interface as tfla
     from lexhybrid.layers.mlstm_block import mLSTMBlock
 
@@ -577,7 +576,7 @@ def test_ssd_document_isolation_is_bit_exact(chunk_size):
 @pytest.mark.parametrize("docs", [False, True], ids=["contiguous", "packed"])
 @pytest.mark.parametrize("seqlen", [1, 63, 64, 65, 200], ids=lambda n: f"L={n}")
 def test_ssd_final_state_matches_oracle(seqlen, docs):
-    """Defect 7 (P2-F): the state after the last token, including a partial last chunk -- where the
+    """The state after the last token, including a partial last chunk -- where the
     reference's fresh padding segment returned zeros -- and a document starting inside it."""
     kw = ssd_fixture((2, seqlen, 4, 8, 1, 16))
     ids = None
@@ -596,7 +595,7 @@ def test_ssd_final_state_matches_oracle(seqlen, docs):
 
 @pytest.mark.parametrize("autocast", [False, True], ids=["bf16-inputs", "bf16-autocast"])
 def test_ssd_state_is_fp32_under_autocast(autocast):
-    """Defect 16 (P2-E): the carried state is fp32 by declaration, whatever the activations are."""
+    """The carried state is fp32 by declaration, whatever the activations are."""
     kw = {
         k: v.to(torch.bfloat16) if v.is_floating_point() else v for k, v in ssd_fixture(SSD_SHAPES[0]).items()
     }
@@ -612,7 +611,7 @@ def test_ssd_state_is_fp32_under_autocast(autocast):
 
 
 def test_tfla_state_is_fp32_for_bf16_inputs():
-    """The TFLA carried state is fp32 too (P2-E), so the cache a bf16 forward writes stays fp32."""
+    """The TFLA carried state is fp32 too, so the cache a bf16 forward writes stays fp32."""
     q, k, v, i_gate, f_gate, _ = _packed_tfla_inputs(40, {0: [], 1: []})
     h16, C, n = tfla_forward_parallel(
         *(t.to(torch.bfloat16) for t in (q, k, v, i_gate, f_gate)),

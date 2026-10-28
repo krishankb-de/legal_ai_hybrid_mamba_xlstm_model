@@ -1,11 +1,11 @@
-"""The currency changelog (plan P3-T): which provisions changed since a date; P9's currency subset.
+"""The currency changelog: which provisions changed since a date.
 
 A provision's version date is its ``valid_from``, and what that date means depends on the source:
 
 * **RIS** (Austria): one document per version with its own ``Inkrafttretensdatum`` -- the date is the
   provision's (granularity ``provision``), and the version it replaced, when the corpus holds it
   (same citation, ``valid_to`` the day before or earlier), is linked as ``previous_id``.
-* **Fedlex** (Switzerland): the latest in-force date in the article's footnotes (P3-K) -- the
+* **Fedlex** (Switzerland): the latest in-force date in the article's footnotes -- the
   provision's own date, conservative (granularity ``provision``).
 * **GII** (Germany): the date of the law's last amendment from its ``Stand`` comment -- the whole
   act's, not the provision's (granularity ``act``: the provision may be unchanged).

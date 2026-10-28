@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Dump the reference-parity fixtures (plan P1-X) -- run once, while Reference/ still exists.
+"""Dump the reference-parity fixtures -- run once, while Reference/ still exists.
 
-Imports the reference package from ``Reference/hybrid_model_mamba_xlstm`` WITHOUT touching
-``sys.path``: an empty package module is registered under the reference's own name with its
+Imports the upstream reference package from ``Reference/hybrid_model_mamba_xlstm`` WITHOUT touching
+``sys.path``: an empty package module is registered under the upstream package's own name with its
 ``__path__`` pointing into Reference/, so its absolute imports resolve there (and its heavy package
 ``__init__`` never runs). For each mixer it builds the REFERENCE block for several flag
 combinations, seeds it, and records the state dict, a packed input with document ids, and the
@@ -11,8 +11,8 @@ same for a whole 4-layer model (logits, loss) and records cached beam-search tok
 pattern.
 
 ``tests/test_reference_parity.py`` loads each state dict into the NEW code and asserts the outputs
-agree to 1e-6, forever -- after P1-Z these files are the record of what the reference computed.
-This is the one file allowed to name the reference package (tests/test_port_map.py).
+agree to 1e-6, forever -- once Reference/ is removed these files are the record of what the reference computed.
+This is the one file allowed to name the reference package (tests/test_code_hygiene.py).
 
     .venv/bin/python scripts/dump_reference_parity.py            # writes tests/fixtures/reference_parity/
     .venv/bin/python scripts/dump_reference_parity.py --check    # regenerate in memory and compare
@@ -30,7 +30,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 REFERENCE_ROOT = REPO_ROOT / "Reference" / "hybrid_model_mamba_xlstm"
 REF_PKG = "hybrid_xmamba"
 OUT_DIR = REPO_ROOT / "tests" / "fixtures" / "reference_parity"
-REF_DOC_KWARG = "cu_seqlens"  # the reference's name for doc_ids
+REF_DOC_KWARG = "cu_seqlens"  # the upstream name for doc_ids
 
 BATCH, SEQ, DIM = 2, 96, 64
 DOC_SPLIT = 40  # doc_ids = [0]*40 + [1]*56 -- the boundary falls inside a chunk for every chunk size
@@ -110,7 +110,7 @@ MODEL_CASES = [
 def import_reference():
     """Register the reference package without running its __init__ and without sys.path edits."""
     if not REFERENCE_ROOT.exists():
-        raise SystemExit(f"{REFERENCE_ROOT} is gone (P1-Z); the committed fixtures are the record")
+        raise SystemExit(f"{REFERENCE_ROOT} is gone; the committed fixtures are the record")
     if REF_PKG not in sys.modules:
         pkg = types.ModuleType(REF_PKG)
         pkg.__path__ = [str(REFERENCE_ROOT / REF_PKG)]

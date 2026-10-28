@@ -14,10 +14,10 @@
 #SBATCH --open-mode=append   # pot-hpi-aisc-batch is preemptible: without this a requeue TRUNCATES the log
 #SBATCH --requeue
 #
-# train_pretrain_4gpu.sh -- 4 x H100 DDP pretraining on one node (plan P6-A; port map §11.1).
-# Submit from the Mac, with --gpus=4 on the sbatch line too (a directive is not overridden by an
-# environment variable, and --gres is never used):
-#   ssh $CLUSTER_HOST "cd $CLUSTER_REPO && NUM_GPUS=4 MODEL_CONFIG=hybrid_legal_base SEED=42 EXPERIMENT=p6_hybrid_s42_A sbatch --gpus=4 scripts/slurm/train_pretrain_4gpu.sh"
+# train_pretrain_4gpu.sh -- 4 x H100 DDP pretraining on one node.
+# Submit from your workstation, with --gpus=4 on the sbatch line too (a directive is not overridden by an
+# environment variable):
+#   ssh $CLUSTER_HOST "cd $CLUSTER_REPO && NUM_GPUS=4 MODEL_CONFIG=hybrid_legal_base SEED=42 EXPERIMENT=pretrain_hybrid_s42_A sbatch --gpus=4 scripts/slurm/train_pretrain_4gpu.sh"
 # One SLURM task; Lightning starts the rank processes itself (scripts/train_pretrain.py builds
 # DDPStrategy with LightningEnvironment). The body is train_pretrain_1gpu.sh: `du` of the outputs
 # first, the NUM_GPUS check against torch.cuda.device_count(), the ARCH check, and
@@ -28,5 +28,5 @@ cd "${SLURM_SUBMIT_DIR:-.}"
 
 export NUM_GPUS="${NUM_GPUS:-4}"
 export TRAINER_CFG="${TRAINER_CFG:-h100_multi_ddp}"
-export SAVE_TOP_K="${SAVE_TOP_K:-1}"   # R6: pipeline inputs keep 1 + last.ckpt
+export SAVE_TOP_K="${SAVE_TOP_K:-1}"   # pipeline inputs keep 1 + last.ckpt
 bash scripts/slurm/train_pretrain_1gpu.sh

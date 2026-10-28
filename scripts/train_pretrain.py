@@ -1,29 +1,29 @@
 #!/usr/bin/env python3
-"""Pretraining entry point (plan P2-U; SLURM wrappers from P5-B / P6-A call it).
+"""Pretraining entry point (the SLURM wrappers call it).
 
     python scripts/train_pretrain.py model=hybrid_legal_base dataset=synthetic trainer=cpu_debug
     python scripts/train_pretrain.py ... distill=qwen3_1p7b +resume_from_checkpoint=/path/last.ckpt
 
-Fixes of the reference's stage-0 script (defect 12) that live here:
+Differences from the upstream reference implementation's training script:
 
 * ``val_check_interval`` counts micro-batches in Lightning; the configs say how often to validate
   in OPTIMIZER steps (``val_every_opt_steps``), so the script sets
   ``val_check_interval = val_every_opt_steps * accumulate_grad_batches`` and asserts the Trainer
   holds that product. A trainer yaml that sets ``val_check_interval`` itself is refused.
 * DDP is built explicitly as ``DDPStrategy(find_unused_parameters=False,
-  gradient_as_bucket_view=True)``; the reference's ``find_unused_parameters`` yaml key was never
+  gradient_as_bucket_view=True)``; the upstream implementation's ``find_unused_parameters`` yaml key was never
   read, because its entry point passed the string ``"ddp"``.
-* ``compile_model`` is honoured (the reference read ``compile``).
+* ``compile_model`` is honoured (the upstream implementation read ``compile``).
 * ``resume_from_checkpoint`` (the wrapper passes ``last.ckpt`` when it exists) resumes the run; a
-  requeued reference job restarted from step 0.
+  requeued upstream job restarted from step 0.
 
-For the SLURM wrappers (P5-B, P6-A):
+For the SLURM wrappers:
 
 * DDP runs as ONE SLURM task that starts its own rank processes (``LightningEnvironment``), so a
   4-GPU job needs ``--gpus=4`` and no ``srun``/``--ntasks-per-node``; left to itself, Lightning
   would detect SLURM from ``SLURM_NTASKS`` and expect one srun task per GPU.
 * ``+arch_only=true`` builds the model this exact config describes, prints its ``ARCH`` line and
-  exits: the wrappers check the arm's expected tokens against it before step 0 (FL1).
+  exits: the wrappers check the arm's expected tokens against it before step 0.
 * ``StepStatsCallback`` prints ``STEPSTATS`` lines (s/step, peak GB, per rank).
 * ``SpikeDiagnosticsCallback`` (``callbacks.diagnostics.enabled``, off by default) logs per-part
   gradient, update, activation and gate statistics for a loss-spike diagnosis.
@@ -61,7 +61,7 @@ _SCRIPT_KEYS = ("val_every_opt_steps", "compile_model", "strategy", "stop_at_ste
 
 
 def build_trainer_kwargs(trainer_cfg) -> dict:
-    """``pl.Trainer`` kwargs from a trainer yaml, with ``val_check_interval`` derived (defect 12)."""
+    """``pl.Trainer`` kwargs from a trainer yaml, with ``val_check_interval`` derived."""
     if isinstance(trainer_cfg, DictConfig):
         t = dict(OmegaConf.to_container(trainer_cfg, resolve=True))
     else:
@@ -80,7 +80,7 @@ def build_trainer_kwargs(trainer_cfg) -> dict:
 
 
 def build_strategy(name):
-    """The strategy object: DDP is always built explicitly with the settings the plan fixes, and
+    """The strategy object: DDP is always built explicitly with fixed settings, and
     launches its own rank processes inside the one SLURM task (``LightningEnvironment``)."""
     if name == "ddp":
         from lightning_fabric.plugins.environments import LightningEnvironment
@@ -111,7 +111,7 @@ def build_teacher(cfg: DictConfig):
         return None
     if float(cfg.distill.get("alpha", 0.5)) == 0.0:
         # S6 (no KD): the loss is plain CE either way; without this the 8B forward still ran every
-        # step and S6's s/step and peak GB carried it (screen attempt 1; decisions.p5_fix).
+        # step and S6's s/step and peak GB carried it (screen attempt 1).
         print("teacher: none (distill.alpha=0)", flush=True)
         return None
     from transformers import AutoModelForCausalLM
@@ -149,7 +149,7 @@ def build_module(cfg: DictConfig, model: HybridLanguageModel, teacher) -> Pretra
 
 
 def build_dataloaders(cfg: DictConfig, vocab_size: int):
-    """Train/val loaders: seeded synthetic rows, or the packed-shard mixture (P3-V)."""
+    """Train/val loaders: seeded synthetic rows, or the packed-shard mixture."""
     d = cfg.dataset
     if d.name == "packed":
         from lexhybrid.data.datasets import ScheduleSampler, ShardSampler, mixture_from_config
@@ -226,7 +226,7 @@ def print_arch(cfg: DictConfig) -> str:
 
 
 def check_stage_keys(cfg: DictConfig) -> None:
-    """P6 stage A: ``trainer.stop_at_step`` ends training at a checkpoint step inside the LR
+    """Stage A: ``trainer.stop_at_step`` ends training at a checkpoint step inside the LR
     schedule's horizon ``trainer.max_steps`` (WSD over the combined A+B horizon), so ``last.ckpt`` is
     that step and stage B resumes from it."""
     stop, horizon = cfg.trainer.get("stop_at_step"), int(cfg.trainer.max_steps)

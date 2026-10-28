@@ -1,12 +1,29 @@
 [project]
 name = "lexhybrid"
 version = "0.1.0"
-description = "DACH legal, citation-faithful, retrieval-gated hybrid Mamba-3 / mLSTM / attention decoder"
+description = "Citation-faithful, retrieval-gated language model for DACH and EU law: a hybrid Mamba-3 / mLSTM / attention decoder that cites by pointer, with a renderer and a verifier"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "LicenseRef-Proprietary"
+license-files = ["LICENSE"]
+keywords = ["legal", "nlp", "language-model", "mamba", "xlstm", "retrieval", "german", "citations"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: Other/Proprietary License",
+    "Natural Language :: German",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Private :: Do Not Upload",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Text Processing :: Linguistic",
+]
 dependencies = [
-    # Decision 18: one torch for every environment. 2.11.0 is the newest build the PyTorch
-    # cu128 index carries, and CUDA 12.8 is what the aisc H100 driver supports.
+    # One torch build for every environment. 2.11.0 is the newest build the PyTorch cu128 index
+    # carries, and CUDA 12.8 is what the H100 cluster's driver supports.
     "torch==2.11.0",
     "pytorch-lightning>=2.4",
     "hydra-core>=1.3",
@@ -19,9 +36,9 @@ dependencies = [
     "packaging>=23.0",
     "tqdm>=4.66",
     "tensorboard>=2.16",
-    "requests>=2.31",  # collectors (P3-E); was only transitive
-    "datasketch>=1.6",  # MinHash deduplication (P3-S); pulls scipy
-    "bm25s[stem]>=0.3.11",  # lexical retrieval (P7-C, decision 14); [stem] pulls PyStemmer (Snowball German)
+    "requests>=2.31",  # corpus collectors; was only transitive
+    "datasketch>=1.6",  # MinHash deduplication; pulls scipy
+    "bm25s[stem]>=0.3.11",  # lexical retrieval; [stem] pulls PyStemmer (Snowball German)
 ]
 
 [dependency-groups]
@@ -33,19 +50,23 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling>=1.25"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["lexhybrid"]
 
+[project.urls]
+Repository = "https://github.com/krishankb-de/legal_ai_hybrid_mamba_xlstm_model"
+Issues = "https://github.com/krishankb-de/legal_ai_hybrid_mamba_xlstm_model/issues"
+
 [tool.hatch.build.targets.sdist]
-# Anchored with "/": an unanchored "README.md" also matched Reference/**/README.md.
-include = ["/lexhybrid", "/README.md", "/pyproject.toml"]
+# Anchored with "/": an unanchored "README.md" would also match nested README files.
+include = ["/lexhybrid", "/README.md", "/LICENSE", "/pyproject.toml"]
 
 [tool.uv]
-# The lock is resolved for exactly the two platforms this project runs on: the Mac
-# (arm64) and Linux x86_64 (GitHub Actions runners and the aisc H100 nodes).
+# The lock is resolved for exactly the two platforms this project runs on: macOS
+# arm64 and Linux x86_64 (GitHub Actions runners and the H100 cluster nodes).
 environments = [
     "sys_platform == 'darwin' and platform_machine == 'arm64'",
     "sys_platform == 'linux' and platform_machine == 'x86_64'",
@@ -70,7 +91,7 @@ markers = [
     "multigpu: needs two or more CUDA GPUs; runs on the cluster (scripts/slurm/multigpu_tests.sh)",
     "linux_only: needs Linux (Inductor CPU compile, FlexAttention on CPU); runs in CI",
     "network: needs live external services; set LEXHYBRID_NETWORK_TESTS=1 (weekly CI job)",
-    "reference: needs Reference/hybrid_model_mamba_xlstm; skipped after P1-Z",
+    "reference: needs the upstream reference implementation checkout; skipped when it is absent",
 ]
 
 [tool.ruff]
@@ -93,9 +114,8 @@ known-first-party = ["lexhybrid"]
 source = ["lexhybrid"]
 
 [tool.coverage.report]
-# P1-W5 (2026-09-27): measured 94.5% of lexhybrid/ (1,772 of 1,875 lines, validate.sh --full
-# --coverage on macOS arm64), rounded down to the nearest 5. Raised as phases add coverage; never
-# lowered without a note.
+# Measured 94.5% of lexhybrid/ at the time it was set (validate.sh --full --coverage on macOS
+# arm64), rounded down to the nearest 5. Raise it as coverage grows; do not lower it without a note.
 fail_under = 90
 show_missing = true
 skip_covered = true

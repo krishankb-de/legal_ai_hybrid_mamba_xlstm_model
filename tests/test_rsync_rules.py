@@ -1,4 +1,4 @@
-"""`.rsync-exclude` does what `scripts/sync_to_cluster.sh` needs (plan P1-A, P4-D).
+"""`.rsync-exclude` does what `scripts/sync_to_cluster.sh` needs.
 
 rsync is first-match-wins and has no `!` negation: an include for the test fixtures must be a
 `+ ` line placed before the `*.pt` exclude, or the parity fixtures never reach the cluster and its
@@ -99,7 +99,7 @@ def test_delete_keeps_what_the_cluster_owns(tmp_path):
 
 @pytest.mark.skipif(shutil.which("rsync") is None, reason="rsync not installed on this machine")
 def test_every_source_file_reaches_the_cluster(tmp_path):
-    """Job 2588703: unanchored `data/probes/` also dropped `lexhybrid/data/probes/`. Mirror every
+    """An unanchored `data/probes/` also dropped `lexhybrid/data/probes/`. Mirror every
     source file of the repo (empty copies) and check rsync keeps all of them."""
     src, dst = tmp_path / "src", tmp_path / "dst"
     sources = [

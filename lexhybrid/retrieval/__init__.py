@@ -1,1 +1,1 @@
-"""retrieval (built in P7)."""
+"""Retrieval: chunking, BM25, fusion, reranking, filters and index versions."""

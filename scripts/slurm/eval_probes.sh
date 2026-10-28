@@ -14,22 +14,21 @@
 #SBATCH --open-mode=append   # pot-hpi-aisc-batch is preemptible: a requeue re-runs the task into the same log
 #SBATCH --requeue
 #
-# eval_probes.sh -- plan P5-G (and the late-25% PPL of P5-F): one array task per screen arm-seed, on
+# eval_probes.sh -- probes and the late-25% PPL: one array task per screen arm-seed, on
 # that run's last.ckpt. ARM is resolved HERE by `screen_arms.py env` (MODEL_CONFIG and the
 # experiment, screen<ATTEMPT>_<arm>_s<seed>), as in screen_array.sh.
 #   1. scripts/evaluate_val_ppl.py: the validation rows at ROW_LEN (2,048), overall PPL (= exp of the
 #      run's last val/loss) and the late-25% PPL: predicted tokens with >= 1,536 tokens of their own
-#      document before them (late_doc, the user's choice of 2026-10-13), plus the row-position variant.
+#      document before them (late_doc), plus the row-position variant.
 #   2. scripts/evaluate_probes.py at CONTEXT (2,048): MQAR, statute recall and multi-hop, the statutes
 #      from the scrubbed gii parts.
 # Both write JSON to logs/eval_<array job>/<experiment>.{valppl,probes}.json (logs/ is pulled; analysis/
-# is not written from the cluster). Submit from the Mac:
+# is not written from the cluster). Submit from your workstation:
 #   ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch --array=0-11 scripts/slurm/eval_probes.sh"
 #   ssh $CLUSTER_HOST "cd $CLUSTER_REPO && ARMS='S5-s42 S5-s43' sbatch --array=0-1 --time=08:00:00 scripts/slurm/eval_probes.sh"
-# RUNS="<experiment>:<model config> ..." evaluates those runs' last.ckpt instead of screen arms (P6-G,
-# P6-K, P6-M), e.g. RUNS='p6_hybrid_s42_A:hybrid_legal_base' ROW_LEN=4096 PROBES=0 for stage A.
+# RUNS="<experiment>:<model config> ..." evaluates those runs' last.ckpt instead of screen arms, e.g. RUNS='pretrain_hybrid_s42_A:hybrid_legal_base' ROW_LEN=4096 PROBES=0 for stage A.
 # PROBES=0 skips step 2. VALPPL=0 skips step 1 (a re-run of the probes after its JSON is already in an earlier logs/eval_<job>/;
-# job 2663318's probes crashed on gii citation codes after every val-PPL had been written).
+# useful when the probes crashed after every val-PPL had been written).
 # The log ends in "EVAL PROBES DONE <experiment>".
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
@@ -42,7 +41,7 @@ export PYTHONUNBUFFERED=1
 mkdir -p logs
 
 IDX="${SLURM_ARRAY_TASK_ID:-0}"
-if [[ -n "${RUNS:-}" ]]; then  # explicit "<experiment>:<model config>" entries (P6 runs, not screen arms)
+if [[ -n "${RUNS:-}" ]]; then  # explicit "<experiment>:<model config>" entries (pretraining runs, not screen arms)
   read -r -a RUN_LIST <<< "${RUNS}"
   if [[ "${IDX}" -ge "${#RUN_LIST[@]}" ]]; then
     echo "FATAL: array index ${IDX} but only ${#RUN_LIST[@]} runs in RUNS='${RUNS}'"; exit 1

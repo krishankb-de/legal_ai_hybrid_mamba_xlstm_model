@@ -1,9 +1,9 @@
-"""The model's answer as segments: text, quote pointers, citation pointers (plan P7-G, P7-H, P7-J).
+"""The model's answer as segments: text, quote pointers, citation pointers.
 
 The renderer and the verifier read the same grammar, defined once here. The answer is the target
 after ``<|answer|>``, optionally ending in the EOS token. Pointers:
 
-* ``<|q|><|cK|><|sJ|>…``: a quote of one or more sentences ``J`` of passage ``K``, as the P3-Y format
+* ``<|q|><|cK|><|sJ|>…``: a quote of one or more sentences ``J`` of passage ``K``, as the SFT format
   writes it (one sentence) and the pointer FSM allows it (a span, ``lexhybrid/decoding/pointer_constraints.py``);
 * ``<|cite|><|cK|>`` optionally followed by ``<|sJ|>…``: a citation of passage ``K``, or of those of its
   sentences. ``sft_format.Cite`` writes it without a sentence, and the FSM ends it after one;

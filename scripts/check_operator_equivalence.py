@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Rule R1 -- the equivalence gate every operator or speed change has to pass.
+"""The equivalence gate every operator or speed change has to pass.
 
-Ported from the reference ``scripts/check_operator_equivalence.py``. A faster operator that
+Ported from the upstream reference implementation's ``scripts/check_operator_equivalence.py``. A faster operator that
 changes a decoded token would invalidate every downstream number, so speed is measured second:
 
   * a variant must match the current operator to rel-max-err <= 1e-4 in fp32, and
@@ -59,7 +59,7 @@ def check_operator(device, chunk_sizes, verbose=True, baseline_chunk=64):
     failures = []
     batch, seqlen, nheads, headdim, ngroups, dstate = 2, 256, 4, 32, 1, 64
     # A document boundary that falls INSIDE a chunk for every chunk size tested -- where the
-    # state-reset masks are hardest and where the Mamba-1 defect lived.
+    # state-reset masks are hardest and where the legacy Mamba-1 bug lived.
     seg = torch.zeros(batch, seqlen, dtype=torch.long, device=device)
     seg[:, 100:] = 1
     seg[1, 173:] = 2
@@ -91,7 +91,7 @@ def check_operator(device, chunk_sizes, verbose=True, baseline_chunk=64):
 def set_mamba3_chunk_size(model, chunk_size):
     """The sweep is over the SSD chunk (``mamba3_chunk_size``) only. The mLSTM mixers also carry a
     ``chunk_size`` (the TFLA chunk, ``mlstm_chunk_size``), which may differ: ref_hybrid_m3 runs
-    Mamba-3 at 64 and mLSTM at 128, and resetting both to 64 moved its logits by 4.5e-4 (job 2589360)."""
+    Mamba-3 at 64 and mLSTM at 128, and resetting both to 64 moved its logits by 4.5e-4."""
     for layer in model.layers:
         if isinstance(layer.mixer, Mamba3Block):
             layer.mixer.chunk_size = chunk_size
@@ -160,7 +160,7 @@ def main(argv=None) -> int:
     args = ap.parse_args(argv)
 
     print("=" * 78)
-    print(f"R1 equivalence gate   device={args.device}  tolerance={R1_TOLERANCE:.0e}")
+    print(f"Operator equivalence gate   device={args.device}  tolerance={R1_TOLERANCE:.0e}")
     print("=" * 78)
     failures = check_operator(args.device, args.chunk_sizes)
     if not args.skip_model:
@@ -170,11 +170,11 @@ def main(argv=None) -> int:
 
     print("\n" + "=" * 78)
     if failures:
-        print(f"R1 FAILED: {', '.join(failures)}")
+        print(f"FAILED: {', '.join(failures)}")
         print("These variants change the function the model computes and must NOT be adopted.")
         print("=" * 78)
         return 1
-    print("R1 PASSED: every variant computes the same function as the baseline operator.")
+    print("PASSED: every variant computes the same function as the baseline operator.")
     print("=" * 78)
     return 0
 

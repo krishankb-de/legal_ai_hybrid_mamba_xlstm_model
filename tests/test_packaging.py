@@ -1,4 +1,4 @@
-"""The built distributions contain the package and nothing else (plan P1-A, CI `package` job).
+"""The built distributions contain the package and nothing else (CI `package` job).
 
 The CI job proves the wheel imports outside the checkout; this test pins what goes into the
 archives, so a stray include (an unanchored `README.md` once pulled in `Reference/**/README.md`)
@@ -45,6 +45,6 @@ def test_sdist_holds_only_the_package_and_its_metadata(dists):
     _, sdist = dists
     with tarfile.open(sdist) as tar:
         names = [m.name.split("/", 1)[1] for m in tar.getmembers() if m.isfile()]
-    allowed_top = {"README.md", "pyproject.toml", ".gitignore", "PKG-INFO"}
+    allowed_top = {"README.md", "LICENSE", "pyproject.toml", ".gitignore", "PKG-INFO"}
     stray = [n for n in names if not n.startswith("lexhybrid/") and n not in allowed_top]
     assert not stray, f"sdist contains unexpected files: {stray}"

@@ -1,16 +1,16 @@
-# One H100 (aisc), bf16 mixed precision. Used by the P5 screen arms.
+# One H100, bf16 mixed precision. Used by the screen arms.
 # val_every_opt_steps counts OPTIMIZER steps; the entry point converts it to Lightning's
 # val_check_interval (which counts micro-batches) as val_every_opt_steps * accumulate_grad_batches.
 accelerator: gpu
 devices: 1
 precision: bf16-mixed
 strategy: auto
-# The reference's distill script read `compile`, so this key was never honoured there (defect 12).
-# P4-Q decides whether compiled training is adopted; until then it stays off.
+# The upstream distill script read `compile`, so this key was never honoured there.
+# Compiled training is not adopted yet; it stays off.
 compile_model: false
 max_epochs: -1
 max_steps: 12000
-# P6 stage A ends at a checkpoint step inside the max_steps horizon (WSD over the combined A+B
+# Stage A of pretraining ends at a checkpoint step inside the max_steps horizon (WSD over the combined A+B
 # horizon; scripts/train_pretrain.py check_stage_keys). null: train to max_steps.
 stop_at_step: null
 val_every_opt_steps: 4000

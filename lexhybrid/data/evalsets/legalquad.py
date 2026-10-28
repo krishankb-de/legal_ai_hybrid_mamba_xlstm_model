@@ -1,4 +1,4 @@
-"""LegalQuAD: extractive question answering over German court decisions (plan P3-Q).
+"""LegalQuAD: extractive question answering over German court decisions.
 
 Source: the authors' release (Hoppe et al., AIKE 2021), ``data/LegalQuAD.json`` in
 ``Christoph911/AIKE2021_Appendix`` at a pinned commit: SQuAD format, 200 decisions from Open Legal

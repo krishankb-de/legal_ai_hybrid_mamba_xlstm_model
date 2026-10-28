@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Per-parameter weights and AdamW state of a training checkpoint (decisions.p5_divergence).
-
+"""Per-parameter weights and AdamW state of a training checkpoint.
     .venv/bin/python scripts/inspect_checkpoint.py --checkpoint outputs/screen_S1_s42/checkpoints/last.ckpt \\
         --model-config hybrid_legal_base --label screen_S1_s42
 
-Screen attempt 1 left a collapsed ``last.ckpt`` (S1-s42, S3-s43) next to healthy ones of the same
+An early screen attempt left a collapsed ``last.ckpt`` (S1-s42, S3-s43) next to healthy ones of the same
 configs (S1-s43, S3-s42). Comparing them shows what the collapse left behind: a norm weight that
 went to zero, a gate bias that ran away, an AdamW second moment that is tiny where the gradient now
 is not. Prints one line per parameter, then one per part (``embed``, ``L<i>_<type>``,

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Locate compile-vs-eager drift per mixer and per batch row (plan P4-J2 follow-up, job 2588779).
+"""Locate compile-vs-eager drift per mixer and per batch row.
 
-Job 2588779: on the H100, ``torch.compile`` of the reduced ``hybrid_legal_base`` matched eager in
+Observed on the H100: ``torch.compile`` of the reduced ``hybrid_legal_base`` matched eager in
 batch row 0 (~1e-7) and drifted in row 1 (max 0.0575) at every position, both rows having the same
 document layout. This builds the same reduced model with one mixer at a time (and the attention
 mixer with each packed-row implementation), runs eager and compiled on a batch of two, and prints

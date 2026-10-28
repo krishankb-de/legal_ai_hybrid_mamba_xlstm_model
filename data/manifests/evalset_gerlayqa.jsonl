@@ -1,4 +1,4 @@
-{"info": {"eval_only": true, "licence": "non-commercial scientific research only (repository notice); the authors claim no copyright", "name": "gerlayqa", "note": "evaluation split bgb_eval.json; never training data (plan P3-Q)", "research_only": true, "source": "https://github.com/trusthlt/eacl24-german-legal-questions@cbc4659", "task": "qa"}}
+{"info": {"eval_only": true, "licence": "non-commercial scientific research only (repository notice); the authors claim no copyright", "name": "gerlayqa", "note": "evaluation split bgb_eval.json; never training data", "research_only": true, "source": "https://github.com/trusthlt/eacl24-german-legal-questions@cbc4659", "task": "qa"}}
 {"gold": ["BGB §573b"], "id": "gerlayqa:bgb_eval:0", "sha256": "4a108e78daed132888596a0347c66329bc50dfd9a7beca4d583739e5e06fc223"}
 {"gold": ["BGB §99"], "id": "gerlayqa:bgb_eval:1", "sha256": "6b8e15119d1c538903b0e82e3362d4d13e76e7cf1a09482a1171077cbe0791fc"}
 {"gold": ["BGB §138", "BGB §343", "BGB §313"], "id": "gerlayqa:bgb_eval:2", "sha256": "62e3c254c09937b7819cc9ec99f2d2f2c5b460998bd160c4fe41263bad144dfb"}

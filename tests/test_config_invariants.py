@@ -1,4 +1,4 @@
-"""Configuration invariants (plan P1-V): the living spec of what every yaml guarantees."""
+"""Configuration invariants: the living spec of what every yaml guarantees."""
 
 import pytest
 import torch
@@ -91,7 +91,7 @@ LEGAL = ("hybrid_legal_base", "transformer_legal_base", "hybrid_legal_legacy")
 
 @pytest.mark.parametrize("name", LEGAL)
 def test_legal_yamls_compose_and_pin_operators(name):
-    """P2-V: the three legal model configs compose, pin their operators (R8, decision 17), use the
+    """The three legal model configs compose, pin their operators use the
     Qwen3 vocabulary and a tied head, and declare every HybridConfig field so an arm can override
     any of them as `model.<field>=...` without a `+`."""
     import dataclasses
@@ -107,7 +107,7 @@ def test_legal_yamls_compose_and_pin_operators(name):
     base = yaml.safe_load((REPO_ROOT / "configs" / "model" / "hybrid_legal_base.yaml").read_text())
     for key in ("learning_rate", "warmup_steps", "weight_decay", "gradient_clip_val", "scheduler"):
         assert raw[key] == base[key], f"{name}: {key} differs from the base"
-    if name == "hybrid_legal_base":  # decision 10, value by value
+    if name == "hybrid_legal_base":  # value by value
         assert (
             cfg.layer_pattern
             == ["mamba3"] * 3
@@ -147,7 +147,7 @@ def test_an_arm_can_override_any_base_field_without_a_plus():
     assert cfg.model.mamba3_use_rope is False
 
 
-# -- P2-W: screen variants and parameter bands ------------------------------------------------
+# -- screen variants and parameter bands ------------------------------------------------
 
 PARAMS = load_script("param_counts")
 SCREEN_VARIANTS = {
@@ -165,7 +165,7 @@ def counts():
 
 @pytest.mark.parametrize("name,lever", list(SCREEN_VARIANTS.items()))
 def test_screen_variants_differ_from_the_base_in_one_lever(name, lever):
-    """OFAT (R3): each screen yaml equals the base in every field but its own lever."""
+    """One factor at a time: each screen yaml equals the base in every field but its own lever."""
     load = lambda n: yaml.safe_load((REPO_ROOT / "configs" / "model" / f"{n}.yaml").read_text())  # noqa: E731
     base, arm = load("hybrid_legal_base"), load(name)
     assert set(arm) == set(base)
@@ -174,7 +174,7 @@ def test_screen_variants_differ_from_the_base_in_one_lever(name, lever):
 
 
 def test_param_bands(counts):
-    """P2-W: the plan's predicted counts and bands, and analysis/param_counts.md is current."""
+    """The predicted counts and bands, and analysis/param_counts.md is current."""
     base = counts["hybrid_legal_base"]
     assert round(base["non_embedding"] / 1e6, 1) == 104.1 and round(base["total"] / 1e6, 1) == 220.8
     predicted = {
@@ -200,8 +200,7 @@ def test_param_bands(counts):
 
 
 def test_legacy_delta_is_the_stated_difference(counts):
-    """S5 (legacy recipe): the pre-registered <= 1% did not hold (+2.36%); the user decided on
-    2026-09-27 (plan §14) to report it as a stated difference inside ±2.5%, not to reshape the arm.
+    """S5 (legacy recipe): the <= 1% target did not hold (+2.36%); it is reported as a stated difference inside ±2.5%, not to reshape the arm.
     Pinned to the measured value so a config change is loud."""
     delta = counts["hybrid_legal_legacy"]["delta_pct"]
     assert abs(delta - 2.36) < 0.005 and abs(delta) <= 2.5

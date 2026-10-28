@@ -1,4 +1,4 @@
-"""Rechtsprechung im Internet: decisions of the German federal courts (plan P3-G).
+"""Rechtsprechung im Internet: decisions of the German federal courts.
 
 Source: ``https://www.rechtsprechung-im-internet.de/rii-toc.xml`` (~23 MB) lists every published
 decision (court, date, docket, zip link). Each zip holds one XML ``<dokument>``: ``gertyp`` (BGH,
@@ -10,9 +10,9 @@ part is a sequence of ``<dl class="RspDL">`` entries: a ``<dt>`` that may carry 
 
 One ``Document`` per decision; each non-empty entry is a ``Section`` labelled ``Rn. N`` when it has
 a Randnummer, otherwise by its part (``Tenor``, ``Leitsatz``), and every section records its part
-(``Section.part``: the retriever chunks a decision part by part, P7-B). ``valid_from`` is the
+(``Section.part``: the retriever chunks a decision part by part). ``valid_from`` is the
 decision date.
-The published decisions are already anonymised; the LER scrub (P3-R) still runs over them.
+The published decisions are already anonymised; the LER scrub still runs over them.
 Licence: official work under § 5 UrhG (register row ``rii``).
 """
 

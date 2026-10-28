@@ -1,4 +1,4 @@
-"""Training utilities: WSD, beta2 anneal, optimizer groups, Lightning module, SLURM callback (P1-O/P)."""
+"""Training utilities: WSD, beta2 anneal, optimizer groups, Lightning module, SLURM callback."""
 
 import math
 
@@ -70,7 +70,7 @@ def test_parameter_groups_exclude_norms_biases_and_embeddings_from_decay(tied):
     decayed = {names[id(p)] for p in decay["params"]}
     assert not any(("bias" in n) or ("norm" in n) or ("embed" in n) for n in decayed)
     assert no_decay["weight_decay"] == 0.0
-    # Untied, the head is an ordinary decayed matrix. Tied (the default since P2-M), the shared
+    # Untied, the head is an ordinary decayed matrix. Tied (the default), the shared
     # tensor is listed once, under its embedding name, and is not decayed.
     assert ("lm_head.weight" in decayed) is (not tied)
     assert len(decay["params"]) + len(no_decay["params"]) == len(list(model.parameters()))
@@ -141,7 +141,7 @@ def test_signal_callback_saves_once(tmp_path):
     assert saved == [str(tmp_path / "ckpt" / "interrupt.ckpt")]
 
 
-# -- distillation (P2-T) -----------------------------------------------------------------------
+# -- distillation -----------------------------------------------------------------------
 
 
 def _kd_inputs(batch=2, length=37, dim=16, teacher_dim=24, vocab=50, seed=0):
@@ -171,7 +171,7 @@ def _full_kd(hidden, teacher_hidden, targets, head, teacher_head, alpha, T):
 
 @pytest.mark.parametrize("slab", [8, 37, 512], ids=lambda s: f"slab{s}")
 def test_slab_kl_equals_full_kl_small(slab):
-    """P2-T: the slab-wise, checkpointed CE + KL equals the materialised computation -- value and
+    """The slab-wise, checkpointed CE + KL equals the materialised computation -- value and
     gradients -- with -100 targets inside and at the end of a slab."""
     from lexhybrid.training.distill import slab_ce_kl
 
@@ -220,7 +220,7 @@ def _tiny_hf_teacher(arch):
 
 @pytest.mark.parametrize("arch", ["qwen2", "qwen3"])
 def test_teacher_position_ids_isolation(arch):
-    """Decision 9: a packed row reaches the teacher with per-document position ids and a block-
+    """A packed row reaches the teacher with per-document position ids and a block-
     diagonal mask, so every document's teacher logits equal the standalone run (1e-3; exact in
     fp32 here). Offline: a tiny random model built from a transformers config."""
     from lexhybrid.training.distill import teacher_forward_packed, teacher_inputs_packed
@@ -262,7 +262,7 @@ class _LargestTensor(torch.utils._python_dispatch.TorchDispatchMode):
 
 
 def test_peak_memory_scales_with_slab_not_row():
-    """P2-T: with the slab loss the largest tensor ever allocated -- forward and backward -- is
+    """With the slab loss the largest tensor ever allocated -- forward and backward -- is
     one slab's logits, whatever the row length; materialised logits grow with the row."""
     from lexhybrid.training.distill import slab_ce_kl
 
@@ -281,7 +281,7 @@ def test_peak_memory_scales_with_slab_not_row():
     assert mode.largest >= batch * 1024 * vocab
 
 
-# -- pretraining module and entry point (P2-U) -------------------------------------------------
+# -- pretraining module and entry point -------------------------------------------------
 
 
 def _compose(*overrides):
@@ -297,7 +297,7 @@ def _compose(*overrides):
 
 @pytest.mark.parametrize("trainer_name", ["cpu_debug", "h100_single_gpu", "h100_multi_ddp"])
 def test_val_check_interval_product(trainer_name, script):
-    """Defect 12: validation cadence is set in optimizer steps and converted to Lightning's
+    """Validation cadence is set in optimizer steps and converted to Lightning's
     micro-batch count as val_every_opt_steps * accumulate_grad_batches."""
     tp = script("train_pretrain")
     cfg = _compose(f"trainer={trainer_name}")
@@ -312,7 +312,7 @@ def test_val_check_interval_product(trainer_name, script):
 
 
 def test_ddp_strategy_is_built_explicitly(script):
-    """...and it launches its own ranks inside the one SLURM task (P6-A): under SLURM, Lightning
+    """...and it launches its own ranks inside the one SLURM task: under SLURM, Lightning
     would otherwise take SLURM_NTASKS=1 as the world and expect srun to start the other ranks."""
     from lightning_fabric.plugins.environments import LightningEnvironment
     from pytorch_lightning.strategies import DDPStrategy
@@ -349,7 +349,7 @@ def test_only_the_launcher_rank_writes_run_metadata(script, monkeypatch):
 
 @pytest.mark.parametrize("name", ["qwen3_1p7b", "qwen3_8b"])
 def test_build_teacher_loads_the_pinned_revision_offline(name, script, monkeypatch):
-    """Job 2589362: offline, a teacher loaded without its revision resolves refs/main, which the
+    """Offline, a teacher loaded without its revision resolves refs/main, which the
     pinned 1.7B snapshot never wrote. build_teacher passes the config's revision through."""
     import transformers
 
@@ -370,7 +370,7 @@ def test_build_teacher_loads_the_pinned_revision_offline(name, script, monkeypat
 
 
 def test_arch_only_prints_the_fingerprint_and_trains_nothing(tmp_path, script, capsys):
-    """The wrappers' step-0 check (FL1): `+arch_only=true` prints the ARCH line of exactly the model
+    """The wrappers' step-0 check: `+arch_only=true` prints the ARCH line of exactly the model
     the overrides describe, on meta, and writes nothing."""
     tp = script("train_pretrain")
     out = tmp_path / "out"
@@ -381,7 +381,7 @@ def test_arch_only_prints_the_fingerprint_and_trains_nothing(tmp_path, script, c
 
 
 def test_step_stats_callback_times_optimizer_steps(tmp_path, capsys):
-    """STEPSTATS (P4-T, P5-F): one timing per optimizer step, not per micro-batch; a line every
+    """STEPSTATS: one timing per optimizer step, not per micro-batch; a line every
     `every_n_steps` and a final one; peak memory is n/a without CUDA."""
     from lexhybrid.training.callbacks import StepStatsCallback
     from lexhybrid.training.lightning_module import HybridLightningModule
@@ -447,7 +447,7 @@ def _cpu_trainer(tmp_path, **kw):
 
 
 def test_nan_guard_skips_step(tmp_path):
-    """Defect 12: a non-finite loss returns None, so Lightning skips backward AND the optimizer step.
+    """A non-finite loss returns None, so Lightning skips backward AND the optimizer step.
     With weight decay 0.1 any step would move the weights even on zero gradients (the reference's
     leaf-tensor guard did exactly that); here they stay bit-identical, and the run stops after
     `max_nan_skips` consecutive skips."""
@@ -553,7 +553,7 @@ def test_train_pretrain_script_runs_and_resumes(tmp_path, script):
 
 
 def test_train_pretrain_runs_on_packed_shards(tmp_path, script):
-    """P3-V: the entry point trains on the packed-shard mixture (dataset=legal_smoke retargeted at
+    """The entry point trains on the packed-shard mixture (dataset=legal_smoke retargeted at
     shards built here with a toy one-id-per-character tokenizer)."""
     import json
 
@@ -645,7 +645,7 @@ def _diag_fit(tmp_path, callbacks, max_steps=4, **trainer_kw):
 
 
 def test_spike_diagnostics_log_every_part_without_changing_training(tmp_path):
-    """decisions.p5_divergence: per-part gradient and update norms every optimizer step, forward
+    """Spike diagnostics: per-part gradient and update norms every optimizer step, forward
     statistics (activations, mLSTM gates and half-range, attention logit bound, Mamba dt, head
     logits) every n steps; the weights end bit-identical to a run without the callback, and the
     TFLA patch is removed at teardown."""
@@ -739,7 +739,7 @@ def test_spike_diagnostics_flag_a_non_finite_gradient_first(capsys):
 
 
 def test_inspect_checkpoint_maps_adamw_state_to_parameter_names(tmp_path, script, monkeypatch, capsys):
-    """decisions.p5_divergence: the AdamW state of a Lightning checkpoint is indexed by position;
+    """The AdamW state of a Lightning checkpoint is indexed by position;
     the inspector names it through get_parameter_groups. Each named second moment must equal the
     live optimizer's for that parameter, and a checkpoint of another model is refused."""
     from lexhybrid.training.pretrain_module import PretrainLightningModule
@@ -777,7 +777,7 @@ def test_inspect_checkpoint_maps_adamw_state_to_parameter_names(tmp_path, script
 
 def test_val_perplexity_is_exp_of_the_token_weighted_mean_ce(tmp_path):
     """Screen attempt 1 logged val/perplexity as the mean of per-batch exp(CE): 31.69 where
-    exp(mean CE) was 8.19 (job 2636358). Two batches at CE 1 and 3 over 30 and 10 tokens must give
+    exp(mean CE) was 8.19. Two batches at CE 1 and 3 over 30 and 10 tokens must give
     exp(1.5) = 4.48, equal to exp(val/loss); the old rule gave (30e + 10e^3) / 40 = 7.06."""
     from lexhybrid.training.pretrain_module import PretrainLightningModule
 
@@ -802,7 +802,7 @@ def test_val_perplexity_is_exp_of_the_token_weighted_mean_ce(tmp_path):
      "hybrid_legal_legacy", "hybrid_legal_mtp", "transformer_legal_base"],
 )  # fmt: skip
 def test_legal_configs_train_with_adamw_beta2_095(model_cfg, script, capsys):
-    """decisions.p5_fix: every legal config's AdamW runs at beta2 0.95, and the yaml value reaches the
+    """Every legal config's AdamW runs at beta2 0.95, and the yaml value reaches the
     optimizer through train_pretrain.build_module (the OPTIM line the job log shows)."""
     tp = script("train_pretrain")
     module = tp.build_module(_compose(f"model={model_cfg}"), _tiny_student(), None)
@@ -831,7 +831,7 @@ def test_no_teacher_is_loaded_when_kd_alpha_is_0(script, capsys):
 
 
 def test_late_context_ppl_counts_document_context_and_matches_training_val_ce(script):
-    """P5-F's late-25% PPL (user's choice, 2026-10-13): a predicted token counts as late when at
+    """The late-25% PPL: a predicted token counts as late when at
     least late_from tokens of ITS OWN document precede it in the row; late_row is the row-position
     variant. The overall CE equals what training's validation_step logs as val/loss."""
     from lexhybrid.training.pretrain_module import PretrainLightningModule
@@ -912,7 +912,7 @@ def _schedule_fit(tmp_path, name, rows, stop=None, resume=None, accumulate=2, ba
 
 
 def test_a_resumed_run_reads_on_through_the_schedule_and_matches_an_unbroken_one(tmp_path):
-    """decisions.resume_data: Lightning restarts a plain loader at row 0 on resume (screen run S5's
+    """Lightning restarts a plain loader at row 0 on resume (screen run S5's
     continuation re-read its first rows). Stopped at step 4 (StopAtStepCallback, the LR horizon still
     8) and resumed, the run reads rows 16..31 and ends with the weights of an unbroken 8-step run."""
     rows = _IndexRows(100)
@@ -926,7 +926,7 @@ def test_a_resumed_run_reads_on_through_the_schedule_and_matches_an_unbroken_one
 
 
 def test_a_stage_on_a_new_schedule_starts_it_at_row_0_and_a_requeue_reads_on(tmp_path):
-    """P6 stage B: resumed from stage A's last step onto a shorter schedule of its own (8,192-token
+    """Stage B: resumed from stage A's last step onto a shorter schedule of its own (8,192-token
     rows), with another micro-batch and accumulation, it reads that schedule from its first row; a
     requeue inside stage B reads on. A schedule longer than stage A's count still never repeats."""
     _schedule_fit(tmp_path, "a", _IndexRows(100), stop=4)  # 8 micro-batches of stage A
@@ -1011,7 +1011,7 @@ def _ddp_fit(tmp_path, name, stop=None, resume=None):
 
 def test_schedule_sampler_splits_ddp_ranks_and_reads_on_after_a_resume(tmp_path):
     """Under DDP (two CPU ranks, gloo) each rank reads its own rows, r, r + 2, ...; stopped at step 2
-    and resumed, every rank reads on where it stopped (P6's four ranks and their requeues)."""
+    and resumed, every rank reads on where it stopped."""
     whole = _ddp_fit(tmp_path, "whole")
     assert whole == [[0, 2, 4, 6, 8, 10, 12, 14], [1, 3, 5, 7, 9, 11, 13, 15]]
     first = _ddp_fit(tmp_path, "a", stop=2)
@@ -1020,7 +1020,7 @@ def test_schedule_sampler_splits_ddp_ranks_and_reads_on_after_a_resume(tmp_path)
 
 
 def test_last_ckpt_holds_the_final_step_when_it_is_not_a_checkpoint_step(tmp_path):
-    """P6 stage B ends at step 18,037 with checkpoints every 1,000: without FinalCheckpointCallback
+    """Stage B ends at step 18,037 with checkpoints every 1,000: without FinalCheckpointCallback
     its last.ckpt would stop at 18,000. Here 5 steps with checkpoints every 2."""
     from pytorch_lightning.callbacks import ModelCheckpoint
 

@@ -1,4 +1,4 @@
-"""DIP, the Bundestag's documentation system: printed papers (Drucksachen) in full text (plan P3-M).
+"""DIP, the Bundestag's documentation system: printed papers (Drucksachen) in full text.
 
 Source: the DIP API ``https://search.dip.bundestag.de/api/v1/drucksache-text`` (OpenAPI 1.5): per
 request ten papers with their metadata (``dokumentnummer`` ``21/8109``, ``drucksachetyp``,

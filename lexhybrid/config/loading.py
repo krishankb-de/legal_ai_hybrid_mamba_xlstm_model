@@ -1,4 +1,4 @@
-"""Load a model yaml into a ``HybridConfig`` -- the one path every script uses (FM5).
+"""Load a model yaml into a ``HybridConfig`` -- the one path every script uses.
 
 A name resolves to ``configs/model/<name>.yaml`` in the repository; an existing path is used as is.
 The yaml goes through ``HybridConfig.from_hydra``, never a hand-written kwarg list.

@@ -1,7 +1,7 @@
 """``run_metadata.json``: what produced a checkpoint, written at the start of every run.
 
-Ported from the reference without its ``git`` subprocess calls (repository rule: the model runs
-no git command). Provenance is instead the ``.sync_stamp`` written by ``scripts/sync_to_cluster.sh``,
+Ported from the upstream implementation without its ``git`` subprocess calls, so a run needs no
+git binary. Provenance is instead the ``.sync_stamp`` written by ``scripts/sync_to_cluster.sh``,
 a content hash of the source tree, and the commit id read from ``.git/HEAD`` as a plain file when
 a ``.git`` directory is present.
 """

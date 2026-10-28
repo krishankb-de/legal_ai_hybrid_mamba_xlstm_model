@@ -1,4 +1,4 @@
-"""Reciprocal rank fusion of retrieval rankings (plan P7-E; Cormack, Clarke and Büttcher 2009).
+"""Reciprocal rank fusion of retrieval rankings (Cormack, Clarke and Büttcher 2009).
 
 A chunk's fused score is the sum, over the rankings that contain it, of ``1 / (k + rank)``, with
 1-based ranks and ``k = 60``. Only ranks enter, never the raw scores, so BM25's unbounded scores and

@@ -10,11 +10,11 @@
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.log
 #
-# corpus_counts.sh -- the numbers of the P4-L verdict: documents and characters per source,
+# corpus_counts.sh -- documents and characters per source,
 # jurisdiction and licence from the collection manifests, tokens estimated from a stride sample of
 # each source (scripts/corpus_counts.py; exact tokens come from pack_corpus.sh). CPU only. Submit:
 #   ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch scripts/slurm/corpus_counts.sh"
-# SOURCES and JURISDICTIONS default to the German market (decisions.market). The log ends in
+# SOURCES and JURISDICTIONS default to German law only. The log ends in
 # "CORPUS COUNTS DONE".
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"

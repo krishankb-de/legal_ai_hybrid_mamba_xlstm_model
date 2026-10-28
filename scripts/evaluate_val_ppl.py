@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validation PPL of a checkpoint, overall and late in context (plan P5-F's late-25% PPL; P6-G, P6-K).
+"""Validation PPL of a checkpoint, overall and late in context (the late-25% PPL).
 
     .venv/bin/python scripts/evaluate_val_ppl.py --checkpoint outputs/screen2_S1_s42/checkpoints/last.ckpt \\
         --model-config hybrid_legal_base --row-len 2048 --label screen2_S1_s42
@@ -10,7 +10,7 @@ Reads the same validation rows as training (``configs/dataset/mixture_pretrain.y
 fp32. ``ppl`` should therefore equal exp(``val/loss``) of the run's last validation. Two late
 subsets, both at ``--late-from`` (default 0.75 x row length = 1,536 of 2,048):
 
-* ``late_doc`` (**the late-25% PPL**, user's choice of 2026-10-13): predicted tokens with at least
+* ``late_doc`` (**the late-25% PPL**, the reported metric): predicted tokens with at least
   ``late_from`` tokens of their own document before them in the row. Packed rows restart position
   and recurrent state at every document, so this is the context the model can actually use.
 * ``late_row``: predicted tokens at row positions ``>= late_from``, whatever their document. It is

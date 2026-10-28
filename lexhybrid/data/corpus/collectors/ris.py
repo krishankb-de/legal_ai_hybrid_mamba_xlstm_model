@@ -1,12 +1,12 @@
 """RIS, the Austrian federal legal information system: consolidated federal law and Supreme Court
-decisions (plan P3-J).
+decisions.
 
 Source: the OGD API v2.6 at ``https://data.bka.gv.at/ris/api/v2.6/`` (CC BY 4.0, no registration).
 
 * ``Bundesrecht?Applikation=BrKons`` lists consolidated norms, one record per **version** of a
   provision: ``Abkuerzung`` (``ABGB``), ``ArtikelParagraphAnlage`` (``§ 688``),
   ``Inkrafttretensdatum`` / ``Ausserkrafttretensdatum`` -- the validity window, which the currency
-  changelog (P3-T) needs -- and links to the version's XML.
+  changelog needs -- and links to the version's XML.
 * ``Judikatur?Applikation=Justiz`` lists decisions; with ``Dokumenttyp.SucheInEntscheidungstexten``
   the full texts (``JJT_...``): ``Geschaeftszahl``, ``Entscheidungsdatum``, ECLI and the XML.
 
@@ -171,7 +171,7 @@ def _refs(page: dict) -> list[dict]:
 
 def _last_page(page: dict) -> int:
     """The search's page count. RIS answers a page past the end with HTTP 500 ("Die Seitennummer ist
-    höher als die Anzahl der verfügbaren Seiten"), not an empty list (job 2589358_4 died on it)."""
+    höher als die Anzahl der verfügbaren Seiten"), not an empty list."""
     hits = page.get("OgdSearchResult", {}).get("OgdDocumentResults", {}).get("Hits", {})
     n, size = int(hits.get("#text", 0)), int(hits.get("@pageSize", 50))
     return -(-n // size)

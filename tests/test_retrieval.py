@@ -1,4 +1,4 @@
-"""Retrieval (plan P7): chunking of statutes and decisions (P7-A, P7-B), on the collectors' fixtures."""
+"""Retrieval: chunking of statutes and decisions, on the collectors' fixtures."""
 
 import json
 from pathlib import Path
@@ -57,11 +57,11 @@ def _verbatim(chunk: Chunk, doc: Document) -> bool:
     return all(_norm(s) in source for s in chunk.sentences)
 
 
-# -- P7-A: statutes ----------------------------------------------------------------------------
+# -- statutes ----------------------------------------------------------------------------
 
 
 def test_statute_chunks_carry_hierarchy_and_dates():
-    """P7-A: one chunk per provision, hierarchy Gesetz -> structural headings -> § (then Absatz,
+    """One chunk per provision, hierarchy Gesetz -> structural headings -> § (then Absatz,
     Satz and Nr. in the sentence labels), the version's validity window, sentences verbatim and
     numbered for <|sJ|>."""
     doc = _gii()["BeurkG §3"]
@@ -115,11 +115,11 @@ def test_statute_labels_are_citation_ids_and_long_provisions_continue():
         chunk_statute(_rii())
 
 
-# -- P7-B: decisions ---------------------------------------------------------------------------
+# -- decisions ---------------------------------------------------------------------------
 
 
 def test_case_windows_keep_randnummer():
-    """P7-B: part by part (Leitsatz, Tenor, Tatbestand, Entscheidungsgründe), windows of 300-500
+    """Part by part (Leitsatz, Tenor, Tatbestand, Entscheidungsgründe), windows of 300-500
     tokens anchored at the Randnummern they cover; every sentence labelled at its Rn.; nothing
     lost or repeated."""
     doc = _rii()
@@ -183,7 +183,7 @@ def test_an_overlong_sentence_is_cut_into_window_sized_verbatim_pieces():
 
 
 def test_chunks_are_prompt_passages_and_dispatch_by_type():
-    """A chunk is one P3-Y passage (<= 64 sentences, no special-token markup) and round-trips
+    """A chunk is one prompt passage (<= 64 sentences, no special-token markup) and round-trips
     through the prompt format; statutes and decisions dispatch, other types are not indexed."""
     chunks = [*chunk_document(_gii()["BeurkG §3"]), *chunk_document(_rii())[:3]]
     example = Example("Wann darf der Notar nicht mitwirken?", tuple(c.passage() for c in chunks))
@@ -201,7 +201,7 @@ def test_chunks_are_prompt_passages_and_dispatch_by_type():
     assert chunks[0].copies == () and "Abschnitt 1 Allgemeine Vorschriften" in chunks[0].text
 
 
-# -- P7-C: BM25 --------------------------------------------------------------------------------
+# -- BM25 --------------------------------------------------------------------------------
 
 
 def _planted():
@@ -225,7 +225,7 @@ def _fixture_corpus() -> list[Document]:
 
 
 def test_bm25_finds_planted_passage(tmp_path):
-    """P7-C: German stopwords and stemming (inflected query words find the passage), numbers kept
+    """German stopwords and stemming (inflected query words find the passage), numbers kept
     (`§ 1 BeurkG`), a stopword-only query finds nothing, and a saved index answers the same."""
     from lexhybrid.retrieval.bm25 import BM25Index, tokenize
 
@@ -257,7 +257,7 @@ def test_bm25_finds_planted_passage(tmp_path):
 
 def test_build_index_writes_chunks_manifest_and_a_queryable_index(tmp_path, script):
     """scripts/build_index.py --kind bm25: scrubbed documents in, chunks.jsonl + bm25/ + index.json
-    out; general text is not indexed; a file under raw/ is refused (R11)."""
+    out; general text is not indexed; a file under raw/ is refused."""
     from lexhybrid.retrieval.bm25 import BM25Index
 
     scrubbed = tmp_path / "scrubbed"
@@ -292,7 +292,7 @@ def test_build_index_writes_chunks_manifest_and_a_queryable_index(tmp_path, scri
 
 
 def test_rrf_and_rerank_orderings():
-    """P7-E: reciprocal rank fusion (k 60) sums 1/(k + rank) over the rankings; ties break by best
+    """Reciprocal rank fusion (k 60) sums 1/(k + rank) over the rankings; ties break by best
     rank, then id. The reranker re-scores the fused top 50, sorts best first (ties keep the fused
     order) and keeps passages best first up to 8 chunks and 4,096 tokens, skipping one that does not fit."""
     import math
@@ -335,11 +335,11 @@ def test_rrf_and_rerank_orderings():
         rerank("frage", chunks[:3], lambda q, t: [1.0])
 
 
-# -- P7-F: filters, index versions, re-sync ----------------------------------------------------
+# -- filters, index versions, re-sync ----------------------------------------------------
 
 
 def test_valid_on_filter():
-    """P7-F: a chunk is valid on d when valid_from <= d <= valid_to (both inclusive, a missing bound
+    """A chunk is valid on d when valid_from <= d <= valid_to (both inclusive, a missing bound
     open); undated chunks are always kept; jurisdiction and doc_type filters keep input order; an
     unknown jurisdiction, doc_type or malformed date is rejected."""
     import dataclasses
@@ -420,7 +420,7 @@ def _snapshot(directory: Path) -> dict:
 
 
 def test_index_registry_versions_increment_idempotently_and_atomically(tmp_path, script, monkeypatch):
-    """P7-F index.py: register records index.json + the sha256 of chunks.jsonl as the next version;
+    """index.py: register records index.json + the sha256 of chunks.jsonl as the next version;
     the same directory with unchanged chunks is a no-op; a rebuild in place is a new version; a failed
     write leaves the registry as it was and no temporary file behind."""
     import hashlib
@@ -477,7 +477,7 @@ def test_index_registry_versions_increment_idempotently_and_atomically(tmp_path,
 
 
 def test_resync_index_records_what_would_change_and_leaves_the_index_alone(tmp_path, script, capsys):
-    """P7-F scripts/resync_index.py: the documents an index was built from (documents.jsonl) against
+    """scripts/resync_index.py: the documents an index was built from (documents.jsonl) against
     the current ones -- added, removed, changed (text or the metadata chunks carry; retrieved_at does
     not count) -- reported exactly, one RESYNC line printed, and the index directory unchanged."""
     import dataclasses
@@ -620,7 +620,7 @@ def test_a_failed_rebuild_leaves_no_index_to_register_or_resync(tmp_path, script
 
 
 def test_cross_source_copies_are_grouped_and_reach_the_chunks(tmp_path, script):
-    """decisions.cite_every_copy: dedup.jsonl rows with dropped false link copies across sources;
+    """Every copy is cited: dedup.jsonl rows with dropped false link copies across sources;
     linked documents group transitively (A-B, B-C -> A, B, C); dropped duplicates link nothing;
     build_index --dedup writes the group's other documents into every chunk's copies."""
     import json

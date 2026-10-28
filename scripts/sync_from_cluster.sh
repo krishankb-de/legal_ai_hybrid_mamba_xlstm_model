@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# sync_from_cluster.sh -- pull job logs or analysis files from the cluster (plan P4-D, rule f).
+# sync_from_cluster.sh -- pull job logs or analysis files from the cluster.
 #
 #   bash scripts/sync_from_cluster.sh logs       # $CLUSTER_REPO/logs/     -> cluster/logs/
 #   bash scripts/sync_from_cluster.sh analysis   # $CLUSTER_REPO/analysis/ -> cluster/analysis/
 #
 # Only logs/ and analysis/ are allowed: never outputs/ (checkpoints stay on scratch), never
-# --delete (a file removed on the cluster stays here as evidence).
+# --delete (a file removed on the cluster stays here, kept locally).
 
 set -euo pipefail
 
@@ -24,7 +24,7 @@ esac
 
 ENV_FILE="${CLUSTER_ENV:-$REPO_ROOT/scripts/slurm/cluster.env}"
 if [[ ! -f "$ENV_FILE" ]]; then
-  echo "missing $ENV_FILE: copy scripts/slurm/cluster.env.example and fill it (plan P4-A)" >&2
+  echo "missing $ENV_FILE: copy scripts/slurm/cluster.env.example and fill it" >&2
   exit 1
 fi
 # shellcheck source=/dev/null

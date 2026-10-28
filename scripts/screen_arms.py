@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
-"""The P5 screen's arm table: one source for preflight, submission and the ARCH check (plan P2-X).
+"""The architecture screen's arm table: one source for preflight, submission and the ARCH check.
 
     .venv/bin/python scripts/screen_arms.py list
     .venv/bin/python scripts/screen_arms.py env S1-s43        # what the SLURM wrapper evals on the node
     .venv/bin/python scripts/screen_arms.py verify --reduced  # small width, one forward/backward per arm
     .venv/bin/python scripts/screen_arms.py verify --full     # full size on `meta`, plus parameter bands
 
-Pattern of the reference's ``scripts/mamba3_arms.py`` (port map §11.5): every arm is a config, the
-model overrides that make it, the one lever it isolates (R3), the tokens its ARCH line must show
-(so a lever that silently fails to reach the model stops the job at step 0 -- FM5), and a walltime.
+Pattern of the upstream reference implementation's ``scripts/mamba3_arms.py``: every arm is a config, the
+model overrides that make it, the one lever it isolates, the tokens its ARCH line must show
+(so a lever that silently fails to reach the model stops the job at step 0), and a walltime.
 ``ARM`` names are ``<arm>-s<seed>`` and are resolved on the compute node, never on the login node.
 
-The screen settings (plan P5) are one table, ``SCREEN``, emitted as Hydra overrides by ``env``.
-S5 (legacy recipe) is a stated difference, +2.36% inside ±2.5% (the user's decision of 2026-09-27,
-plan §14): it measures the old operators, PPL/probe-only, and is not reshaped to match.
+The screen settings are one table, ``SCREEN``, emitted as Hydra overrides by ``env``.
+S5 (legacy recipe) is a stated difference, +2.36% inside ±2.5%: it measures the old operators, PPL/probe-only, and is not reshaped to match.
 """
 
 import argparse
@@ -31,12 +30,12 @@ from lexhybrid.config import load_model_config
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SEEDS = (42, 43)
 BASE_ARM = "S1"
-# Screen attempt 2 (decisions.p5_fix, 2026-10-11): AdamW beta2 0.95 in every arm's yaml, S6 without the
+# Screen attempt 2: AdamW beta2 0.95 in every arm's yaml, S6 without the
 # teacher. Its runs live in outputs/screen2_<arm>_s<seed>, so none resumes from attempt 1's
 # step-12,000 last.ckpt in outputs/screen_<arm>_s<seed>.
 ATTEMPT = 2
 
-# Plan P5: 12,000 steps, 2,048-token rows, micro-batch 8 x accum 2 (32,768 tokens/step), warmup 500,
+# Screen settings: 12,000 steps, 2,048-token rows, micro-batch 8 x accum 2 (32,768 tokens/step), warmup 500,
 # LR 4e-4, clip 1.0, WSD, SAVE_TOP_K 0, validation every 4,000 optimizer steps.
 SCREEN: dict[str, Any] = {
     "trainer.max_steps": 12000,
@@ -103,7 +102,7 @@ ARMS: dict[str, Arm] = {
         ["mambax9", "mlstmx3", "scan_impl=legacy", "tfla_impl=legacy"],
         forbid=["attention", "mamba3("],
         walltime="24:00:00",
-        band_pct=2.5,  # +2.36%, delta reported (user decision 2026-09-27)
+        band_pct=2.5,  # +2.36%, delta reported
     ),
     "S6": Arm(
         "hybrid_legal_base",
@@ -213,9 +212,7 @@ def verify(reduced: bool, full: bool) -> list[str]:
                 f"    {arm_name}: non-embedding {counts[arm_name]:,} ({delta:+.2f}%, {band}) {'ok' if ok else 'FAIL'}"
             )
             if not ok:
-                problems.append(
-                    f"{arm_name}: non-embedding delta {delta:+.2f}% outside the pre-registered {band}"
-                )
+                problems.append(f"{arm_name}: non-embedding delta {delta:+.2f}% outside the allowed {band}")
     return problems
 
 

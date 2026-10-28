@@ -1,4 +1,4 @@
-"""Swiss Federal Supreme Court (Bundesgericht) decisions in German, via entscheidsuche.ch (plan P3-L).
+"""Swiss Federal Supreme Court (Bundesgericht) decisions in German, via entscheidsuche.ch.
 
 Source: entscheidsuche.ch republishes every decision the court puts online (``CH_BGer``: 178,635
 since 2000, 109,262 of them in German, on 2026-09-27), one HTML file per decision under
@@ -28,7 +28,7 @@ One ``Document`` per decision (``BGer 4A_102/2026``); sections are the heading l
 facts (``Sachverhalt A``), the considerations (``E. 3.1``, the unit Swiss decisions are cited by),
 the operative part (``Dispositiv Ziff. 1``) and the closing (``Schluss``). ``valid_from`` is the
 decision date. Licence: decisions are unprotected (Art. 5 Abs. 1 lit. c URG; register row
-``bger``, whose note records that entscheidsuche.ch's own terms are confirmed before P4).
+``bger``, whose note records that entscheidsuche.ch's own terms are confirmed before use).
 """
 
 import re

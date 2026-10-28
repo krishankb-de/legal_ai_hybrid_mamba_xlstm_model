@@ -1,10 +1,8 @@
-"""Entailment of a claim by its cited sources (plan P7-I, P7-J): the NLI step of the verifier.
+"""Entailment of a claim by its cited sources: the NLI step of the verifier.
 
 An NLI model is any callable ``(premise, hypothesis) -> float``, the probability that the premise
 entails the hypothesis; the verifier passes a claim when it is at least ``ENTAILMENT_THRESHOLD``.
-The threshold, 0.5 on the entailment probability, was pre-registered in ``pre_registered.P7.nli_threshold``
-on 2026-10-27, before any calibration; P7-I calibrates on a hand-built set afterwards and the
-pre-registered value ships unless its precision is below 0.85.
+0.5 is the default entailment threshold; calibrate it on held-out pairs before relying on it.
 
 ``MDebertaNLI`` is the production model, ``MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7``
 (multilingual, German included), loaded lazily on first call from the Hugging Face cache (offline on
@@ -20,7 +18,7 @@ stand-in callables; the model is never loaded offline.
 from collections.abc import Callable, Mapping
 
 NLI_MODEL = "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7"
-ENTAILMENT_THRESHOLD = 0.5  # pre_registered.P7.nli_threshold, 2026-10-27
+ENTAILMENT_THRESHOLD = 0.5  # fixed before calibration
 
 NLI = Callable[[str, str], float]
 

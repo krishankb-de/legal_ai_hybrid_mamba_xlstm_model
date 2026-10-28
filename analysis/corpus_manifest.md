@@ -1,29 +1,25 @@
-# P4 results — the German-market pretraining corpus: tokens, deduplication, scrub
+# German-law pretraining corpus: tokens, deduplication, scrub
 
-> **Written:** 2026-10-03, plan item P4-M. **Plan:** `LEGAL_BUILD_PLAN.md` · **State:** `legal_build_state.json`.
-> **Measured:** aisc CPU nodes (collection, counts, pack) and 1×H100 80 GB per scrub task; pack job 2599735 on gx08 (32 workers, 1 h 44 min, 22.9 GB peak RSS), jobs listed in §8. Logs under `cluster/logs/<name>_<id>.log`.
-> **Precedence:** the exact token counts below (pack 2599735, `build_summary.json`) replace the P4-L estimates (job 2593359), which were taken before deduplication and scrub; §3.4 compares the two.
+Exact token counts for the packed pretraining corpus, with the deduplication and entity-scrub statistics behind them.
 
-## 1. Summary
+**Setup.** Collection, counts and packing ran on CPU nodes; the scrub ran on 1×H100 80 GB per task. The pack step ran on one node with 32 workers (1 h 44 min, 22.9 GB peak RSS). Token counts use the Qwen3 tokenizer. The exact counts below (from `build_summary.json` of the pack) replace an earlier estimate taken before deduplication and scrub; the comparison is in "Estimate vs exact".
 
-1. **Commercial-safe training tokens: 6,092,655,089** (Qwen3 tokenizer, 5 sources, after scrub and deduplication; 75,026,585 more in validation). Of these 4,225,013,660 are legal text and 1,867,641,429 general German (fineweb2_de). (job 2599735)
-2. **Research arm: 7,474,326,564 training tokens** — the commercial-safe set plus multilegalpile's German rows (1,381,671,475, CC BY-NC-SA 4.0). (job 2599735)
-3. **P6 token budget = min(5 B, 6.09 B) = 5,000,000,000 tokens.** Both parts of decision 13's mix are covered: 3.5 B legal (70%) from 4.23 B available, 1.5 B general German (30%) from 1.87 B. (job 2599735)
-4. **Deduplication** over 2,885,936 documents: 30,597 within-source duplicates dropped (1.06%; dip the highest at 12.3%), 241,242 cross-source copies kept and linked (8.36%). 73% of rii decisions and 74% of multilegalpile rows have a copy in another source, mostly oldp; under decision 13 as amended both copies are trained on. (job 2599735)
-5. **Scrub:** 15,960,418 person/judge/lawyer/street entities replaced across 2,886,503 documents of 7 sources, about 83 H100-hours over the completed parts. (jobs 2593360, 2593479, 2594823, 2599609)
-6. **Scope** (user decisions): Germany only (2026-10-02) — ris, fedlex, bger and multilegalpile's 325,593 Swiss rows are out; eurlex is collected and scrubbed but out of training (2026-10-03: 565 documents cannot give the ≥ 2,000-document validation split). Both remain available to retrieval (P7).
+## Summary
 
-## 2. What was pre-registered, and what happened
+1. **Commercial-safe training tokens: 6,092,655,089** (5 sources, after scrub and deduplication; 75,026,585 more in validation). Of these 4,225,013,660 are legal text and 1,867,641,429 general German (fineweb2_de).
+2. **Research arm: 7,474,326,564 training tokens**: the commercial-safe set plus multilegalpile's German rows (1,381,671,475, CC BY-NC-SA 4.0).
+3. **Pretraining token budget = min(5 B, 6.09 B) = 5,000,000,000 tokens.** Both parts of the planned mix are covered: 3.5 B legal (70%) from 4.23 B available, 1.5 B general German (30%) from 1.87 B.
+4. **Deduplication** over 2,885,936 documents: 30,597 within-source duplicates dropped (1.06%; dip the highest at 12.3%), 241,242 cross-source copies kept and linked (8.36%). 73% of rii decisions and 74% of multilegalpile rows have a copy in another source, mostly oldp; both copies are trained on.
+5. **Scrub:** 15,960,418 person/judge/lawyer/street entities replaced across 2,886,503 documents of 7 sources, about 83 H100-hours over the completed parts.
+6. **Scope:** Germany only. ris (AT), fedlex and bger (CH) and multilegalpile's 325,593 Swiss rows are out of training because pretraining covers German law only. eurlex is collected and scrubbed but out of training (565 documents cannot give the minimum 2,000-document validation split). All remain available to retrieval.
 
-| Prediction (written before submission) | Outcome | Verdict |
-|---|---|---|
-| None for the corpus. P4's pre-registered line covers profiling (`analysis/profile_results.md`). | — | n/a |
+## Budget rule
 
-Decision rule as written in the plan before the numbers: "token budget for P6 set to `min(5B, available commercial-safe)`". Value: available commercial-safe training tokens 6,092,655,089 > 5 B, so **budget = 5 B**.
+The budget rule was fixed before the numbers: token budget = `min(5B, available commercial-safe)`. Available commercial-safe training tokens are 6,092,655,089 > 5 B, so **budget = 5 B**.
 
-## 3. Results
+## Results
 
-### 3.1 Tokens per source, jurisdiction, licence and arm (exact; pack 2599735)
+### Tokens per source, jurisdiction, licence and arm (exact)
 
 Train and validation are split by document (0.1%, at least 2,000 documents per source, seed 0). Both row lengths come from one tokenisation, so the token counts are identical at 4,096 and 8,192.
 
@@ -38,9 +34,9 @@ Train and validation are split by document (0.1%, at least 2,000 documents per s
 | multilegalpile (German rows) | DE | CC-BY-NC-SA-4.0 | research only | 244,950 | 1,381,671,475 | 2,000 | 11,092,158 | 337,323 | 168,662 |
 | **research total** | | | | **2,843,339** | **7,474,326,564** | **12,000** | **86,118,743** | **1,824,791** | **912,397** |
 
-Not in training: eurlex (EU, CC-BY-4.0; 567 collected, 565 after its own deduplication, ~0.3 M tokens estimated) by `decisions.eurlex_training`; ris (AT), fedlex and bger (CH), and multilegalpile's CH rows by `decisions.market`.
+Not in training: eurlex (EU, CC-BY-4.0; 567 collected, 565 after its own deduplication, ~0.3 M tokens estimated) because 565 documents cannot fill the 2,000-document validation split; ris (AT), fedlex and bger (CH) and multilegalpile's CH rows because pretraining covers German law only. All remain available to retrieval.
 
-### 3.2 Deduplication (P3-S; decision 13 as amended: drop within a source, keep and link across)
+### Deduplication (drop within a source, keep and link across)
 
 2,885,936 documents entered (the six packed sources); 30,597 dropped, 241,242 linked. Collected minus kept equals the dropped count for every source.
 
@@ -67,7 +63,7 @@ Cross-source copies, kept in both sources and linked in `data/shards/<L>/dedup.j
 | rii | fineweb2_de | 0 | 13 | 13 |
 | fineweb2_de | dip | 0 | 1 | 1 |
 
-### 3.3 Scrub (P3-R; `flair/ner-german-legal`, tags PER/RR/AN/STR)
+### Scrub (`flair/ner-german-legal`, tags PER/RR/AN/STR)
 
 Per source, summed over its 8 parts from the final line of each completed task's log (failed and cancelled attempts excluded). All 7 scrubbed sources are listed, eurlex included.
 
@@ -82,9 +78,9 @@ Per source, summed over its 8 parts from the final line of each completed task's
 | multilegalpile (DE) | 254,573 | 1,764,626 | 6.93 | 13.3 |
 | **total** | **2,886,503** | **15,960,418** | | **83.0** |
 
-### 3.4 P4-L estimate vs exact
+### Estimate vs exact
 
-The P4-L estimate (job 2593359) multiplied each source's collected characters by the tokens per character of a 2,000-document stride sample, before scrub and deduplication. Exact = train + validation tokens of the pack.
+The earlier estimate multiplied each source's collected characters by the tokens per character of a 2,000-document stride sample, before scrub and deduplication. Exact = train + validation tokens of the pack.
 
 | source | estimate | exact | exact / estimate |
 |---|---:|---:|---:|
@@ -95,34 +91,31 @@ The P4-L estimate (job 2593359) multiplied each source's collected characters by
 | fineweb2_de | 1,857,435,129 | 1,869,502,121 | 1.006 |
 | multilegalpile (DE) | 1,425,721,823 | 1,392,763,633 | 0.977 |
 
-The gaps track each source's within-source drop rate (dip 12.3% → 0.876); the sample estimator itself was within about 1–3%.
+Where a source drops many documents the gap follows its within-source drop rate (dip 12.3% → 0.876, rii 4.59% → 0.947), but not everywhere (gii drops 5.10% yet sits at 0.982); the sample estimator itself was within about 1-3% for the other sources.
 
-## 4. Efficiency
+### Efficiency
 
-| step | resource | wall / cost | job |
-|---|---|---|---|
-| scrub, 56 parts | 1×H100 per part | 83.0 H100-hours (completed parts); largest part (oldp) ≈ 3.5 h | 2593360, 2593479, 2594823, 2599609 |
-| pack (dedup + split + pack at two lengths) | 32 CPUs | 1 h 44 min, 22.9 GB peak RSS; 12 GB of shards per row length | 2599735 |
+| step | resource | wall / cost |
+|---|---|---|
+| scrub, 56 parts | 1×H100 per part | 83.0 H100-hours (completed parts); largest part (oldp) ≈ 3.5 h |
+| pack (dedup + split + pack at two lengths) | 32 CPUs | 1 h 44 min, 22.9 GB peak RSS; 12 GB of shards per row length |
 
-## 5. What this licenses
+## Discussion
 
-- P6 can train a 5 B-token budget on commercial-safe data alone, at decision 13's 70/30 legal/general mix, without repeating a source.
-- Every packed document was scrubbed (`meta.json` records `scrubbed: true` for all six sources), and document ids are unique within each source (the deduplication now refuses repeated ids).
+- A 5 B-token pretraining budget can be trained on commercial-safe data alone, at the 70/30 legal/general mix. The square-root source weights repeat the small sources (`configs/dataset/mixture_pretrain.yaml`: gii 4.00 passes, rii 1.53, dip 1.26; oldp 0.59 and fineweb2_de 0.80 are below one).
+- Every packed document was scrubbed (`meta.json` records `scrubbed: true` for all six sources), and document ids are unique within each source (the deduplication refuses repeated ids).
 - multilegalpile is a shard set of its own, so the commercial-safe arm never reads CC BY-NC-SA text.
 
-## 6. Not licensed
+## Limitations
 
 - No claim about **unique** legal content: 73% of rii and 74% of multilegalpile documents have a near or exact copy in oldp (or gii), and both copies are counted in the tokens above. The commercial-safe legal total therefore overstates distinct text by roughly rii's linked share.
 - No precision or recall claim for the scrub at corpus scale: the counts are what the tagger replaced, not a measured miss rate. The fineweb2_de count (4.5 entities per page) includes whatever the legal NER tags in web text.
 - No claim that EU law is in the pretraining data: eurlex is out of training.
-
-## 7. Open limitations
-
-- The scrub log was not broken down by tag (PER/RR/AN/STR) here; `data/manifests/scrub_<src>.part-*-of-8.jsonl` holds one row per entity for that.
+- The scrub counts were not broken down by tag (PER/RR/AN/STR) here; the per-part scrub logs on the cluster (under `$SCRATCH_ROOT/data/manifests/`) hold one row per entity for that.
 - Some documents are longer than the tokenizer's 131,072-token context (transformers warned five times during the pack). Packing cuts them into rows, so this is harmless for training; it matters only to anything that feeds a whole document to Qwen3.
-- gii ids changed on 2026-10-03 (1,132 provisions inside articles now carry `art<n>:` ids). The retrieval chunks and BM25 index built ahead of phase (P7) predate that and must be rebuilt.
+- gii ids changed after the counts above were first collected (1,132 provisions inside articles now carry `art<n>:` ids). Retrieval chunks and a BM25 index built before that change must be rebuilt.
 - fineweb2_de is capped at 2,000,000 pages (collection limit), so its 1.87 B tokens are a sampling choice, not the source's size.
 
-## 8. Reproduction
+## Reproduction
 
-Key jobs: collection 2589358, 2589414, 2589572 (+ gii from cache 2599608); counts 2593359; scrub 2593360 (pilot), 2593479, 2594823 (fixes: whitespace-only spans, 4,096-character pieces), 2599609 (gii, `FORCE=1`); pack 2594824 (FAILED: repeated gii ids), 2599610 (FAILED: eurlex below the validation minimum), **2599735 (the record)**. Wrappers: `scripts/slurm/build_corpus_array.sh`, `scripts/slurm/corpus_counts.sh`, `scripts/slurm/scrub_array.sh` (`SOURCES`, `PARTS=8`, `JURISDICTIONS="DE EU"`), `scripts/slurm/pack_corpus.sh` (`SOURCES` without eurlex). Sync stamp of the pack: `2026-10-03T12:38:00Z 64de6f52…`. Shards (cluster-only): `$SCRATCH_ROOT/data/shards/{4096,8192}/<source>/{train,val}/`, `build_summary.json`, `<L>/dedup.jsonl`. Every number above has a job id and a log path (R12).
+Wrappers: `scripts/slurm/build_corpus_array.sh`, `scripts/slurm/corpus_counts.sh`, `scripts/slurm/scrub_array.sh` (`SOURCES`, `PARTS=8`, `JURISDICTIONS="DE EU"`), `scripts/slurm/pack_corpus.sh` (`SOURCES` without eurlex). Fixes made along the way: whitespace-only spans and 4,096-character pieces in the scrub, gii rescrubbed with `FORCE=1`; earlier pack attempts failed on repeated gii ids and on eurlex falling below the validation minimum. Shards (cluster-only): `$SCRATCH_ROOT/data/shards/{4096,8192}/<source>/{train,val}/`, `build_summary.json`, `<L>/dedup.jsonl`.

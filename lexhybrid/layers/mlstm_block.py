@@ -1,15 +1,15 @@
 """mLSTM (matrix LSTM) mixer from xLSTM, with exponential input gating and chunked TFLA.
 
-P1 port of the reference block with two removals: ``use_tfla``/``_slow_forward`` (the sequential
+Port of the reference block with two removals: ``use_tfla``/``_slow_forward`` (the sequential
 path computed a *different* function from TFLA -- LSE-stabilised with an ``abs`` clamp, 0.42 max
 abs apart at L=24 -- and no checkpoint ever trained on it), and the sLSTM sibling.
 
-P2 fixes: the ``mlstm_*`` config keys reach this block (defect 2, P2-A, in ``HybridBlock``); the
-gate-bias init survives the model's weight pass through ``post_model_init`` (defect 3, P2-B); the
-TFLA chunk size is the block's (defect 9, P2-C); and document boundaries are masks inside the
-TFLA kernel instead of the reference's per-(row, segment) Python loop with a host sync per row
-(defect 15, P2-D); ``forward(x, cache)`` fills an empty decode cache with TFLA's final ``C``, ``n``
-so ``step`` continues after a one-pass prefill (P2-G).
+Differences from the reference: the ``mlstm_*`` config keys reach this block (in
+``HybridBlock``); the gate-bias init survives the model's weight pass through ``post_model_init``;
+the TFLA chunk size is the block's; and document boundaries are masks inside the TFLA kernel
+instead of the reference's per-(row, segment) Python loop with a host sync per row.
+``forward(x, cache)`` fills an empty decode cache with TFLA's final ``C``, ``n`` so ``step``
+continues after a one-pass prefill.
 """
 
 import torch
@@ -101,13 +101,13 @@ class mLSTMBlock(nn.Module):
         self.out_proj = nn.Linear(self.inner_dim, dim, bias=False)
 
         # Unused by the computation; kept because it is a persistent buffer in the reference state
-        # dict, and the P1 parity fixtures load strictly. P2 may drop it with a fixture note.
+        # dict, and the parity fixtures load strictly.
         self.register_buffer("eps", torch.tensor(1e-6))
 
         self.post_model_init()
 
     def post_model_init(self) -> None:
-        """(Re-)apply the gate-bias inits after the parent model's global weight pass (defect 3).
+        """(Re-)apply the gate-bias inits after the parent model's global weight pass.
 
         ``HybridLanguageModel._init_weights`` zeroes every ``nn.Linear`` bias, which in the reference
         silently replaced the -10 input-gate bias (keeps early exp-gates small) and the configured
@@ -141,7 +141,7 @@ class mLSTMBlock(nn.Module):
         Args:
             x: input.
             cache: an EMPTY cache from ``allocate_inference_cache``; when given, it is filled with
-                the fp32 ``C``, ``n`` after the last token (prefill, P2-G) and ``seen``.
+                the fp32 ``C``, ``n`` after the last token (prefill) and ``seen``.
             doc_ids: optional (batch, seq_len) per-position document ids; the matrix memory
                 restarts at every change of id, inside the TFLA kernel.
         """
@@ -189,15 +189,15 @@ class mLSTMBlock(nn.Module):
         h = h * torch.sigmoid(x_gate)
         return self.out_proj(h)
 
-    # -- O(1) recurrent decode (reference M6-B) ---------------------------------------------------
+    # -- O(1) recurrent decode -----------------------------------------------------------------
     supports_step = True
 
     def allocate_inference_cache(self, batch_size, device=None, dtype=torch.float32, max_seq_len=None):
         """mLSTM decode state: the matrix cell ``C`` and the normalizer ``n``, both zeros, fp32.
 
         ``dtype`` and ``max_seq_len`` are accepted for interface parity and ignored: the state is
-        fp32 whatever the activations are (P2-E), as TFLA's carried state is, and does not grow. No ``m``: the recurrence has no
-        stabiliser to carry (the reference's ``m_state`` was never applied).
+        fp32 whatever the activations are, as TFLA's carried state is, and does not grow. No ``m``: the
+        recurrence has no stabiliser to carry (the reference's ``m_state`` was never applied).
         """
         device = device or self.out_proj.weight.device
         H, D = self.num_heads, self.head_dim
@@ -249,7 +249,7 @@ class mLSTMBlock(nn.Module):
         ki = (i_gate * k).float()
         q32, v32 = q.float(), v.float()
 
-        # The recurrence runs in fp32 (defect 16, P2-E): the reference cast the carried state to the
+        # The recurrence runs in fp32: the reference cast the carried state to the
         # activation dtype every token, so a bf16 decode rounded C and n to 8 mantissa bits per step.
         C = f_eff.unsqueeze(-1) * cache["C"].float() + torch.einsum("bhd,bhe->bhde", ki, v32)
         n = f_eff * cache["n"].float() + ki

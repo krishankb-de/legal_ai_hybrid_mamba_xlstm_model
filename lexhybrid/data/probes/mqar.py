@@ -1,4 +1,4 @@
-"""Multi-query associative recall, MQAR (plan P3-W), with the reference's ``configs/dataset/mqar.yaml``
+"""Multi-query associative recall, MQAR, with the upstream reference's ``configs/dataset/mqar.yaml``
 semantics (Zoology, Arora et al. 2023): a vocabulary of 8,192 ids split into keys (lower half) and
 values (upper half), 4 key-value pairs, 4 queries, query gaps drawn from a power law with
 ``a = 0.01``, a 2,048-token context, data seed 42.
@@ -34,7 +34,7 @@ class MQARItem:
     values: list[int]
 
 
-REFERENCE = MQARConfig()  # configs/dataset/mqar.yaml of the reference
+REFERENCE = MQARConfig()  # configs/dataset/mqar.yaml of the upstream reference
 
 
 def generate(num_items: int, cfg: MQARConfig = REFERENCE) -> list[MQARItem]:

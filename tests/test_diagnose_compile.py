@@ -1,4 +1,4 @@
-"""`scripts/diagnose_compile.py` (P4-J2 follow-up): the per-mixer, per-row drift report runs end to
+"""`scripts/diagnose_compile.py`: the per-mixer, per-row drift report runs end to
 end. CPU with the eager backend, so every row is exact; the H100 run is scripts/slurm/diag_compile.sh."""
 
 

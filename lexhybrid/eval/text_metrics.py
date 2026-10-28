@@ -1,7 +1,7 @@
 """Sentence ROUGE-L and corpus BLEU, stdlib only.
 
-Ported verbatim from the reference ``scripts/evaluate_report_generation.py`` (which is otherwise
-dropped) so ``scripts/bootstrap_compare.py`` reproduces the reference's point estimates exactly.
+Ported verbatim from the upstream reference ``scripts/evaluate_report_generation.py`` (which is otherwise
+dropped) so ``scripts/bootstrap_compare.py`` reproduces the upstream reference's point estimates exactly.
 These are self-contained implementations, not sacrebleu/rouge-score; compare systems scored by the
 same code, and do not quote the numbers as sacrebleu-comparable.
 """

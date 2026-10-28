@@ -1,11 +1,11 @@
-"""SLURM wrappers under `scripts/slurm/` (plan P4-E onward; P4-V completes the list).
+"""SLURM wrappers under `scripts/slurm/`.
 
-Static checks on every `*.sh` there: the header SLURM parses (port map §11.1), the facts learnt on
-the HPI cluster (global scratch only on GLB_SCRATCH nodes; ga03 is an ARM node; gx13v1 has a faulty
-GPU), and the repository rules (no git, `cd` to the submit dir, `--gpus` never `--gres`). Then the
+Static checks on every `*.sh` there: the header SLURM parses, the facts learnt on
+the cluster (global scratch exists only on some nodes, some nodes are ARM, one node is excluded for a
+faulty GPU), and the wrapper conventions (no git, `cd` to the submit dir, `--gpus` never `--gres`). Then the
 wrappers that decide something at run time are RUN, in a sandbox copy of the repository whose
-`.venv/bin/python` is a fake that records the entry points it is asked to start: the resume path
-(FL5), the ARCH check before step 0 (FL1), ARM resolved on the compute node, the probes, the
+`.venv/bin/python` is a fake that records the entry points it is asked to start: the resume path,
+the ARCH check before step 0, ARM resolved on the compute node, the probes, the
 profiler protocol and the corpus array.
 """
 
@@ -26,7 +26,7 @@ from tests.conftest import REPO_ROOT
 SLURM_DIR = REPO_ROOT / "scripts" / "slurm"
 WRAPPERS = sorted(SLURM_DIR.glob("*.sh"))
 EXCLUDED_NODES = {"ga03", "gx17v1", "gx13v1"}
-# `set -uo pipefail` without -e: a status report whose every section must run (port map §11.7)
+# `set -uo pipefail` without -e: a status report whose every section must run
 REPORTS = {"watch.sh"}
 
 
@@ -54,7 +54,7 @@ def test_there_are_wrappers():
 
 
 def test_every_planned_wrapper_exists():
-    """P4-V: the wrappers the plan's P4-P6 boxes name are all here."""
+    """The wrappers the pipeline names are all here."""
     planned = {
         "setup_env.sh", "fetch_hf.sh", "preflight.sh", "gpu_tests.sh", "multigpu_tests.sh",
         "build_corpus_array.sh", "probe_ckpt_size.sh", "profile.sh", "equivalence.sh",
@@ -73,7 +73,7 @@ def test_header(path):
         "ga03 is an ARM node (the x86 .venv cannot run there); gx13v1 has a faulty GPU"
     )
     assert d.get("constraint") == "GLB_SCRATCH", "/sc/scratch is mounted only on GLB_SCRATCH nodes"
-    assert "gres" not in d, "use --gpus, never --gres (port map §11.1)"
+    assert "gres" not in d, "use --gpus, never --gres"
     assert d.get("output", "").startswith("logs/") and d.get("error") == d.get("output")
     assert "time" in d and "job-name" in d
 
@@ -89,7 +89,7 @@ def test_body(path):
 
 @pytest.mark.parametrize("path", [p for p in WRAPPERS if runs_training(p)], ids=lambda p: p.name)
 def test_training_wrappers_requeue_and_append(path):
-    """FL5: pot-hpi-aisc-batch is preemptible. A training job is requeued, and its log is appended to (a
+    """The batch partition is preemptible. A training job is requeued, and its log is appended to (a
     requeue with the default open mode truncates the log it is resuming)."""
     d = directives(path)
     assert "requeue" in d and d.get("open-mode") == "append"
@@ -116,7 +116,7 @@ def test_array_wrappers_log_per_task(path):
 
 @pytest.mark.parametrize("path", MULTI_GPU_WRAPPERS, ids=lambda p: p.name)
 def test_multi_gpu_wrappers_check_the_device_count(path):
-    """A `--gpus` directive is not overridden by an environment variable (port map §11.1): a
+    """A `--gpus` directive is not overridden by an environment variable: a
     multi-GPU wrapper checks torch.cuda.device_count() against NUM_GPUS and its usage line puts
     `--gpus=N` on the sbatch command too."""
     gpus = int(directives(path)["gpus"])
@@ -135,7 +135,7 @@ def test_setup_env_builds_from_the_lock_and_checks_it():
     assert "uv sync --locked" in body
     assert ".venv/bin/python scripts/check_env.py" in body
     assert body.index("uv sync --locked") < body.index("scripts/check_env.py")
-    # decision 22: the scrub environment from its own lock, checked by its own interpreter (P4-L)
+    # the scrub environment from its own lock, checked by its own interpreter
     assert body.index("uv sync --locked --project envs/scrub") < body.index(
         "envs/scrub/.venv/bin/python scripts/check_env.py --scrub"
     )
@@ -150,7 +150,7 @@ FETCH_MODELS = (
     "flair/ner-german-legal",
     "BAAI/bge-m3",
     "BAAI/bge-reranker-v2-m3",
-    "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7",  # decision 14
+    "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7",
 )
 
 
@@ -200,7 +200,7 @@ def test_preflight_runs_the_planned_checks_and_gates_the_verdict_line():
     "path", [p for p in WRAPPERS if "scripts/check_env.py" in code(p)], ids=lambda p: p.name
 )
 def test_wrappers_that_check_the_env_can_find_uv(path):
-    """check_env.py reads uv.lock through `uv`; job 2588703 failed with 'uv not found on PATH'."""
+    """check_env.py reads uv.lock through `uv`; a missing uv failed with 'uv not found on PATH'."""
     body = code(path)
     assert "$HOME/.local/bin" in body.split("scripts/check_env.py")[0], "put ~/.local/bin on PATH first"
 
@@ -227,7 +227,7 @@ def test_gpu_tests_fails_fast_without_a_gpu():
 
 
 def test_equivalence_runs_the_r1_gate_at_64_and_128_compiled():
-    """P4-R: the box's command as written, the same gate on the legal base, P2-Y's CUDA smoke."""
+    """The command as documented, the same check on the legal base, the CUDA smoke."""
     body = code(SLURM_DIR / "equivalence.sh").replace("\\\n", " ")  # join continued lines
     runs = re.findall(r"scripts/check_operator_equivalence\.py([^\n]*)", body)
     assert len(runs) == 2 and all("--chunk-sizes 64 128" in r and "--compile" in r for r in runs)
@@ -238,8 +238,8 @@ def test_equivalence_runs_the_r1_gate_at_64_and_128_compiled():
 
 
 def test_pretrain_wrapper_resumes_from_last():
-    """P6-A: the 4-GPU header, and the body it delegates to passes last.ckpt as
-    +resume_from_checkpoint= when the file exists (defect 12), prints `du` of the outputs first
+    """The 4-GPU header, and the body it delegates to passes last.ckpt as
+    +resume_from_checkpoint= when the file exists, prints `du` of the outputs first
     and checks the GPUs it was given."""
     four = SLURM_DIR / "train_pretrain_4gpu.sh"
     d = directives(four)
@@ -257,7 +257,7 @@ def test_pretrain_wrapper_resumes_from_last():
 
 
 def test_screen_array_resolves_the_arm_on_the_node():
-    """Port map §11.5: ARM is resolved inside the job by `screen_arms.py env`, EXPERIMENT from the
+    """ARM is resolved inside the job by `screen_arms.py env`, EXPERIMENT from the
     submitting shell is dropped, and the run goes through the training body (ARCH check)."""
     body = code(SLURM_DIR / "screen_array.sh")
     assert 'scripts/screen_arms.py env "$ARM"' in body and 'eval "$ARM_ENV"' in body
@@ -427,14 +427,14 @@ def test_train_wrapper_defaults_and_the_arch_check_before_training(sandbox):
 @pytest.mark.parametrize(
     "env, want",
     [
-        ({}, "true"),  # the 8B teacher: checkpointing on (OOM without it, job 2589362)
+        ({}, "true"),  # the 8B teacher: checkpointing on (OOM without it)
         ({"GRAD_CKPT": "false"}, "false"),  # an explicit setting wins
         ({"DISTILL_CFG": "qwen3_1p7b"}, None),  # the 1.7B: the model's own default
         ({"DISTILL_CFG": "none"}, None),
     ],
 )
 def test_train_wrapper_checkpoints_the_8b_teacher_run(sandbox, env, want):
-    """P4-U chose Qwen3-8B-Base, which fits only with gradient checkpointing (job 2589417)."""
+    """The Qwen3-8B-Base teacher fits only with gradient checkpointing."""
     res, calls = sandbox("train_pretrain_1gpu.sh", **env)
     assert res.returncode == 0, res.stdout + res.stderr
     (train,) = _train_calls(calls)[1]
@@ -443,7 +443,7 @@ def test_train_wrapper_checkpoints_the_8b_teacher_run(sandbox, env, want):
 
 
 def test_train_wrapper_resumes_from_last_ckpt(sandbox):
-    """FL5 / defect 12: a requeued run finds its last.ckpt and passes it on."""
+    """A requeued run finds its last.ckpt and passes it on."""
     ckpt = sandbox.scratch / "outputs" / "screen_S1_s42" / "checkpoints" / "last.ckpt"
     ckpt.parent.mkdir(parents=True)
     ckpt.write_bytes(b"0")
@@ -464,7 +464,7 @@ def test_train_wrapper_resumes_from_last_ckpt(sandbox):
     ],
 )
 def test_train_wrapper_stops_before_step_0(sandbox, env, message):
-    """FL1: an ARCH line without an expected token, or with a forbidden one, stops the job before
+    """An ARCH line without an expected token, or with a forbidden one, stops the job before
     training starts; so does a node with fewer GPUs than the run needs."""
     res, calls = sandbox("train_pretrain_1gpu.sh", **env)
     assert res.returncode == 1 and message in res.stdout, res.stdout + res.stderr
@@ -552,7 +552,7 @@ def _compose(overrides):
     ids=lambda v: v if isinstance(v, str) else ",".join(f"{k}={x}" for k, x in v.items()) or "defaults",
 )
 def test_every_train_argument_list_composes_under_real_hydra(sandbox, script, env):
-    """Job 2589359: the fake interpreter recorded `distill=null` happily; real Hydra refused it
+    """The fake interpreter recorded `distill=null` happily; real Hydra refused it
     ("Config group override must be a string or a list") before step 0. Every train_pretrain.py
     argument list a wrapper builds must compose against configs/."""
     res, calls = sandbox(script, **env)
@@ -566,7 +566,7 @@ def test_every_train_argument_list_composes_under_real_hydra(sandbox, script, en
 
 
 def test_every_teacher_loads_the_revision_fetch_hf_puts_in_the_cache():
-    """Job 2589362: fetch_hf.sh fetched Qwen3-1.7B-Base at the tokenizer's pinned commit, which
+    """fetch_hf.sh fetched Qwen3-1.7B-Base at the tokenizer's pinned commit, which
     writes no refs/main; the teacher was loaded without a revision, so offline it resolved `main`
     and found nothing. Each distill config names the revision its teacher was fetched at."""
     import yaml
@@ -608,8 +608,7 @@ def test_kd_probe_runs_four_shapes_and_survives_an_oom(sandbox):
 
 
 def test_kd_probe_reruns_only_the_named_shapes(sandbox):
-    """Job 2589362: the 1.7B shapes failed on infrastructure and are rerun; the 8B OOMs are results
-    and must not be measured again."""
+    """Only the named shapes are rerun: the 1.7B shapes are rerun alone; the 8B shapes are not repeated."""
     res, calls = sandbox("kd_memory_probe.sh", FAKE_GPUS=4, SLURM_JOB_ID=92, PROBES="t1p7b_L4096 t1p7b_L8192")
     assert res.returncode == 0, res.stdout + res.stderr
     train = _train_calls(calls)[1]
@@ -618,7 +617,7 @@ def test_kd_probe_reruns_only_the_named_shapes(sandbox):
 
 
 def test_kd_probe_summary_reads_its_own_log(sandbox):
-    """Jobs 2589362, 2589379, 2589417: the log is the job's own stdout, and GNU grep refuses to read
+    """The log is the job's own stdout, and GNU grep refuses to read
     its output file ("input file is also the output"), so the summary said "log not found". Run the
     wrapper the way Slurm does, stdout into logs/kd_probe_<id>.log (CI's GNU grep catches a relapse)."""
     (sandbox.repo / "logs").mkdir(exist_ok=True)
@@ -634,8 +633,8 @@ def test_kd_probe_summary_reads_its_own_log(sandbox):
 
 
 def test_profile_measures_one_length_per_process_with_its_own_cache(sandbox):
-    """Port map §11.8 / R7: one sequence length per process, a fresh Inductor cache per point, the
-    Transformer's sanity row before the hybrid's; the P4-Q chunk-64 row at 4,096 is there."""
+    """One sequence length per process, a fresh Inductor cache per point, the
+    Transformer's sanity row before the hybrid's; the chunk-64 row at 4,096 is there."""
     res, calls = sandbox("profile.sh", SLURM_JOB_ID=55)
     assert res.returncode == 0 and "PROFILE DONE" in res.stdout, res.stdout + res.stderr
     points = [c for c in calls if "scripts/performance_profile.py" in c]
@@ -692,7 +691,7 @@ def test_watch_reports_every_section_and_flags_a_requeue_that_did_not_resume(san
 
 
 def test_scrub_array_task_scrubs_its_part_with_one_key(sandbox):
-    """P4-L: task i scrubs part i % PARTS of source i / PARTS; every task uses the same HMAC key
+    """Task i scrubs part i % PARTS of source i / PARTS; every task uses the same HMAC key
     (created once, 32 hex bytes, private); a part already written is skipped."""
     for src in ("gii", "rii"):
         raw = sandbox.scratch / "data" / "raw" / src / f"{src}.jsonl"
@@ -707,7 +706,7 @@ def test_scrub_array_task_scrubs_its_part_with_one_key(sandbox):
     assert (flags["--source"], flags["--part"], flags["--parts"]) == ("rii", "1", "3")
     assert flags["--out"] == str(sandbox.scratch / "data" / "scrubbed" / "rii.part-1-of-3.jsonl")
     assert flags["--log"] == str(sandbox.scratch / "data" / "manifests" / "scrub_rii.part-1-of-3.jsonl")
-    assert call[-3:] == ["--jurisdictions", "DE", "EU"], "decisions.market: multilegalpile's Swiss rows out"
+    assert call[-3:] == ["--jurisdictions", "DE", "EU"], "German law only: multilegalpile's Swiss rows out"
     key_file = sandbox.scratch / ".secrets" / "scrub_hmac.key"
     key = key_file.read_text()
     assert re.fullmatch(r"[0-9a-f]{64}", key) and call[0] == f"KEY={key}"
@@ -732,16 +731,16 @@ def test_pack_corpus_packs_both_row_lengths_from_the_scrubbed_parts(sandbox):
     i = call.index("--row-len")
     assert call[i + 1 : i + 3] == ["4096", "8192"] and call[call.index("--workers") + 1] == "32"
     assert call[call.index("--scrubbed") + 1] == str(sandbox.scratch / "data" / "scrubbed")
-    assert "--allow-unscrubbed" not in call, "R11: only scrubbed documents are packed"
+    assert "--allow-unscrubbed" not in call, "only scrubbed documents are packed"
     i = call.index("--sources")
     assert call[i + 1 :] == ["gii", "rii", "oldp", "dip", "fineweb2_de", "multilegalpile"], (
-        "decisions.market: ris, fedlex and bger are collected but never packed; decisions.eurlex_training"
+        "German law only: ris, fedlex and bger are collected but never packed; eurlex is kept for retrieval"
     )
 
 
 def test_scrub_and_pack_and_counts_default_to_one_source_list():
     """The scrub array and the counts read the same German-market sources; the pack reads them all
-    but eurlex (decisions.eurlex_training: too small for a validation split, kept for retrieval)."""
+    but eurlex (too small for a validation split, kept for retrieval)."""
     lists = {
         name: re.search(r'SOURCES="\$\{SOURCES:-([^}]+)\}"', code(SLURM_DIR / name)).group(1).split()
         for name in ("scrub_array.sh", "pack_corpus.sh", "corpus_counts.sh")
@@ -782,7 +781,7 @@ def test_screen_metrics_reads_the_runs_on_scratch(sandbox):
 
 
 def test_diag_spike_reruns_the_arm_observed_in_its_own_directory(sandbox):
-    """decisions.p5_divergence: S1-s42 with the screen settings, seed and schedule unchanged
+    """Loss-spike rerun: S1-s42 with the screen settings, seed and schedule unchanged
     (max_steps 12,000), the diagnostics on, every 250-step checkpoint kept, a stop at 7,000, and its
     own experiment, so the screen run's last.ckpt is neither resumed nor overwritten."""
     screen_ckpt = sandbox.scratch / "outputs" / "screen_S1_s42" / "checkpoints" / "last.ckpt"
@@ -814,7 +813,7 @@ def test_screen_metrics_passes_the_dump_through(sandbox):
 
 
 def test_inspect_ckpt_compares_collapsed_and_healthy_runs(sandbox):
-    """decisions.p5_divergence: by default the two collapsed screen runs and a healthy run of each
+    """Loss-spike inspection: by default the two collapsed screen runs and a healthy run of each
     config, every one inspected with its own model config."""
     res, calls = sandbox("inspect_ckpt.sh")
     assert res.returncode == 0 and "INSPECT CKPT DONE" in res.stdout, res.stdout + res.stderr
@@ -833,7 +832,7 @@ def test_inspect_ckpt_compares_collapsed_and_healthy_runs(sandbox):
 
 
 def test_eval_probes_task_scores_its_arms_attempt_2_checkpoint(sandbox):
-    """P5-G (+ P5-F's late-25% PPL): the array index picks the arm; screen_arms.py resolves its config
+    """The array index picks the arm; screen_arms.py resolves its config
     and screen2_ experiment on the node; the val-PPL and probe scripts run on that last.ckpt, the
     probes over every scrubbed gii part, both writing JSON under logs/eval_<array job>/."""
     out = sandbox.scratch / "outputs"
@@ -881,7 +880,7 @@ def test_eval_probes_task_scores_its_arms_attempt_2_checkpoint(sandbox):
 
 
 def test_train_wrapper_starts_a_stage_from_init_from_until_it_has_its_own_checkpoint(sandbox):
-    """P6 stage B: INIT_FROM (stage A's last.ckpt) while the stage has none of its own; after that a
+    """Stage B: INIT_FROM (stage A's last.ckpt) while the stage has none of its own; after that a
     requeue resumes from its own; a missing INIT_FROM stops the job. STOP_AT and TRAIN_SAMPLES reach
     the Hydra arguments."""
     stage_a = sandbox.scratch / "outputs" / "p6_A" / "checkpoints" / "last.ckpt"
@@ -904,7 +903,7 @@ def test_train_wrapper_starts_a_stage_from_init_from_until_it_has_its_own_checkp
 
 def test_cleanup_deletes_only_the_approved_list_and_checks_it_all_first(sandbox):
     """The login node runs no rm: approved deletions go through cleanup.sh. Only superseded runs,
-    caches, raw text and the scrub env may go; P6 outputs, shards, the scrubbed corpus, manifests and
+    caches, raw text and the scrub env may go; final-run outputs, shards, the scrubbed corpus, manifests and
     the HF cache never; one refused entry stops the job before anything is removed."""
     s, repo = sandbox.scratch, sandbox.repo
     keep = [
@@ -941,7 +940,7 @@ def test_cleanup_deletes_only_the_approved_list_and_checks_it_all_first(sandbox)
 
 
 def test_eval_probes_scores_named_runs_at_another_length(sandbox):
-    """P6-G/K/M: RUNS names P6 runs and their configs (not screen arms); ROW_LEN 4,096 for stage A;
+    """RUNS names final runs and their configs (not screen arms); ROW_LEN 4,096 for stage A;
     PROBES=0 runs the val-PPL step only."""
     ckpt = sandbox.scratch / "outputs" / "p6_hybrid_s42_A" / "checkpoints" / "last.ckpt"
     ckpt.parent.mkdir(parents=True)
@@ -964,7 +963,7 @@ def test_eval_probes_scores_named_runs_at_another_length(sandbox):
 
 
 def test_verify_handoff_checks_every_run_and_fails_if_one_does(sandbox):
-    """P6-L: each run's last.ckpt against configs/model/<cfg>.yaml, a PASS/FAIL line per run, exit 1
+    """Each run's last.ckpt against configs/model/<cfg>.yaml, a PASS/FAIL line per run, exit 1
     when any run fails (here the fake verifier fails a path containing 'fail')."""
     runs = "p6_hybrid_s42_B:hybrid_legal_base p6_transformer_s42_B:transformer_legal_base"
     res, calls = sandbox("verify_handoff.sh", RUNS=runs)

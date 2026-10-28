@@ -1,4 +1,4 @@
-"""Gesetze im Internet: federal statutes and ordinances of Germany (plan P3-F).
+"""Gesetze im Internet: federal statutes and ordinances of Germany.
 
 Source: ``https://www.gesetze-im-internet.de/gii-toc.xml`` lists every law with a link to its
 ``xml.zip``; the zip holds one XML file in the gii-norm format: ``<dokumente>`` of ``<norm>``s.
@@ -18,7 +18,7 @@ Introductory and omnibus laws number their paragraphs afresh inside each article
 ``§ 6``, ``Art 231`` ``§ 6``; ``Art II`` ``§ 1`` in the IntPatÜG): a ``§`` under an article heading is
 ``gii:bgbeg:art229:6``, ``BGBEG Art. 229 §6``, ``.../bgbeg/art_229__6.html``. A number the XML
 itself repeats (RückAbzinsV's two ``§ 8``) gets the site's suffix on its repeats: ``gii:r_ckabzinsv:8_1``,
-``.../__8_1.html``. So every id is unique within the source (job 2594824: 137 ids named two or more
+``.../__8_1.html``. So every id is unique within the source (137 ids once named two or more
 provisions, and the deduplication's index refused them).
 """
 

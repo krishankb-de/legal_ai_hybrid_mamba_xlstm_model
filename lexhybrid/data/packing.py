@@ -1,15 +1,15 @@
-"""EOS-delimited packing into fixed-length rows and parquet shards (plan P3-U).
+"""EOS-delimited packing into fixed-length rows and parquet shards.
 
 Every document is tokenized (``encode_document``: no special token can come from its text) and
 followed by Qwen3's ``<|endoftext|>`` (151,643). Documents are laid end to end into rows of
 ``row_len`` tokens; ``doc_ids`` numbers the documents inside a row from 0 and steps **after** the EOS,
 so the EOS belongs to the document it ends (the model predicts it) and the loss masks only the
-prediction across the boundary (P2). A document longer than the rest of a row carries on into the
+prediction across the boundary. A document longer than the rest of a row carries on into the
 next row (as that row's document 0): nothing is dropped. The last row of a source is filled with EOS
 tokens that join its last document; its ``length`` column says how many tokens are real, and
 training masks the rest.
 
-One source per shard, so a row has one ``source`` and one licence; the mixture (P3-V) weights
+One source per shard, so a row has one ``source`` and one licence; the mixture weights
 sources by drawing their rows. Columns: ``input_ids`` and ``doc_ids`` (``row_len`` int32 each),
 ``length``, ``source``, ``licence`` (the documents' licences joined by ``+`` if they differ),
 ``commercial_safe`` (every document in the row is), ``research_only`` (any is), ``documents`` (the
@@ -49,7 +49,7 @@ class Row:
 class Packer:
     """Rows of ``row_len`` tokens from one source's documents, fed one tokenised document at a time
     (``pack`` is this over an iterable). One token stream can feed several packers -- one per row
-    length and split -- so the at-scale build (P4-L) tokenises every document once."""
+    length and split -- so the at-scale build tokenises every document once."""
 
     def __init__(self, row_len: int, eos_id: int):
         self.row_len, self.eos_id = row_len, eos_id

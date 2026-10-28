@@ -1,6 +1,6 @@
-"""Quote fidelity (plan P7-H): a rendered quote equals its source after NFC + whitespace normalisation.
+"""Quote fidelity: a rendered quote equals its source after NFC + whitespace normalisation.
 
-The renderer (P7-G) writes a ``QuotePointer(K, (J1..Jn))`` as ``„<sentences J1..Jn of passage K joined by
+The renderer writes a ``QuotePointer(K, (J1..Jn))`` as ``„<sentences J1..Jn of passage K joined by
 one space>“ (<label>)``, German quotes U+201E / U+201C, the label being the span's sentence labels in
 order, deduplicated, joined by ``"; "``. The quote characters and the label rule are taken from that
 contract here, not imported from the renderer, so a renderer that drifts from it fails this check.
@@ -45,7 +45,7 @@ def source_text(chunk: Chunk, sentences: Sequence[int]) -> str:
 
 def quote_label(chunk: Chunk, sentences: Sequence[int]) -> str:
     """The label a quote of these sentences carries: their labels in order, deduplicated, then, for
-    a passage held by several sources, every source (``decisions.cite_every_copy``). Computed here,
+    a passage held by several sources, every source. Computed here,
     not taken from the renderer, so that renderer drift shows; only the source data is shared."""
     from lexhybrid.renderer.render import SOURCE_NAMES, sources
 

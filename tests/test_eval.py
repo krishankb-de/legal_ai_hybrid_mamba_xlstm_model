@@ -1,4 +1,4 @@
-"""Text metrics ported from the reference (plan P1-T)."""
+"""Text metrics ported from the reference."""
 
 import pytest
 

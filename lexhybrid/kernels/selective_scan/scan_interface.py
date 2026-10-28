@@ -1,6 +1,6 @@
 """Mamba-1 selective scan (legacy incumbent; used only by the ``hybrid_legal_legacy`` arm).
 
-Three operators (reference M1 / Phase 14C):
+Three operators (from the reference):
 - ``selective_scan_parallel`` -- ``scan_impl="legacy"``: the chunk-parallel scan every reference
   checkpoint was trained with. It divides by ``A_cum.clamp(min=1e-8)`` and so does not compute the
   specified recurrence where the clamp fires (rel-max-err 0.92 at the reference's init Delta of
@@ -135,7 +135,7 @@ def selective_scan_exact(
     D: torch.Tensor,
     chunk_size: int | None = None,
 ) -> torch.Tensor:
-    """Exact chunked selective scan -- no division, no clamp (reference M1-E).
+    """Exact chunked selective scan -- no division, no clamp.
 
     Flips which axis is parallel: (1) scan within each chunk from a zero state, all chunks in
     parallel; (2) carry the chunk-end states across chunks; (3) add ``A_cum * carry`` back into

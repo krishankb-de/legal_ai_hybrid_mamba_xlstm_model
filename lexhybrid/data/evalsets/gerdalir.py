@@ -1,4 +1,4 @@
-"""GerDaLIR, the German Dataset for Legal Information Retrieval (plan P3-P): case-law retrieval.
+"""GerDaLIR, the German Dataset for Legal Information Retrieval: case-law retrieval.
 
 Source: the MTEB copy ``mteb/GerDaLIRSmall`` on the Hugging Face Hub (MIT, like the original
 ``lavis-nlp/GerDaLIR``), pinned revision, read line by line with ``huggingface_hub``'s file system:

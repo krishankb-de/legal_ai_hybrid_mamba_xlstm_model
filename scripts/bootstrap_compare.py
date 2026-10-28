@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Paired bootstrap comparison of two systems scored on the same items.
 
-Ported from the reference ``scripts/bootstrap_compare.py`` (Phase 14A-6) with the CheXbert parts
+Ported from the upstream reference implementation's ``scripts/bootstrap_compare.py`` with the CheXbert parts
 dropped and a generic per-item metric input added. The bootstrap is PAIRED: both systems answered
 the same items, so each resample draws one set of item indices and scores both on it, and the
 difference is computed within the resample. That removes the "some items are just harder"
@@ -14,7 +14,7 @@ Inputs (either or both, all aligned by line):
                              (e.g. {"citation_precision": 1.0, "refusal_correct": 0}); the mean
                              of every key present in both files is compared
 
-Decision 16: the bootstrap CI is the sampling uncertainty over items; the seed SD is the training
+The bootstrap CI is the sampling uncertainty over items; the seed SD is the training
 uncertainty. Report both; a claim needs the paired mean above one baseline seed SD and the sign at
 >= 2/3 seeds -- this script supplies the CI, not the claim.
 

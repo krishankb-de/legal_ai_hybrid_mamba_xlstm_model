@@ -1,4 +1,4 @@
-"""Multi Legal Pile, German parts: the research-exception arm (plan P3-O, decision 2).
+"""Multi Legal Pile, German parts: the research-exception arm.
 
 Source: the Hugging Face dataset ``joelniklaus/Multi_Legal_Pile`` (not gated, no token needed),
 read straight from its ``data/<lang>/<type>/<source>.jsonl.xz`` files at a pinned revision with
@@ -12,7 +12,7 @@ per row: id ``multilegalpile:<subset>:<row>`` (stable at the pinned revision), `
 paragraphs as sections, ``valid_from`` unknown (None). The German parts are Swiss cantonal
 legislation (lexfind, no licence information), Swiss court decisions (entscheidsuche) and German
 statutes and decisions (Open Legal Data); the last two overlap the ``bger``/``oldp`` collectors and
-deduplication (P3-S) keeps the commercial-safe copy.
+deduplication keeps the commercial-safe copy.
 
 Licence: the dataset is CC BY-NC-SA 4.0, so every document is ``research_only`` and never
 ``commercial_safe``; it enters only the ``research`` arm (register row ``multilegalpile``).

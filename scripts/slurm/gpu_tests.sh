@@ -11,23 +11,23 @@
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.log
 #
-# gpu_tests.sh -- the `cuda` test layer on one H100 (plan P4-J1, §8.1), plus check_env.py.
-# Submit from the Mac:  ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch scripts/slurm/gpu_tests.sh"
+# gpu_tests.sh -- the `cuda` test layer on one H100, plus check_env.py.
+# Submit from your workstation:  ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch scripts/slurm/gpu_tests.sh"
 # The log ends in "GPU TESTS PASSED" only if every step exits 0.
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
 
-# Environment block, port map §11.2
+# Environment block
 SCRATCH_ROOT="${SCRATCH_ROOT:-/sc/scratch/$USER/lexhybrid}"
 export HF_HOME="${SCRATCH_ROOT}/.hf"
 export HF_HUB_OFFLINE=1
 export HF_DATASETS_OFFLINE=1
-# one fresh cache per job: a shared Inductor cache once timed two shapes identically (port map §14)
+# one fresh cache per job: a shared Inductor cache once timed two shapes identically
 export TORCHINDUCTOR_CACHE_DIR="${SCRATCH_ROOT}/.torchinductor/gpu_tests_${SLURM_JOB_ID:-local}"
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 export CUDA_LAUNCH_BLOCKING=0
 export PYTHONUNBUFFERED=1
-export PATH="$HOME/.local/bin:$PATH"   # uv, for check_env.py (job 2588703)
+export PATH="$HOME/.local/bin:$PATH"   # uv, for check_env.py
 mkdir -p logs "$TORCHINDUCTOR_CACHE_DIR"
 
 echo "host: $(hostname)  job: ${SLURM_JOB_ID:-none}"

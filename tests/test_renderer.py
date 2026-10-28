@@ -1,4 +1,4 @@
-"""The renderer (plan P7-G, lexhybrid/renderer/render.py), on chunks of the collectors' fixtures."""
+"""The renderer (lexhybrid/renderer/render.py), on chunks of the collectors' fixtures."""
 
 import pytest
 
@@ -211,7 +211,7 @@ def test_text_segments_are_copied_unchanged(retrieved):
 
 
 def test_a_passage_held_by_several_sources_cites_every_source():
-    """decisions.cite_every_copy (user, 2026-09-29): a quoted or cited passage whose text other sources
+    """A quoted or cited passage whose text other sources
     also hold (Chunk.copies, linked from the pack's dedup log) names every source; the quoted text is
     unchanged, so the verifier's quote check still passes."""
     import dataclasses

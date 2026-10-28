@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Nightly re-sync stub (plan P7-F): record what rebuilding an index would change; change nothing.
+"""Nightly re-sync stub: record what rebuilding an index would change; change nothing.
 
     .venv/bin/python scripts/resync_index.py --index data/index/smoke --report data/manifests/resync_smoke.json
     .venv/bin/python scripts/resync_index.py --index data/index/smoke --docs data/scrubbed/gii.jsonl \
@@ -76,7 +76,7 @@ def resync(index_dir: Path, paths: list[Path]) -> dict:
         raise SystemExit("no document files")
     raw = [str(p) for p in paths if "raw" in p.parts]
     if raw:
-        raise SystemExit(f"not scrubbed (R11: an index is built from scrubbed documents only): {raw}")
+        raise SystemExit(f"not scrubbed (an index is built from scrubbed documents only): {raw}")
     try:
         manifest, indexed = read_manifest(index_dir), indexed_documents(index_dir)
     except FileNotFoundError as e:

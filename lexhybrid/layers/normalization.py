@@ -1,6 +1,6 @@
 """Normalization layers.
 
-Ported from the reference. P2-E (defect 10): ``RMSNorm`` computes in fp32 and casts back to the
+Ported from the reference. ``RMSNorm`` computes in fp32 and casts back to the
 input dtype. The reference squared and averaged in the activation dtype, so a bf16 model lost the
 mean-square to bf16's 8-bit mantissa. For fp32 inputs the computation is unchanged bit for bit.
 """

@@ -1,0 +1,11 @@
+# Keep GitHub language statistics focused on the Python source.
+tests/fixtures/** linguist-vendored
+data/manifests/** linguist-generated
+analysis/*.jsonl linguist-generated
+analysis/*.log linguist-generated
+uv.lock linguist-generated
+envs/scrub/uv.lock linguist-generated
+graphify-out/** linguist-generated
+
+# Binary fixtures
+*.pt binary

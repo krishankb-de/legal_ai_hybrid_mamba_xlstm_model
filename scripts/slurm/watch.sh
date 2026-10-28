@@ -10,15 +10,13 @@
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.log
 #
-# watch.sh -- one status report on every run (plan P4-V; port map §11.7): the queue, the last three
+# watch.sh -- one status report on every run: the queue, the last three
 # days of jobs, preemptions and requeues, the checkpoints of every run on scratch, and an error
 # count per log. No python anywhere, and every section runs even when one command fails
 # (`set -uo pipefail` without -e), so the script is also safe to `source` inside another job.
-# Submit from the Mac, then read logs/watch_<id>.log:
+# Submit from your workstation, then read logs/watch_<id>.log:
 #   ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch scripts/slurm/watch.sh"
 #   ssh $CLUSTER_HOST "cd $CLUSTER_REPO && tail -100 logs/watch_<id>.log"
-# (squeue/sacct/tail/grep/ls/du are also allowed on the login node as one-liners; this job is the
-# report that runs them all, plus `du`, which only a job may run over scratch.)
 set -uo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}" || return 1 2>/dev/null || exit 1
 
@@ -28,7 +26,7 @@ LOG_DIR="${WATCH_LOG_DIR:-logs}"
 ERROR_PATTERN='Traceback|CUDA out of memory|OutOfMemoryError|RuntimeError|DUE TO TIME LIMIT|PREEMPT|\bnan\b|Segmentation fault|FATAL'
 # A requeued run prints "restart: N" (SLURM_RESTART_COUNT, N >= 1) in its header and, if it picked
 # up its checkpoint, "resuming from ..." (train_pretrain_1gpu.sh): fewer resumes than restarts is
-# a run that started again from step 0 (FL5).
+# a run that started again from step 0.
 REQUEUE_PATTERN='restart: [1-9]'
 RESUME_PATTERN='^resuming from '
 
@@ -59,7 +57,7 @@ if [[ -d "$OUTPUTS" ]]; then
     echo "$(basename "$run"): ${listing:-(no checkpoint yet)}"
   done
   if [[ -n "${SLURM_JOB_ID:-}" ]]; then
-    echo; echo "== scratch usage (R6: <= 40 GB of checkpoints kept)"
+    echo; echo "== scratch usage (<= 40 GB of checkpoints kept)"
     du -sh "$OUTPUTS" "$OUTPUTS"/*/ 2>/dev/null | sort -h | tail -n 15
     df -h "$SCRATCH_ROOT" 2>/dev/null | tail -n 1
   fi
@@ -77,7 +75,7 @@ ls -1t "$LOG_DIR"/*.log 2>/dev/null | head -n 30 | while IFS= read -r log; do
   resumes="$(grep -cE "$RESUME_PATTERN" "$log" 2>/dev/null)"
   flag=""
   if [[ "${requeues:-0}" -gt "${resumes:-0}" ]]; then
-    flag="  <- requeued ${requeues}x but resumed ${resumes}x: restarted from step 0? (FL5)"
+    flag="  <- requeued ${requeues}x but resumed ${resumes}x: restarted from step 0?"
   fi
   printf '%-48s %7s %9s %8s  %s%s\n' "$(basename "$log")" "${errors:-0}" "${requeues:-0}" "${resumes:-0}" \
     "$(tail -n 1 "$log" 2>/dev/null | cut -c1-60)" "$flag"

@@ -1,4 +1,4 @@
-"""Mamba-3 mixer (reference M2-C).
+"""Mamba-3 mixer.
 
 With every feature flag off this is **exactly Mamba-2 SSD**: scalar-per-head ``A``, multi-value
 ``B``/``C`` shared across heads, a short depthwise convolution, and the chunked scan in
@@ -19,7 +19,7 @@ Two deliberate departures from stock Mamba-2, recorded so they are not mistaken 
   slices of ``in_proj`` exist whether or not their flags are on, so parameter count is identical
   across arms and turning a flag off is exactly "zero that slice".
 
-P2-F (defect 7): ``forward(x, cache)`` fills an empty decode cache -- the fp32 SSM state after the
+``forward(x, cache)`` fills an empty decode cache -- the fp32 SSM state after the
 last token, the last ``conv_size - 1`` pre-convolution columns, the trapezoid's previous ``B`` and
 ``x``, the fp64 rotation angle and ``seen`` -- so a prompt is consumed in one chunked pass and
 ``step`` continues from it. The reference prefilled token by token.
@@ -69,7 +69,7 @@ class Mamba3Block(nn.Module):
     """
 
     # Declares that this mixer honours packed-document resets, so `HybridBlock` dispatches on a
-    # capability rather than on a hard-coded tuple of layer names (reference M2-E).
+    # capability rather than on a hard-coded tuple of layer names.
     supports_doc_ids = True
 
     def __init__(
@@ -207,7 +207,7 @@ class Mamba3Block(nn.Module):
         ``HybridLanguageModel.__init__`` ends with ``self.apply(self._init_weights)``, which zeroes
         every ``nn.Linear`` bias. ``dt_bias`` and ``A_log`` are bare Parameters so they survive that,
         but this hook is called explicitly afterwards anyway: the Mamba-1 block lost its dt init to
-        exactly this ordering (reference M1-F).
+        exactly this ordering.
         """
         with torch.no_grad():
             # Delta ~ logU[dt_min, dt_max], inverted through softplus.
@@ -239,7 +239,7 @@ class Mamba3Block(nn.Module):
 
         Args:
             cache: an EMPTY cache from ``allocate_inference_cache`` (``seen == 0``); when given, it
-                is filled with the state after the last token (prefill, P2-F). A filled cache is
+                is filled with the state after the last token (prefill). A filled cache is
                 continued with ``step``.
             doc_ids: optional (batch, seqlen) document ids; the state resets at every change.
         """
@@ -397,7 +397,7 @@ class Mamba3Block(nn.Module):
             near_start[:, shift:] |= starts[:, : seqlen - shift] if shift else starts
         return torch.where(near_start.unsqueeze(-1), masked, conved)
 
-    # -- O(1) recurrent decode (reference M6-A) ---------------------------------------------------
+    # -- O(1) recurrent decode -----------------------------------------------------------------
     supports_step = True
 
     def allocate_inference_cache(self, batch_size, device=None, dtype=torch.float32, max_seq_len=None):
@@ -410,7 +410,7 @@ class Mamba3Block(nn.Module):
         """
         device = device or self.in_proj.weight.device
         cache = {
-            # fp32 whatever `dtype` is: `step` runs the recurrence in fp32 (P2-E).
+            # fp32 whatever `dtype` is: `step` runs the recurrence in fp32.
             "ssm_state": torch.zeros(
                 batch_size, self.nheads, self.head_dim, self.d_state, device=device, dtype=torch.float32
             ),

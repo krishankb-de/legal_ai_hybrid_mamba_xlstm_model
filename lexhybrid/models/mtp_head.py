@@ -1,4 +1,4 @@
-"""Multi-token prediction (plan P2-S; screen arm S4). Off by default (``mtp_n = 1``).
+"""Multi-token prediction. Off by default (``mtp_n = 1``).
 
 With ``mtp_n = D + 1``, depth ``k`` (1..D) predicts the token ``k + 1`` positions ahead, in the
 sequential form of DeepSeek-V3 (arXiv:2412.19437, Sec. 2.2): module ``k`` combines the previous
@@ -11,7 +11,7 @@ embedding and the head are the main model's -- shared, not copied, and not regis
 state dict holds them once. ``h_0`` is the main model's last residual stream.
 
 The loss of depth ``k`` supervises position ``i`` only when ``i`` and ``i + k + 1`` lie in the same
-document (the P2-L rule, extended), and the total added to the language-model loss is
+document (the same boundary rule as the main loss, extended), and the total added to the language-model loss is
 ``mtp_loss_weight * mean_k(CE_k)``. Nothing here runs at inference time.
 """
 

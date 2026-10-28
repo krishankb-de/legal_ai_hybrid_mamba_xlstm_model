@@ -1,6 +1,6 @@
-"""While Reference/ exists, regenerating the fixtures from it reproduces the committed ones (P1-X).
+"""While Reference/ exists, regenerating the fixtures from it reproduces the committed ones.
 
-Marked ``reference``: skipped, with its reason, once Reference/ is deleted at P1-Z.
+Marked ``reference``: skipped, with its reason, once Reference/ is deleted.
 """
 
 import pytest

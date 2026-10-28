@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Per-source corpus counts from the collection manifests (plan P4-L verdict).
+"""Per-source corpus counts from the collection manifests.
 
     .venv/bin/python scripts/corpus_counts.py --manifests $SCRATCH_ROOT/data/manifests \
         --raw $SCRATCH_ROOT/data/raw --sources gii rii oldp eurlex dip fineweb2_de multilegalpile
@@ -8,8 +8,8 @@ Documents and characters per source, jurisdiction and licence come from the mani
 document with ``n_chars``, streamed). Tokens are an ESTIMATE: characters times the Qwen3 tokens per
 character of a stride sample of the source's raw documents (``--sample`` per source: every k-th
 line, so the sample spans the whole file), taken per jurisdiction. The exact counts come from the
-pack (``build_summary.json``, P4-M). Rows outside ``--jurisdictions`` are reported and marked
-excluded (decisions.market). Prints one table row per (source, jurisdiction, licence), then the
+pack (``build_summary.json``). Rows outside ``--jurisdictions`` are reported and marked
+excluded (German law only scope). Prints one table row per (source, jurisdiction, licence), then the
 JSON summary as its last line.
 """
 

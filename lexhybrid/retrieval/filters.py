@@ -1,4 +1,4 @@
-"""Retrieval filters (plan P7-F): jurisdiction, validity date and document type.
+"""Retrieval filters: jurisdiction, validity date and document type.
 
 ``filter_chunks`` keeps, in input order, the chunks that pass every filter given; a filter left at
 ``None`` keeps everything. ``jurisdictions`` and ``doc_types`` are the allowed values, each checked

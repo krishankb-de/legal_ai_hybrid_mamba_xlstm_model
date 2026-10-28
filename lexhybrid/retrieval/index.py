@@ -1,4 +1,4 @@
-"""Index versions (plan P7-F): a registry of the retrieval indexes that have been built.
+"""Index versions: a registry of the retrieval indexes that have been built.
 
 ``scripts/build_index.py`` writes an index directory (``chunks.jsonl``, ``bm25/``, ``index.json``,
 ``documents.jsonl``); ``register`` records it in a registry, a JSON file
@@ -108,7 +108,7 @@ def indexed_documents(index_dir: str | Path) -> dict[str, DocumentDigest]:
     path = Path(index_dir) / DOCUMENTS_NAME
     if not path.is_file():
         raise FileNotFoundError(
-            f"{index_dir}: no {DOCUMENTS_NAME} (built before P7-F; rebuild with scripts/build_index.py)"
+            f"{index_dir}: no {DOCUMENTS_NAME} (built before document storage; rebuild with scripts/build_index.py)"
         )
     out: dict[str, DocumentDigest] = {}
     with open(path, encoding="utf-8") as f:

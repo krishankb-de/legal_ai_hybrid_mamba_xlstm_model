@@ -1,4 +1,4 @@
-"""EUR-Lex: EU regulations and directives in German (plan P3-I).
+"""EUR-Lex: EU regulations and directives in German.
 
 Source: the Publications Office's CELLAR repository, which serves each act's German XHTML by CELEX
 number (``Accept: application/xhtml+xml``, ``Accept-Language: deu``). The eur-lex.europa.eu site

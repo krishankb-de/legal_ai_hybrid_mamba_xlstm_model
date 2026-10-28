@@ -1,6 +1,6 @@
-"""Loss-spike diagnostics for one training run (decisions.p5_divergence, 2026-10-11).
+"""Loss-spike diagnostics for one training run.
 
-Two screen runs (S1-s42, S3-s43; jobs 2626202, 2629409) collapsed to unigram-level loss after one
+Two screening runs collapsed to unigram-level loss after one
 gradient spike at constant LR. ``SpikeDiagnosticsCallback`` logs, to the run's TensorBoard logger,
 what is needed to see which part of the model moved first. ``<part>`` is ``embed``,
 ``L<i>_<type>`` (one per block), ``final_norm`` or ``mtp``.

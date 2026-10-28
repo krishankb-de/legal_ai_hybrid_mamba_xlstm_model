@@ -1,5 +1,5 @@
-# Reference replica: the reference's parameter-matched Transformer (transformer_150m_baseline),
-# GPT-2 vocabulary, 15 attention layers, canonical pre-norm. P4 sanity point only; its parameter
+# Reference replica: the upstream parameter-matched Transformer (transformer_150m_baseline),
+# GPT-2 vocabulary, 15 attention layers, canonical pre-norm. Sanity point only; its parameter
 # count must be exactly 183,386,880.
 model_type: lexhybrid
 

@@ -3,30 +3,30 @@
 Forward is O(L/C) sequential steps with O(C^2 * D) parallel work per chunk; backward is plain
 autograd through the chunked ops.
 
-Two intra-chunk implementations (reference M1-C / M1-H):
+Two intra-chunk implementations (upstream):
 - ``"legacy"`` absorbs the decay into the query and its reciprocal into the key and clamps the
   reciprocal's denominator at 1e-6. Where ``f_cum`` underflows that clamp (70.9% of entries at the
   reference's forget-gate init) the decay collapses to ~0 even for nearby positions: rel-max-err
   0.882 against the fp64 recurrence. Kept only for the ``hybrid_legal_legacy`` ablation arm.
 - ``"exact"`` re-centres both sides on half the chunk's widest log-decay, so nothing is clamped.
-  When that one factorisation would overflow fp32 -- trained forget gates reach it: S1's screen
-  runs hit half-ranges of 43.2 and 54.6 at chunk 128 within 840 steps (job 2599890) -- the chunk's
+  When that one factorisation would overflow fp32 -- trained forget gates reach it: training
+  runs hit half-ranges of 43.2 and 54.6 at chunk 128 within 840 steps -- the chunk's
   rows are split into blocks and each block is re-centred on its own log-decay range
   (``_row_block``, ``_blockwise_scores``): still exact, the configured chunk size kept. Only when
   no block size fits does it raise or scan within the chunk (``fallback``); with forget gates
   clamped at 1e-6 a block of at most 6 rows always fits, so that needs ``min_block`` above it.
 
-P2-C (defect 9): the chunk size comes from the block (``mlstm_chunk_size``) instead of being picked
+The chunk size comes from the block (``mlstm_chunk_size``) instead of being picked
 from the sequence length; the reference's ``m_state`` stabiliser, computed and never applied, is
 gone; the sequential fallback is a configured choice, an error by default. At chunk 128 with
 forget-gate bias 0 the exact path needed the fallback from the first step (half-range
 0.5 * 128 * ln 2 = 44.4 > 40); the shipped forget bias 3.0 gives 3.1.
 
-P2-D (defect 15): document boundaries are handled here, with the three boolean masks of
+Document boundaries are handled here, with the three boolean masks of
 ``kernels/ssd/ssd_interface.py`` -- ``same`` on the intra-chunk scores, ``carry_ok`` on the carried
 numerator/denominator, ``end_ok`` on the chunk-end state -- and a cumulative log-decay that restarts
 at every boundary inside a chunk. It replaces the block's per-(row, document) Python loop.
-``return_state`` hands back the state after the last token for the decode cache (P2-G).
+``return_state`` hands back the state after the last token for the decode cache.
 """
 
 import torch
@@ -208,7 +208,7 @@ def tfla_forward_parallel(
     k_gated_intra = k_c * i_c  # per-dimension input gating
     scores = None  # set directly by the per-block path
     if tfla_impl == "legacy":
-        # M1-C: `f_cum` underflows 1e-6 within a chunk for any realistic forget gate, and the
+        # `f_cum` underflows 1e-6 within a chunk for any realistic forget gate, and the
         # clamp then pins the denominator, so decay[i, j] collapses to ~0 even for j close to i.
         f_cum_safe = f_cum.clamp(min=1e-6)
         q_weighted = q_c * f_cum
@@ -250,7 +250,7 @@ def tfla_forward_parallel(
         h_intra_den = scores.sum(dim=-1, keepdim=True)  # (B, H, nc, C, 1)
 
     # ---- inter-chunk recurrence (sequential across chunks only) ------------------------------
-    # The carried state is fp32 whatever the activation dtype (P2-E, as in ssd_interface.py): it
+    # The carried state is fp32 whatever the activation dtype (as in ssd_interface.py): it
     # accumulates over the whole row. It is read in the activation dtype for each einsum, because
     # einsum does not promote, and every update is added in fp32.
     C_state = torch.zeros(batch, num_heads, head_dim, head_dim, device=device, dtype=torch.float32)

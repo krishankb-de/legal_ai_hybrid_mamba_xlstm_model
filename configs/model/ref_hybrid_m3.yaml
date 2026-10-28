@@ -1,7 +1,7 @@
-# Reference replica: the reference's hybrid_150m_m3 (its A2 arm), GPT-2 vocabulary.
-# Kept for the P4 sanity point only -- the ported code must reproduce the reference's exact
+# Reference replica: the upstream hybrid_150m_m3, GPT-2 vocabulary.
+# Kept for the sanity point only -- the ported code must reproduce the upstream's exact
 # parameter count (184,192,200, tests/test_config_invariants.py) and its H100 timings. Never
-# trained in this project. Legacy operators are allowed here and in hybrid_legal_legacy only (R8).
+# trained in this project. Legacy operators are allowed here and in hybrid_legal_legacy only.
 model_type: lexhybrid
 
 vocab_size: 50257
@@ -16,11 +16,11 @@ expand_factor: 2
 dt_rank: null
 use_fast_path: true
 
-# Operators, pinned explicitly (R8).
+# Operators, pinned explicitly.
 scan_impl: legacy
 tfla_impl: legacy
 
-# Mamba-3: every flag at the Mamba-2 reduction.
+# Mamba-3: every flag at its Mamba-2 setting.
 mamba3_d_state: 128
 mamba3_head_dim: 64
 mamba3_ngroups: 1
@@ -48,7 +48,7 @@ proj_factor: 2
 mlstm_gate_soft_cap: 15.0
 mlstm_input_gate_bias_init: -10.0
 mlstm_forget_gate_bias_init: 0.0
-# The reference chose the TFLA chunk from the length (32 / 64 / 128 above 2,048 tokens); P4's
+# The upstream implementation chose the TFLA chunk from the length (32 / 64 / 128 above 2,048 tokens); the
 # sanity point is at 16,384 tokens, where it used 128.
 mlstm_chunk_size: 128
 
@@ -67,7 +67,7 @@ initializer_range: 0.02
 tie_word_embeddings: false
 use_gradient_checkpointing: false
 
-# Optimization (the reference's values)
+# Optimization (the upstream values)
 learning_rate: 4.0e-4
 weight_decay: 0.1
 warmup_steps: 2000

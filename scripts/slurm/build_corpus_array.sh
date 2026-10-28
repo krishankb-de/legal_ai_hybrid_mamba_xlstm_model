@@ -12,12 +12,12 @@
 #SBATCH --open-mode=append   # pot-hpi-aisc-batch is preemptible: a requeued task appends to its log
 #SBATCH --requeue
 #
-# build_corpus_array.sh -- the corpus at scale, one CPU array task per collector (plan P4-K;
-# verdict P4-L). Submit from the Mac (10 collectors, indices 0-9 of SOURCES):
+# build_corpus_array.sh -- the corpus at scale, one CPU array task per collector.
+# Submit from your workstation (10 collectors, indices 0-9 of SOURCES):
 #   ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch --array=0-9 scripts/slurm/build_corpus_array.sh"
 # Writes $SCRATCH_ROOT/data/raw/<src>/<src>.jsonl and $SCRATCH_ROOT/data/manifests/<src>.jsonl,
 # both renamed from *.partial only when the collection completes. No --limit (`--limit all`),
-# except FineWeb-2: the general-German replay is 30% of a token budget of at most 5B (decision 13),
+# except FineWeb-2: the general-German replay is 30% of a token budget of at most 5B,
 # so FINEWEB_LIMIT pages (default 2,000,000, ~2B tokens), sampled across dumps.
 # At one request per second a legal source takes hours to days. Every response is kept in
 # $SCRATCH_ROOT/data/http_cache/<src>: a requeued task -- or the same index resubmitted after a

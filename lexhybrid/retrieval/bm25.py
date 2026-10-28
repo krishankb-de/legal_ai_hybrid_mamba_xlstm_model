@@ -1,6 +1,6 @@
-"""Lexical retrieval with BM25 over the retrieval chunks (plan P7-C; decision 14: ``bm25s``).
+"""Lexical retrieval with BM25 over the retrieval chunks (``bm25s``).
 
-Every chunk's ``text`` (citation header, hierarchy, sentences; P7-A/B) is lower-cased, split into
+Every chunk's ``text`` (citation header, hierarchy, sentences) is lower-cased, split into
 word tokens, stripped of NLTK's German stopwords (``bm25s``' ``"de"`` list) and reduced by the
 Snowball German stemmer (``PyStemmer``), which also folds umlauts and ß: ``Kündigungen``,
 ``kündigen`` -> ``kundig``, ``Mietverhältnisses`` -> ``mietverhaltnis``. One-character tokens are

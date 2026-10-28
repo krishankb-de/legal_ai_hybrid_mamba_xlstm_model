@@ -12,26 +12,26 @@
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.log
 #
-# profile.sh -- the P4 profiler ladder on one H100 (plan P4-P; verdict P4-Q), port map §11.8:
+# profile.sh -- the profiler ladder on one H100:
 # one sequence length per PROCESS, a fresh TORCHINDUCTOR_CACHE_DIR per point, the Transformer rows
 # first, effective chunk sizes printed and recorded in every row.
-# Submit from the Mac:  ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch scripts/slurm/profile.sh"
+# Submit from your workstation:  ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch scripts/slurm/profile.sh"
 #
 # Points (bf16, batch 4, random weights):
 #   sanity   ref_transformer at 16,384; ref_hybrid_m3 at 16,384 uncompiled chunk 64 and compiled
-#            chunk 128 (the reference's 163.9 / 678.2 / 122.9 ms, 7.1 GB -- prediction R4)
+#            chunk 128 (the upstream reference implementation's 163.9 / 678.2 / 122.9 ms, 7.1 GB)
 #   infer    transformer_legal_base then hybrid_legal_base at 2,048 / 8,192 / 16,384
 #   train    both at 2,048 / 4,096 / 8,192, forward+backward with the slab loss, unpacked and packed
 #            (a document every DOC_LEN tokens: flex attention on the GPU)
-#   chunk    hybrid_legal_base training at 4,096, packed, chunk 64 (the P4-Q rule compares it with
-#            the chunk-128 row above: "128 unless it fails R1 or loses > 5% at 4,096")
+#   chunk    hybrid_legal_base training at 4,096, packed, chunk 64 (compared with
+#            the chunk-128 row above: "128 unless it fails equivalence or loses > 5% at 4,096")
 # CSV/JSON per point go to logs/profile_<jobid>/ (cluster-owned, never touched by the rsync push;
 # pulled with `bash scripts/sync_from_cluster.sh logs`). A point that fails is recorded and the
 # ladder continues; the log ends in "PROFILE DONE" or lists the failed points.
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
 
-# Environment block, port map §11.2
+# Environment block
 SCRATCH_ROOT="${SCRATCH_ROOT:-/sc/scratch/$USER/lexhybrid}"
 export HF_HOME="${SCRATCH_ROOT}/.hf"
 export HF_HUB_OFFLINE=1
@@ -69,7 +69,7 @@ point() {  # name, model, seq_len, extra performance_profile.py flags...
   fi
 }
 
-# -- sanity against the reference (the Transformer first, port map §11.8)
+# -- sanity against the upstream reference implementation (the Transformer first)
 point sanity_ref_transformer ref_transformer 16384
 point sanity_ref_m3_c64 ref_hybrid_m3 16384 --chunk-size 64
 point sanity_ref_m3_c128_compiled ref_hybrid_m3 16384 --chunk-size 128 --compile

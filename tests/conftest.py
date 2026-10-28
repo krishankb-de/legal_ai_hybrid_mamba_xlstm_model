@@ -1,4 +1,4 @@
-"""Shared test configuration (plan §8.2).
+"""Shared test configuration.
 
 Markers are declared in pyproject.toml under --strict-markers. Here every marker that depends on
 the machine is turned into a skip WITH ITS REASON, never a silent pass:
@@ -7,7 +7,7 @@ the machine is turned into a skip WITH ITS REASON, never a silent pass:
     cuda        skipped unless a CUDA device is available        (runs on the cluster)
     multigpu    skipped unless >= 2 CUDA devices                 (runs on the cluster)
     network     skipped unless LEXHYBRID_NETWORK_TESTS=1         (weekly CI job)
-    reference   skipped when Reference/hybrid_model_mamba_xlstm is absent (after P1-Z)
+    reference   skipped when Reference/hybrid_model_mamba_xlstm is absent
 
 Tests never reach the Hugging Face Hub unless marked `network`.
 """
@@ -41,7 +41,7 @@ def _skip_reasons() -> dict:
         else "live network test; set LEXHYBRID_NETWORK_TESTS=1 (weekly CI job)",
         "reference": None
         if REFERENCE_ROOT.exists()
-        else "Reference/ has been deleted (P1-Z); fixtures are the record",
+        else "Reference/ has been deleted; fixtures are the record",
     }
 
 

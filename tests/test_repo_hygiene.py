@@ -1,4 +1,4 @@
-"""scripts/check_repo_hygiene.py on synthetic trees (plan P1-W2)."""
+"""scripts/check_repo_hygiene.py on synthetic trees."""
 
 from pathlib import Path
 
@@ -75,10 +75,21 @@ def test_an_ignored_analysis_document_is_reported(tmp_path):
     make_tree(
         tmp_path,
         {"analysis/results.md": b"# r\n"},
-        gitignore="*.md\n!README.md\n!CLAUDE.md\n!LEGAL_BUILD_PLAN.md\n",
+        gitignore="*.md\n!README.md\n",
     )
     problems = H.run(tmp_path, ci=False)
-    assert any("analysis/results.md exists but .gitignore excludes it" in p for p in problems)
+    assert any("analysis/results.md exists but the ignore rules exclude it" in p for p in problems)
+
+
+def test_git_info_exclude_hides_local_only_files(tmp_path):
+    make_tree(tmp_path, {"notes.md": b"# local\n", "lexhybrid/a.py": b"x = 1\n"}, gitignore="")
+    assert "notes.md" in H.list_files(tmp_path, ci=False)
+    info = tmp_path / ".git" / "info"
+    info.mkdir(parents=True)
+    (info / "exclude").write_text("# local only\n/notes.md\n")
+    files = H.list_files(tmp_path, ci=False)
+    assert "notes.md" not in files and "lexhybrid/a.py" in files
+    assert "notes.md" in H.list_files(tmp_path, ci=True)
 
 
 def test_a_missing_critical_file_is_reported(tmp_path):

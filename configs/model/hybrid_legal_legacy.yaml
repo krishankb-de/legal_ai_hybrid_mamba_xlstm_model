@@ -1,22 +1,22 @@
-# The legacy-operator ablation (decision 17): the reference's incumbent recipe -- Mamba-1 with the
+# The legacy-operator ablation: the upstream reference implementation's incumbent recipe -- Mamba-1 with the
 # legacy selective scan and mLSTM with the legacy TFLA -- in the base's shape (9 x mamba + 3 x mlstm
 # at the base's mLSTM positions). The only model config allowed legacy operators besides the ref_*
-# replicas (R8). PPL / probe only: Mamba-1 has no step(), so there is no cached decode, and legacy
+# replicas. PPL / probe only: Mamba-1 has no step(), so there is no cached decode, and legacy
 # TFLA computes no recurrence a step could reproduce.
 model_type: lexhybrid
 
-vocab_size: 151936  # Qwen3 tokenizer, padded (decision 6)
+vocab_size: 151936  # Qwen3 tokenizer, padded
 dim: 768
 num_layers: 12
 #               0      1      2      3      4      5      6      7      8      9      10     11
 layer_pattern: [mamba, mamba, mamba, mamba, mlstm, mlstm, mlstm, mamba, mamba, mamba, mamba, mamba]
 
-# Operators, pinned explicitly (R8): the shipping ones.
-scan_impl: legacy  # the reference's divide-and-clamp selective scan
-tfla_impl: legacy  # the reference's clamped TFLA; it has no fallback path
+# Operators, pinned explicitly: the shipping ones.
+scan_impl: legacy  # the upstream divide-and-clamp selective scan
+tfla_impl: legacy  # the upstream clamped TFLA; it has no fallback path
 tfla_fallback: error
 
-# Mamba-1 fields (nine mamba layers): the reference's incumbent settings.
+# Mamba-1 fields (nine mamba layers): the upstream incumbent settings.
 state_size: 16
 conv_size: 4
 expand_factor: 2
@@ -26,7 +26,7 @@ dt_init_strategy: none
 dt_min: 1.0e-3
 dt_max: 1.0e-1
 
-# Mamba-3: every flag at the Mamba-2 reduction (the reference's winning A2 recipe); arms move one.
+# Mamba-3: every flag at its Mamba-2 setting (the upstream implementation's best recipe); each screen variant changes one.
 mamba3_d_state: 128
 mamba3_head_dim: 64
 mamba3_expand_factor: 2
@@ -54,8 +54,8 @@ num_heads: 12
 proj_factor: 2
 mlstm_gate_soft_cap: 15.0
 mlstm_input_gate_bias_init: -10.0
-mlstm_forget_gate_bias_init: 3.0  # the base's value, decided 2026-09-27 (user, plan §14): S5's one lever
-# is the legacy operator; the reference's effective 0.0 came from defect 3 (an init bug), and at 0.0 the
+mlstm_forget_gate_bias_init: 3.0  # the base's value: S5's one lever
+# is the legacy operator; the upstream effective 0.0 came from an init bug, and at 0.0 the
 # mLSTM kernel falls onto its slow sequential path at chunk 128 (a second, confounding lever).
 mlstm_chunk_size: 128
 
@@ -64,7 +64,7 @@ attn_dropout: 0.0
 rope_theta: 500000.0
 attn_impl: auto  # flex block mask on GPU for packed rows
 
-# Multi-token prediction: off in the base; arm S4 turns it on (P2-W hybrid_legal_mtp.yaml)
+# Multi-token prediction: off in the base; arm S4 turns it on (hybrid_legal_mtp.yaml)
 mtp_n: 1
 mtp_loss_weight: 0.3
 mtp_layer_type: mamba3
@@ -86,7 +86,6 @@ weight_decay: 0.1
 warmup_steps: 2000
 scheduler: wsd
 beta2_schedule: false
-# AdamW beta2 (decisions.p5_fix, 2026-10-11): 0.999 let one KD-amplified spike collapse screen
-# runs S1-s42 and S3-s43 (jobs 2626202, 2629409); the second moment now adapts in ~20 steps.
+# AdamW beta2: 0.999 let one KD-amplified spike collapse two screen runs; the second moment now adapts in ~20 steps.
 adam_beta2: 0.95
 gradient_clip_val: 1.0

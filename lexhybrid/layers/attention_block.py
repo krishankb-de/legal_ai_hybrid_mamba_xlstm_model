@@ -1,4 +1,4 @@
-"""Causal self-attention mixer with RoPE (reference Phase 14A).
+"""Causal self-attention mixer with RoPE.
 
 A *mixer*, not a model class: registered as the ``"attention"`` layer type, so
 ``layer_pattern: ["attention"]`` turns ``HybridLanguageModel`` into an ordinary pre-norm
@@ -12,16 +12,16 @@ Design choices (comparison fairness):
   attention must not attend across one either.
 - ``use_hybrid_norm`` is honoured as QK-norm.
 
-P2-H (defect 8): RoPE positions restart at every document in a packed row, so a document sees
+RoPE positions restart at every document in a packed row, so a document sees
 the positions it would see alone, and ``_rope_tables`` extends with the configured ``rope_theta``
 (the reference rebuilt with 10,000). The config default is 500,000: 10,000 is a Llama-1 setting
 whose slowest frequency wraps within ~63K tokens and resolves long offsets poorly.
-P2-I (defect 5): ``step()`` with a preallocated KV cache ``{k, v: (B, H, Lmax, Dh), seen,
+``step()`` with a preallocated KV cache ``{k, v: (B, H, Lmax, Dh), seen,
 doc_start}``, filled in one pass by ``forward(x, cache)``, so a hybrid containing attention decodes
 with the cache instead of recomputing (the reference's ``supports_cached_decode`` was all-or-nothing
 and attention made it false). Keys are cached after RoPE; a token's position is its offset inside
 its document, as in the packed forward.
-P2-J (defect 18): packed rows can attend through ``torch.nn.attention.flex_attention`` with a
+Packed rows can attend through ``torch.nn.attention.flex_attention`` with a
 block mask built from ``doc_ids`` (``attn_impl``), instead of a dense ``(B, 1, L, L)`` fp32 mask --
 256 MB per row at 8K, and it pushes SDPA off the flash kernel. ``"auto"`` takes flex on CUDA and
 keeps the dense mask on CPU, where it is the reference path (compiled flex needs Inductor, which
@@ -102,8 +102,8 @@ def build_doc_block_mask(doc_ids: torch.Tensor):
     documents' own lengths rather than the row's.
 
     Built eagerly even inside a compiled model: traced by Dynamo, the ``mask_mod`` that reads
-    ``doc_ids[b, ...]`` from its closure produced a wrong mask for batch row 1 on the H100 (job
-    2588784: compiled vs eager drift 0.99 in row 1, 7e-7 in row 0). The compiled graph receives the
+    ``doc_ids[b, ...]`` from its closure produced a wrong mask for batch row 1 on the H100
+    (compiled vs eager drift 0.99 in row 1, 7e-7 in row 0). The compiled graph receives the
     finished ``BlockMask`` instead, at the cost of one graph break per attention layer.
     """
     from torch.nn.attention.flex_attention import create_block_mask
@@ -262,7 +262,7 @@ class AttentionBlock(nn.Module):
 
     def _packed_impl(self, q: torch.Tensor, dropout_p: float) -> str:
         """Which kernel a packed row uses. FlexAttention has no attention dropout, and in torch 2.11 no
-        backward pass on CPU (CI run 36330688065): a CPU training step with ``flex`` is refused here,
+        backward pass on CPU: a CPU training step with ``flex`` is refused here,
         before it could fail inside autograd; ``auto`` never picks flex on a CPU."""
         if self.attn_impl == "flex":
             if dropout_p > 0:
@@ -279,7 +279,7 @@ class AttentionBlock(nn.Module):
             return "flex"
         return "sdpa"
 
-    # -- KV-cache decode (P2-I) ------------------------------------------------------------------
+    # -- KV-cache decode ------------------------------------------------------------------
     supports_step = True
 
     def allocate_inference_cache(self, batch_size, device=None, dtype=torch.float32, max_seq_len=None):

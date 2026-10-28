@@ -1,4 +1,4 @@
-"""Open Legal Data: German court decisions of every instance (plan P3-H).
+"""Open Legal Data: German court decisions of every instance.
 
 Source: Open Legal Data's bulk dump on the Hugging Face hub, ``openlegaldata/court-decisions-germany``
 (config ``dump-20260520``: 423,941 decisions in 54 parquet shards), read at a pinned revision with
@@ -6,7 +6,7 @@ Source: Open Legal Data's bulk dump on the Hugging Face hub, ``openlegaldata/cou
 the account behind ``HF_TOKEN`` must have accepted its terms. The REST API
 (``https://de.openlegaldata.io/api/``) was the source until 2026-09-30, when it began refusing any page
 past the tenth ("Page 20 exceeds maximum of 10. For bulk access use
-https://huggingface.co/openlegaldata/datasets"; job 2589358_2), i.e. at most the 500 newest cases.
+https://huggingface.co/openlegaldata/datasets"), i.e. at most the 500 newest cases.
 A row carries the API's case fields (``id``, ``slug``, ``court``, ``file_number``, ``date``,
 ``content`` as HTML, already anonymised by the courts), so the parser is unchanged.
 

@@ -1,4 +1,4 @@
-"""Chunked SSD scan -- the Mamba-2/3 state space dual (reference M2-B).
+"""Chunked SSD scan -- the Mamba-2/3 state space dual.
 
 Why this exists rather than a patch to ``selective_scan``: Mamba-1 parameterizes ``A`` as
 ``(d_inner, dstate)``, one decay per channel *and* state, so the exact intra-chunk pairwise decay
@@ -19,11 +19,11 @@ Shapes follow ``ssd_reference``:
     C   (batch, seqlen, ngroups, dstate)
     D   (nheads,) or None
 
-P2-F (defect 7): padding joins the last real document instead of a fresh segment id (which cost
+Padding joins the last real document instead of a fresh segment id (which cost
 a ``.item()`` host sync and made the state after a partial last chunk come back as zero), and
 ``return_final_state`` hands back the fp32 state after the last token -- what ``ssd_step``
-continues from, so a forward pass can fill the decode cache. P2-E (defect 16): the carried state
-is fp32 by declaration.
+continues from, so a forward pass can fill the decode cache. The carried state is fp32 by
+declaration.
 """
 
 from collections.abc import Sequence
@@ -145,7 +145,7 @@ def ssd_chunked_scan(
     # The decay factors are built in fp32 by policy while x/B/C carry the model's dtype, so every
     # einsum below is handed operands that already agree: einsum does NOT promote. Under autocast
     # this cast is exactly what autocast applies; without autocast (a `.to(bfloat16)` model) it is
-    # the difference between running and a dtype error (reference job 2560261).
+    # the difference between running and a dtype error.
     cdtype = x.dtype
 
     # --- intra-chunk: y[t] = sum_{s<=t} mask[t,s] <C_t, B_s> coeff_s x_s ---------------------
@@ -158,7 +158,7 @@ def ssd_chunked_scan(
         )
 
     # --- inter-chunk: carry the state across chunks (nc sequential steps) --------------------
-    # fp32 by declaration (defect 16, P2-E): the reference allocated it in the activation dtype and
+    # fp32 by declaration: the reference allocated it in the activation dtype and
     # it became fp32 only because the first decay multiplication promoted it.
     state = torch.zeros(batch, nheads, headdim, dstate, device=x.device, dtype=torch.float32)
     C_h = C_c.repeat_interleave(rep, dim=3)  # (batch, nc, cs, nheads, dstate)

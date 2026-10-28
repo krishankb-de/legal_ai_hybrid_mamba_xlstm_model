@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sync_to_cluster.sh -- push this working tree to the cluster without git (plan P4-D, rule f).
+# sync_to_cluster.sh -- push this working tree to the cluster without git.
 #
 #   bash scripts/sync_to_cluster.sh             # write .sync_stamp, mkdir the remote dirs, rsync
 #   bash scripts/sync_to_cluster.sh --dry-run   # show what rsync would change; no stamp, no mkdir
@@ -25,7 +25,7 @@ done
 
 ENV_FILE="${CLUSTER_ENV:-$REPO_ROOT/scripts/slurm/cluster.env}"
 if [[ ! -f "$ENV_FILE" ]]; then
-  echo "missing $ENV_FILE: copy scripts/slurm/cluster.env.example and fill it (plan P4-A)" >&2
+  echo "missing $ENV_FILE: copy scripts/slurm/cluster.env.example and fill it" >&2
   exit 1
 fi
 # shellcheck source=/dev/null
@@ -54,11 +54,15 @@ EOF
 )"
   printf '%s %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$TREE_HASH" > .sync_stamp
   echo "[sync] .sync_stamp: $(cat .sync_stamp)"
-  # shellcheck disable=SC2029  # expanding on the Mac is intended: the paths come from cluster.env
+  # shellcheck disable=SC2029  # expanding locally is intended: the paths come from cluster.env
   ssh "$CLUSTER_HOST" "mkdir -p '$CLUSTER_REPO' '$SCRATCH_ROOT'"
 fi
 
 RSYNC_ARGS=(-az --delete "--exclude-from=$REPO_ROOT/.rsync-exclude")
+# Optional extra excludes for files that exist only in this checkout.
+if [[ -f "$REPO_ROOT/.rsync-exclude.local" ]]; then
+  RSYNC_ARGS+=("--exclude-from=$REPO_ROOT/.rsync-exclude.local")
+fi
 if [[ $DRY_RUN -eq 1 ]]; then RSYNC_ARGS+=(--dry-run -v); fi
 rsync "${RSYNC_ARGS[@]}" ./ "$CLUSTER_HOST:$CLUSTER_REPO/"
 echo "[sync] $REPO_ROOT -> $CLUSTER_HOST:$CLUSTER_REPO/ (dry_run=$DRY_RUN)"

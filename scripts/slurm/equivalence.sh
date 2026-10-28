@@ -12,22 +12,22 @@
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.log
 #
-# equivalence.sh -- rule R1 on one H100 (plan P4-R; verdict P4-S): the operator and model-logit
+# equivalence.sh -- operator equivalence on one H100: the operator and model-logit
 # equivalence gate of scripts/check_operator_equivalence.py at chunk sizes 64 and 128, compiled,
-# at 1e-4; then P2-Y's compile smoke under CUDA (tests/test_gpu.py, the compile tests).
-# Submit from the Mac:  ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch scripts/slurm/equivalence.sh"
-# Step 1 is the box's command as written (the default model, ref_hybrid_m3); step 2 runs the same
-# gate on the legal base, whose chunk size P4-Q decides. The log ends in "EQUIVALENCE PASSED" only
+# at 1e-4; then the compile smoke under CUDA (tests/test_gpu.py, the compile tests).
+# Submit from your workstation:  ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch scripts/slurm/equivalence.sh"
+# Step 1 checks the default model, ref_hybrid_m3; step 2 runs the same
+# gate on the legal base. The log ends in "EQUIVALENCE PASSED" only
 # if every step exits 0.
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
 
-# Environment block, port map §11.2
+# Environment block
 SCRATCH_ROOT="${SCRATCH_ROOT:-/sc/scratch/$USER/lexhybrid}"
 export HF_HOME="${SCRATCH_ROOT}/.hf"
 export HF_HUB_OFFLINE=1
 export HF_DATASETS_OFFLINE=1
-# one fresh cache per job (plan R7): a shared Inductor cache once timed two shapes identically
+# one fresh cache per job: a shared Inductor cache once timed two shapes identically
 export TORCHINDUCTOR_CACHE_DIR="${SCRATCH_ROOT}/.torchinductor/equivalence_${SLURM_JOB_ID:-local}"
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 export CUDA_LAUNCH_BLOCKING=0
@@ -46,12 +46,12 @@ step() {  # name, command...
   if "$@"; then echo "[PASS] $name"; else echo "[FAIL] $name"; FAILED+=("$name"); fi
 }
 
-step "R1 ref_hybrid_m3: chunk 64/128, compiled" \
+step "equivalence ref_hybrid_m3: chunk 64/128, compiled" \
   .venv/bin/python scripts/check_operator_equivalence.py --device cuda --chunk-sizes 64 128 --compile
-step "R1 hybrid_legal_base: chunk 64/128, compiled, L=2048" \
+step "equivalence hybrid_legal_base: chunk 64/128, compiled, L=2048" \
   .venv/bin/python scripts/check_operator_equivalence.py --device cuda --model hybrid_legal_base \
   --chunk-sizes 64 128 --seq-length 2048 --compile
-step "compile smoke under CUDA (P2-Y)" \
+step "compile smoke under CUDA" \
   .venv/bin/python -m pytest tests/test_gpu.py -m cuda -k compile -v -rA -p no:cacheprovider
 
 echo

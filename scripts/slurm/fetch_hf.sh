@@ -12,8 +12,8 @@
 #SBATCH --open-mode=append   # pot-hpi-aisc-batch is preemptible; hf download resumes after a requeue
 #SBATCH --requeue
 #
-# fetch_hf.sh -- download every Hugging Face model the plan needs into $HF_HOME (plan P4-G).
-# Submit from the Mac:  ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch scripts/slurm/fetch_hf.sh"
+# fetch_hf.sh -- download every Hugging Face model the project needs into $HF_HOME.
+# Submit from your workstation:  ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch scripts/slurm/fetch_hf.sh"
 # The only job with HF_HUB_OFFLINE=0; training and eval jobs read the same cache offline.
 # Pinned revisions come from the code that loads them (tokenizer.py, scrub_ner_worker.py);
 # the others resolve main, and the snapshot listing at the end records the commit fetched.
@@ -39,7 +39,7 @@ QWEN_REV="$(.venv/bin/python -c 'from lexhybrid.data.tokenizer import QWEN3_REVI
 FLAIR_REV="$(sed -n 's/^REVISION = "\([0-9a-f]*\)".*/\1/p' scripts/scrub_ner_worker.py)"
 [[ -n "$QWEN_REV" && -n "$FLAIR_REV" ]] || { echo "FATAL: pinned revision not found"; exit 1; }
 
-# repo|revision (decision 14 names the NLI model; decisions 6/8 the Qwen3 tokenizer and teachers)
+# repo|revision (the NLI model, the Qwen3 tokenizer and the teachers)
 MODELS=(
   "Qwen/Qwen3-1.7B-Base|$QWEN_REV"
   "Qwen/Qwen3-8B-Base|main"

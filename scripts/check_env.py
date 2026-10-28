@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify that this Python environment IS the locked environment (plan §8.5, decision 18).
+"""Verify that this Python environment IS the locked environment.
 
 Checks, in order:
   1. interpreter: major.minor equals ``.python-version`` (or ``--expect-python``);
@@ -7,16 +7,16 @@ Checks, in order:
      the pinned version (read through ``uv export --frozen``, markers evaluated here);
   3. key imports: torch, pytorch_lightning, hydra, omegaconf, transformers, datasets, einops, yaml;
   4. ``lexhybrid`` is installed editable from this repository (no ``sys.path`` shims);
-  5. torch build: CUDA 12.8 on Linux (the cluster's driver; decision 18), CPU/MPS on macOS.
+  5. torch build: CUDA 12.8 on Linux (the cluster's driver), CPU/MPS on macOS.
 
-Run it everywhere the code runs: the Mac (validate.sh gate 1), every CI job, every cluster job.
+Run it everywhere the code runs: macOS arm64 (validate.sh gate 1), every CI job, every cluster job.
 Exit code 1 on any failure.
 
     .venv/bin/python scripts/check_env.py
     .venv/bin/python scripts/check_env.py --expect-python 3.12      # CI forward-compat matrix entry
     envs/scrub/.venv/bin/python scripts/check_env.py --scrub       # the LER scrub's own environment
 
-``--scrub`` checks the scrub environment of decision 22 instead (``envs/scrub``: its own
+``--scrub`` checks the scrub environment instead (``envs/scrub``: its own
 ``.python-version`` and ``uv.lock``, the imports flair, torch and transformers, transformers below 5,
 and no ``lexhybrid``, which that environment must not install).
 """
@@ -48,7 +48,7 @@ KEY_IMPORTS = (
     "datasets",
     "einops",
     "yaml",
-    "bm25s",  # lexical retrieval (P7-C1)
+    "bm25s",  # lexical retrieval
     "Stemmer",  # PyStemmer, bm25s's Snowball German stemmer
 )
 EXPECTED_CUDA = {"linux": "12.8", "darwin": None}
@@ -57,7 +57,7 @@ SCRUB_IMPORTS = ("flair", "torch", "transformers")
 
 
 def check_scrub_transformers(version: str) -> list[str]:
-    """Decision 22: the scrub environment exists because flair needs transformers < 5."""
+    """The scrub environment exists because flair needs transformers < 5."""
     return (
         []
         if Version(version).major < 5
@@ -77,7 +77,7 @@ def check_python(expected: str, actual=sys.version_info) -> list[str]:
 
 # CSI escape sequences. uv colours its output when FORCE_COLOR is set, even into a pipe, and the CI
 # workflow sets FORCE_COLOR=1: the "# via" annotations then arrived as "\x1b[32m    # via x\x1b[39m"
-# and failed to parse (CI run 36322586655).
+# and failed to parse.
 _ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
 
 

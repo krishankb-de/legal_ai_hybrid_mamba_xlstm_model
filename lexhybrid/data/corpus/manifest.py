@@ -1,9 +1,9 @@
-"""Corpus manifests (plan P3-E): one JSON line per document with every schema field but the text.
+"""Corpus manifests: one JSON line per document with every schema field but the text.
 
 ``data/manifests/<source>.jsonl`` is versioned (``.gitignore`` allowlists ``data/manifests/``) while
 the texts under ``data/raw/`` are not: the manifest is the auditable record of what was collected,
 from where, under which licence, with which content hash -- enough to recount tokens per source
-and licence (P4-M) and to prove what a model saw.
+and licence and to prove what a model saw.
 """
 
 import json

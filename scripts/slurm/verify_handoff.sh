@@ -10,10 +10,10 @@
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.log
 #
-# verify_handoff.sh -- plan P6-L: each run's last.ckpt against the yaml that builds its model
+# verify_handoff.sh -- each run's last.ckpt against the yaml that builds its model
 # (scripts/verify_handoff.py: PASS = 0 missing / 0 unexpected keys; the checkpoint's global_step is
 # printed too, so a stage-B last.ckpt shows it reached 18,037). CPU only.
-#   ssh $CLUSTER_HOST "cd $CLUSTER_REPO && RUNS='p6_hybrid_s42_B:hybrid_legal_base p6_transformer_s42_B:transformer_legal_base' sbatch scripts/slurm/verify_handoff.sh"
+#   ssh $CLUSTER_HOST "cd $CLUSTER_REPO && RUNS='pretrain_hybrid_s42_B:hybrid_legal_base pretrain_transformer_s42_B:transformer_legal_base' sbatch scripts/slurm/verify_handoff.sh"
 # RUNS holds "<experiment>:<model config>" entries. Ends with one "HANDOFF <experiment> PASS|FAIL" line
 # per run and "VERIFY HANDOFF DONE"; exits 1 if any run failed.
 set -euo pipefail

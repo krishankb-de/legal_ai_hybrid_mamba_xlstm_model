@@ -1,8 +1,8 @@
-"""Pointer-constrained decoding (plan P2-Q, decision 7).
+"""Pointer-constrained decoding.
 
 The legal model never generates statute text: it emits *pointers* into the numbered retrieved
 context, ``<|q|><|c3|><|s2|>`` ("quote chunk 3, sentence 2") or ``<|cite|><|c3|><|s2|>``, and the
-renderer (P7) replaces each pointer with the exact sentence or its label. ``PointerFSM`` makes an
+renderer replaces each pointer with the exact sentence or its label. ``PointerFSM`` makes an
 invalid pointer impossible to decode rather than something the verifier has to catch:
 
     FREE --(<|q|> or <|cite|>)--> MARKER --(<|cK|>, K retrieved)--> CHUNK(K)
@@ -34,7 +34,7 @@ FREE, MARKER, CHUNK, SENTENCE = "free", "marker", "chunk", "sentence"
 
 @dataclass(frozen=True)
 class SpecialTokens:
-    """Ids of the 87 SFT-only special tokens of decision 7 (never used in KD)."""
+    """Ids of the 87 SFT-only special tokens (never used in distillation)."""
 
     q: int
     cite: int
@@ -72,7 +72,7 @@ class SpecialTokens:
 
     @classmethod
     def from_tokenizer(cls, tokenizer) -> "SpecialTokens":
-        """Ids from a tokenizer that has the tokens added (P3-C adds them to the Qwen3 tokenizer)."""
+        """Ids from a tokenizer that has the tokens added (they are added to the Qwen3 tokenizer)."""
         ids = tokenizer.convert_tokens_to_ids(cls.names())
         unknown = [n for n, i in zip(cls.names(), ids) if i is None or i == tokenizer.unk_token_id]
         if unknown:

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Boilerplate / duplicate-template analysis for generated answers, with controls.
 
-Ported from the reference ``scripts/analyze_generation_diversity.py`` (Phase 14B): exact-duplicate
+Ported from the upstream reference implementation's ``scripts/analyze_generation_diversity.py``: exact-duplicate
 clusters, distinct-n, type-token ratio and sampled self-BLEU-4, for the generator and -- the point
 of the tool -- for the reference answers and a copy baseline scored the same way. Stdlib only.
 Self-BLEU here is not sacrebleu-comparable; compare only rows scored in the same run.
@@ -27,7 +27,7 @@ def read_lines(path: str) -> list[str]:
 
 
 def duplicate_clusters(texts: Sequence[str]) -> tuple[int, int, float, list[int]]:
-    """Exact-duplicate clustering — the same measurement Phase 11C reported.
+    """Exact-duplicate clustering — the same measurement the upstream implementation reports.
 
     Returns:
         (num_clusters, num_texts_in_a_cluster, fraction_in_a_cluster, top_sizes)
@@ -145,7 +145,7 @@ def analyse(name: str, texts: Sequence[str], seed: int = 0) -> dict[str, object]
 
 
 def render(results: list[dict[str, object]], historical_pct: float | None = None) -> str:
-    """Render the comparison table plus the pre-registered verdict."""
+    """Render the comparison table plus the verdict."""
     out = []
     out.append("# Generation diversity / boilerplate analysis\n")
     out.append("Produced by `scripts/analyze_generation_diversity.py`.\n")
@@ -198,7 +198,7 @@ def render(results: list[dict[str, object]], historical_pct: float | None = None
             f"{c['pct_in_duplicate_cluster']:.1f}% (**{delta:+.1f} pp**).\n"
         )
 
-    # Pre-registered interpretation (thresholds carried over from the reference).
+    # Interpretation (thresholds carried over from the upstream reference implementation).
     above_all = (
         all(gen["pct_in_duplicate_cluster"] > c["pct_in_duplicate_cluster"] + 10.0 for c in controls)
         if controls

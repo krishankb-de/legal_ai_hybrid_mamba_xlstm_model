@@ -1,7 +1,7 @@
-"""Decoding (plans P1-N, P2-I..P2-R).
+"""Decoding.
 
-Cached decode must be an equivalence with full recomputation (reference M6-D). The uncached
-references (P2-N) are tested against a bigram "model" whose next-token scores depend only on the
+Cached decode must be an equivalence with full recomputation. The uncached
+references are tested against a bigram "model" whose next-token scores depend only on the
 last token, so every expected output is computable by hand."""
 
 import math
@@ -73,7 +73,7 @@ def test_cached_beam_equals_uncached(flags):
     assert torch.equal(uncached, cached), f"uncached {uncached.tolist()} vs cached {cached.tolist()}"
 
 
-# The three families P2-K and the P2 gate name: the recurrent hybrid, the Transformer, and the legal
+# The three families under test: the recurrent hybrid, the Transformer, and the legal
 # base pattern (M3 M3 M3 A L L L M3 M3 A M3 M3, legacy-free), all at test width.
 FAMILIES = {
     "hybrid": ["mamba3", "mlstm"],
@@ -110,7 +110,7 @@ def _prefill_then_greedy(model, ids, steps):
 
 @pytest.mark.parametrize("family", list(FAMILIES))
 def test_prefill_equals_uncached(family):
-    """P2-K (defect 7): the one-pass prefill leaves every cache exactly where token-by-token decoding
+    """The one-pass prefill leaves every cache exactly where token-by-token decoding
     would, in fp32 to 1e-5 over the prompt end and 6 continued tokens."""
     model = family_lm(family)
     assert model.supports_cached_decode()
@@ -154,7 +154,7 @@ def test_prefill_with_documents_continues_the_last_document():
 @pytest.mark.parametrize("penalty", [1.0, 1.3], ids=["no-penalty", "penalty1.3"])
 @pytest.mark.parametrize("family", list(FAMILIES))
 def test_cached_greedy_equals_uncached(family, penalty):
-    """P2-O: cached greedy equals the uncached reference token for token, batch 3 with rows that
+    """Cached greedy equals the uncached reference token for token, batch 3 with rows that
     finish at different steps (EOS is a token row 0 emits at its third step, so it must fire)."""
     from lexhybrid.decoding import greedy, greedy_cached
 
@@ -194,7 +194,7 @@ def test_model_generate_methods_delegate_to_the_decoders():
 @pytest.mark.parametrize("length_penalty", [0.0, 1.0], ids=["lp0", "lp1"])
 @pytest.mark.parametrize("family", list(FAMILIES))
 def test_cached_beam_equals_uncached_with_eos(family, length_penalty):
-    """P2-P / defect 11: with EOS, length normalisation and a repetition penalty, cached beam search
+    """With EOS, length normalisation and a repetition penalty, cached beam search
     returns the uncached reference's tokens. EOS is a token the free best beam emits, so
     hypotheses do finish and leave the beam; the caches (KV included) follow every reorder."""
     from lexhybrid.decoding import beam_search, beam_search_cached
@@ -228,7 +228,7 @@ def test_cached_decode_refuses_a_stack_it_cannot_serve():
 
 
 def test_attention_step_matches_forward():
-    """Defect 5 (P2-I): the KV-cache step reproduces the full forward, from an empty cache and after
+    """The KV-cache step reproduces the full forward, from an empty cache and after
     a one-pass prefill that fills it, with and without QK-norm."""
     from lexhybrid.layers.attention_block import AttentionBlock
 
@@ -303,7 +303,7 @@ def test_beam_search_refuses_a_batch():
         beam_search_uncached(model, torch.randint(0, 97, (2, 4)))
 
 
-# -- uncached references (P2-N) ----------------------------------------------------------------
+# -- uncached references ----------------------------------------------------------------
 
 EOS = 3
 
@@ -338,7 +338,7 @@ TABLE = log_table(
 
 
 def test_uncached_beam_stops_on_eos():
-    """P2-N / defect 11: finished hypotheses leave the beam with their EOS and are ranked by
+    """Finished hypotheses leave the beam with their EOS and are ranked by
     `sum_logprob / generated ** length_penalty`; nothing follows an EOS."""
     model = Bigram(TABLE)
     out = beam_search(model, torch.tensor([[0]]), beam_size=2, max_new_tokens=10, eos_token_id=EOS)
@@ -444,7 +444,7 @@ def test_uncached_beam_search_refuses_a_batch():
         beam_search(Bigram(TABLE), torch.tensor([[0], [1]]))
 
 
-# -- pointer constraints (P2-Q) ----------------------------------------------------------------
+# -- pointer constraints ----------------------------------------------------------------
 
 POINTER_VOCAB = 300
 RETRIEVED = {2: [1, 3], 5: [2], 9: [4, 5, 6]}
@@ -505,7 +505,7 @@ def _trim_open_pointer(tokens, sp):
 
 
 def test_pointer_fsm_never_emits_unretrieved_pointer():
-    """P2-Q: 1,000 steps of random logits (pointer tokens boosted so pointers are frequent) through
+    """1,000 steps of random logits (pointer tokens boosted so pointers are frequent) through
     the machine; an independent validator finds no invalid pointer, and pointers were exercised."""
     from lexhybrid.decoding.pointer_constraints import PointerFSM, validate_pointers
 
@@ -549,11 +549,11 @@ def test_pointer_constraint_inside_the_decoders():
         assert validate_pointers(gen, sp, RETRIEVED) == []
 
 
-# -- best-of-n (P2-R) --------------------------------------------------------------------------
+# -- best-of-n --------------------------------------------------------------------------
 
 
 def test_best_of_n_picks_scorer_max():
-    """P2-R: n cached samples in one batch; the scorer sees each answer (prompt removed, cut after
+    """N cached samples in one batch; the scorer sees each answer (prompt removed, cut after
     EOS) and the highest-scoring sample is returned; ties go to the earliest sample."""
     from lexhybrid.decoding import best_of_n, sample_cached
 

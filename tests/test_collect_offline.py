@@ -1,4 +1,4 @@
-"""The collectors' and fetchers' network loops, offline (plans P3-E..Q; CI has no network).
+"""The collectors' and fetchers' network loops, offline (CI has no network).
 
 Each test replaces the module's ``http_get`` / ``http_post`` (or the dataset reader) with a fake web
 that answers from the fixtures, and checks what the loop does with it: the order it asks in, the
@@ -96,7 +96,7 @@ def test_rii_collector_goes_newest_first(monkeypatch):
 
 
 def test_rii_collector_skips_a_document_that_keeps_failing(monkeypatch, capsys):
-    """Job 2589358_1: one document's connection dropped five times and the whole RII crawl (3.8 h,
+    """One document's connection dropped five times and the whole RII crawl (3.8 h,
     13,000 documents) died. That document is now skipped and logged; the crawl goes on."""
     from lexhybrid.data.corpus.collectors import rii
     from lexhybrid.data.corpus.collectors.base import FetchError
@@ -135,7 +135,7 @@ def test_skip_failed_documents_stops_on_an_outage(capsys):
 
 
 def test_oldp_collector_reads_the_bulk_dump(monkeypatch, tmp_path):
-    """Job 2589358_2: the OLDP API stopped paging past page 10, so the collector reads the bulk dump
+    """The OLDP API stopped paging past page 10, so the collector reads the bulk dump
     on the hub (gated parquet shards at a pinned revision) in shard order. A row carries the API's
     case fields, so the documents equal the parser's on the same cases."""
     import huggingface_hub

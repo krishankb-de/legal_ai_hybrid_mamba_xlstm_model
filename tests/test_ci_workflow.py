@@ -1,4 +1,4 @@
-"""The CI workflow and the local gate stay in step (plan §8.3-8.4, P1-W4).
+"""The CI workflow and the local validation script stay in step.
 
 PyYAML parses the workflow's `on:` key as the boolean True (YAML 1.1), hence `doc.get(True)`.
 """
@@ -61,7 +61,7 @@ def test_test_job_runs_the_local_gate_in_ci_mode(wf):
 def test_hygiene_runs_on_a_pristine_checkout(wf):
     job = wf["jobs"]["hygiene"]
     text = steps_text(job)
-    assert "check_repo_hygiene.py --ci" in text and "plan_state.py check" in text
+    assert "check_repo_hygiene.py --ci" in text
     assert "uv sync" not in text and "setup-uv" not in text, "the hygiene job must not install anything first"
 
 
@@ -94,15 +94,13 @@ def test_scheduled_jobs_only_run_on_schedule_or_dispatch(wf):
         assert "if" not in wf["jobs"][name], f"{name} must run on every push"
 
 
-def test_validate_marker_selections_match_the_plan():
-    """§8.3: fast excludes slow/cuda/multigpu/network; --full and --ci exclude cuda/multigpu/network."""
+def test_validate_marker_selections():
+    """Fast excludes slow/cuda/multigpu/network; --full and --ci exclude cuda/multigpu/network."""
     text = VALIDATE.read_text()
     fast = re.search(r'MARKERS_FAST="([^"]+)"', text).group(1)
     full = re.search(r'MARKERS_FULL="([^"]+)"', text).group(1)
     assert fast == "not slow and not cuda and not multigpu and not network"
     assert full == "not cuda and not multigpu and not network"
-    plan = (REPO_ROOT / "LEGAL_BUILD_PLAN.md").read_text()
-    assert f"`{fast}`" in plan and f"`{full}`" in plan
 
 
 def test_markers_are_declared_once_in_pyproject():

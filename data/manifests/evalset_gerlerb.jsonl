@@ -1,4 +1,4 @@
-{"info": {"eval_only": true, "licence": "CC-BY-4.0", "name": "gerlerb", "note": "queries generated with GPT-4.1 and verified by legal experts: evaluation only (R10)", "research_only": false, "source": "https://zenodo.org/records/15745124", "task": "retrieval"}}
+{"info": {"eval_only": true, "licence": "CC-BY-4.0", "name": "gerlerb", "note": "queries generated with GPT-4.1 and verified by legal experts: evaluation only", "research_only": false, "source": "https://zenodo.org/records/15745124", "task": "retrieval"}}
 {"id": "206", "relevant": ["93d_bverfgg"], "sha256": "21289cd0b414efe7371841f2e93a7ec488b807cd96a9ab0c145843acdd7bb189"}
 {"id": "207", "relevant": ["99_betrvg"], "sha256": "cab8817de5db06975093b6c52f180a56f9a11d14689f4cb9b2125e50057c96f2"}
 {"id": "209", "relevant": ["2b_beeg"], "sha256": "2b718480839d3248506d0b30067bb23c25386634e9db822c22ba598000e22d23"}

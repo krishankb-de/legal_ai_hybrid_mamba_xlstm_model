@@ -1,6 +1,5 @@
-"""Multi-GPU checks (plan §8.1 "Multi-GPU" layer). Marked ``multigpu``: they collect everywhere and
-skip, with the reason, unless at least two CUDA devices are visible (``scripts/slurm/multigpu_tests.sh``,
-P4-J1).
+"""Multi-GPU checks. Marked ``multigpu``: they collect everywhere and
+skip, with the reason, unless at least two CUDA devices are visible (``scripts/slurm/multigpu_tests.sh``).
 
 The DDP step uses the settings ``scripts/train_pretrain.py`` builds (``DDPStrategy(
 find_unused_parameters=False, gradient_as_bucket_view=True)``): with ``find_unused_parameters``

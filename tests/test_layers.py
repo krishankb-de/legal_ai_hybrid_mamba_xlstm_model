@@ -1,7 +1,7 @@
-"""Block-level behaviour of the four mixers and HybridBlock (plan P1-D..M).
+"""Block-level behaviour of the four mixers and HybridBlock.
 
 Ported from the reference's ``tests/test_layers.py`` and the block-level parts of
-``tests/test_mamba3_numerics.py`` (M2-M6): document resets, bit-identity controls for disabled
+``tests/test_mamba3_numerics.py``: document resets, bit-identity controls for disabled
 features, every parameter receiving a gradient, and ``step()`` reproducing the chunked forward.
 """
 
@@ -53,7 +53,7 @@ def test_rmsnorm_shape_and_unit_rms():
 
 
 def test_rmsnorm_computes_in_fp32():
-    """Defect 10 (P2-E): the mean square is taken in fp32 and the result cast back. For fp32 inputs
+    """The mean square is taken in fp32 and the result cast back. For fp32 inputs
     the formula is the reference's, bit for bit."""
     norm = RMSNorm(64)
     with torch.no_grad():
@@ -309,7 +309,7 @@ def _continue_with_steps(block, x, prefix, doc_ids=None):
 @pytest.mark.parametrize("prefix", [1, 3, 23, 40], ids=lambda p: f"prefix{p}")
 @pytest.mark.parametrize("flags", MAMBA3_FLAG_SETS, ids=lambda f: "-".join(sorted(f)) or "default")
 def test_mamba3_forward_then_step_equals_step_only(flags, prefix):
-    """P2-F: a forward pass fills the cache (state, conv window, trapezoid B/x, fp64 angle, seen) so
+    """A forward pass fills the cache (state, conv window, trapezoid B/x, fp64 angle, seen) so
     stepping on from it equals stepping from the first token -- including a prompt shorter than
     the conv window and one that ends exactly on a chunk edge (chunk 8)."""
     block = m3_block(chunk_size=8, **flags).eval()
@@ -403,7 +403,7 @@ def test_mlstm_step_reproduces_the_shipping_exact_tfla_operator():
 
 
 def test_mlstm_step_state_stays_fp32():
-    """Defect 16 (P2-E): a bf16 decode keeps C and n in fp32, as Mamba3Block.step keeps its state."""
+    """A bf16 decode keeps C and n in fp32, as Mamba3Block.step keeps its state."""
     torch.manual_seed(0)
     block32 = mLSTMBlock(dim=64, head_dim=16, tfla_impl="exact").eval()
     block16 = mLSTMBlock(dim=64, head_dim=16, tfla_impl="exact").eval()
@@ -422,7 +422,7 @@ def test_mlstm_step_state_stays_fp32():
 @pytest.mark.parametrize("prefix", [1, 17, 40], ids=lambda p: f"prefix{p}")
 @pytest.mark.parametrize("hybrid_norm", [False, True], ids=["plain", "hybridnorm"])
 def test_mlstm_forward_then_step_equals_step_only(prefix, hybrid_norm):
-    """P2-G: TFLA's final (C, n) fill the cache, so stepping on after a one-pass prefill equals
+    """TFLA's final (C, n) fill the cache, so stepping on after a one-pass prefill equals
     stepping from the first token (chunk 8: prompts ending mid-chunk and on a chunk edge)."""
     block = mLSTMBlock(
         dim=64, head_dim=16, tfla_impl="exact", chunk_size=8, use_hybrid_norm=hybrid_norm
@@ -486,7 +486,7 @@ def test_attention_is_causal_and_blocks_cross_document():
 
 
 def test_attention_positions_restart_per_document():
-    """Defect 8 (P2-H): a document in a packed row sees the RoPE positions it would see alone, so its
+    """A document in a packed row sees the RoPE positions it would see alone, so its
     output equals running it alone -- for the second document too, at any offset."""
     from lexhybrid.layers.attention_block import positions_within_documents
 
@@ -503,7 +503,7 @@ def test_attention_positions_restart_per_document():
 
 
 def test_attention_rope_tables_extend_with_the_configured_theta():
-    """Defect 8's second half: past `max_position_embeddings` the reference rebuilt its tables with
+    """Second half: past `max_position_embeddings` the reference rebuilt its tables with
     theta 10,000 whatever rope_theta said. A short cache must now give the long cache's output."""
     torch.manual_seed(0)
     short = AttentionBlock(dim=64, num_heads=4, rope_theta=500000.0, max_position_embeddings=8).eval()
@@ -527,7 +527,7 @@ def _packed_doc_ids(batch: int, seq_len: int) -> torch.Tensor:
 
 
 def test_doc_block_mask_matches_the_dense_mask():
-    """Semantics of the P2-J block mask, checked with eager FlexAttention (runs everywhere): causal
+    """Semantics of the block mask, checked with eager FlexAttention (runs everywhere): causal
     inside each document, nothing across one -- the dense mask's exact meaning."""
     import torch.nn.functional as F
     from torch.nn.attention.flex_attention import flex_attention
@@ -559,9 +559,9 @@ def test_attn_impl_auto_keeps_the_dense_mask_on_cpu():
 
 @pytest.mark.linux_only
 def test_flex_block_mask_equals_dense():
-    """Defect 18 (P2-J): the compiled FlexAttention path on Inductor CPU equals the dense-mask path
-    for packed rows. Forward only: torch 2.11 has no FlexAttention backward on CPU (CI run
-    36330688065); the backward check is the CUDA variant in tests/test_gpu.py."""
+    """The compiled FlexAttention path on Inductor CPU equals the dense-mask path
+    for packed rows. Forward only: torch 2.11 has no FlexAttention backward on CPU; the
+    backward check is the CUDA variant in tests/test_gpu.py."""
     torch.manual_seed(0)
     dense = AttentionBlock(dim=64, num_heads=4, attn_impl="sdpa").eval()
     flex = AttentionBlock(dim=64, num_heads=4, attn_impl="flex").eval()
@@ -653,7 +653,7 @@ def test_hybrid_norm_ffn_is_post_residual_from_block_one():
 
 
 def test_mlstm_kwargs_reach_block():
-    """Defect 2 (P2-A): the reference filtered on unprefixed names, so every `mlstm_*` option fell
+    """The reference filtered on unprefixed names, so every `mlstm_*` option fell
     back to the block default. Gate biases are checked on the bare block, before any model init."""
     block = HybridBlock(
         dim=64,
@@ -686,7 +686,7 @@ def test_mlstm_kwargs_reach_block_through_the_config():
 
 
 def test_mamba3_expand_factor_independent():
-    """Defect 4 (P2-A): Mamba-3 read the Mamba-1 `expand_factor`; each mixer now reads its own."""
+    """Mamba-3 read the Mamba-1 `expand_factor`; each mixer now reads its own."""
     common = dict(dim=64, state_size=8, mamba3_d_state=16, mamba3_head_dim=32, head_dim=32)
     m3 = HybridBlock(layer_type="mamba3", expand_factor=4, mamba3_expand_factor=1, **common).mixer
     m1 = HybridBlock(layer_type="mamba", expand_factor=4, mamba3_expand_factor=1, **common).mixer

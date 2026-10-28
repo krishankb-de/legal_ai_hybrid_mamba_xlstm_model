@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
-"""Build a retrieval index from collected documents (plan P7-C; P7-D adds ``--kind dense``).
+"""Build a retrieval index from collected documents.
 
     .venv/bin/python scripts/build_index.py --kind bm25 --out data/index/smoke
     .venv/bin/python scripts/build_index.py --kind bm25 --docs data/scrubbed/gii.jsonl data/scrubbed/rii.jsonl \
         --out data/index/smoke
 
 Documents come from scrubbed JSONL files (default: every ``data/scrubbed/*.jsonl`` of an indexed
-type; R11 runs the LER scrub before any index build, so a file under a ``raw`` directory is refused
+type; the LER scrub runs before any index build, so a file under a ``raw`` directory is refused
 unless ``--allow-unscrubbed``); scrub parts (``<source>.part-<k>-of-<n>.jsonl``) are read like whole
-files. Statutes and regulations are chunked by provision, decisions by window (P7-A/B); other
+files. Statutes and regulations are chunked by provision, decisions by window; other
 document types are not indexed. The index directory gets ``chunks.jsonl`` (every chunk, for the
 prompt builder and the renderer), ``bm25/`` (``lexhybrid.retrieval.bm25.BM25Index``),
 ``index.json`` (what was indexed: sources, documents, chunks by type, settings) and
-``documents.jsonl`` (P7-F: ``lexhybrid.retrieval.index.DocumentDigest`` of every input document of
+``documents.jsonl`` (``lexhybrid.retrieval.index.DocumentDigest`` of every input document of
 an indexed type, which ``scripts/resync_index.py`` compares with the current documents).
 
 The retrieval index keeps every copy of a text: it is built from the collected documents, not from
-the pretraining deduplication (decision 13 as amended), so a passage held by two sources is found
+the pretraining deduplication, so a passage held by two sources is found
 in both.
 """
 
@@ -56,19 +56,17 @@ def build(
     kind: str, paths: list[Path], out: Path, allow_unscrubbed: bool = False, dedup: list[Path] = ()
 ) -> dict:
     if kind not in KINDS:
-        raise SystemExit(f"--kind {kind}: only {KINDS} so far (P7-D adds dense)")
+        raise SystemExit(f"--kind {kind}: only {KINDS} so far")
     raw = [p for p in paths if "raw" in p.parts]
     if raw and not allow_unscrubbed:
-        raise SystemExit(
-            f"not scrubbed (R11: the LER scrub runs before any index build): {[str(p) for p in raw]}"
-        )
+        raise SystemExit(f"not scrubbed (the LER scrub runs before any index build): {[str(p) for p in raw]}")
     if not paths:
         raise SystemExit("no document files")
     out.mkdir(parents=True, exist_ok=True)
     # index.json is written last: a rebuild that fails leaves no stale manifest beside the new
     # chunks.jsonl / documents.jsonl, so register and the re-sync refuse the directory
     (out / MANIFEST_NAME).unlink(missing_ok=True)
-    # decisions.cite_every_copy: a chunk of a document whose text another source also holds names
+    # A chunk of a document whose text another source also holds names
     # those documents, so its citation can name every source (lexhybrid/retrieval/copies.py)
     groups = copy_groups(read_dedup_logs(dedup)) if dedup else {}
     chunks, docs, by_type, sources = [], 0, Counter(), Counter()
@@ -111,7 +109,7 @@ def main(argv=None) -> int:
     parser.add_argument("--allow-unscrubbed", action="store_true")
     parser.add_argument(
         "--dedup", type=Path, nargs="*", default=[],
-        help="the pack's dedup.jsonl: cross-source copies are linked into Chunk.copies (decisions.cite_every_copy)",
+        help="the pack's dedup.jsonl: cross-source copies are linked into Chunk.copies",
     )  # fmt: skip
     args = parser.parse_args(argv)
     paths = args.docs if args.docs else sorted((REPO_ROOT / "data" / "scrubbed").glob("*.jsonl"))

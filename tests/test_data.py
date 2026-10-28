@@ -1,4 +1,4 @@
-"""The data pipeline at smoke scale (plan P3): schema, licences, collectors on fixtures, scrub,
+"""The data pipeline at smoke scale: schema, licences, collectors on fixtures, scrub,
 dedup, changelog, packing, splits, probes and the SFT format. Offline except ``network`` tests."""
 
 import pytest
@@ -33,7 +33,7 @@ def _doc(**kw):
 
 
 def test_document_roundtrip():
-    """P3-A: to_json/from_json is lossless (umlauts, sections, dates), sha256 is filled and checked."""
+    """To_json/from_json is lossless (umlauts, sections, dates), sha256 is filled and checked."""
     doc = _doc()
     assert doc.sha256 == sha256_text(doc.text)
     back = Document.from_json(doc.to_json())
@@ -88,7 +88,7 @@ def test_document_rejects_invalid_records(bad, match):
             {"kind": "statute", "code": "OR", "article": "40a", "absatz": "2bis"},
         ),
         ("ZGB Art. 334bis", {"kind": "statute", "code": "ZGB", "article": "334bis"}),
-        # gii's official abbreviations (job 2663318: 12.7% of its provisions failed the one-token code)
+        # gii's official abbreviations (12.7% of its provisions failed the one-token code)
         ("SGB 5 §20", {"kind": "statute", "code": "SGB 5", "paragraph": "20"}),
         ("13. BImSchV §3", {"kind": "statute", "code": "13. BImSchV", "paragraph": "3"}),
         ("1-DM-GoldmünzG §4", {"kind": "statute", "code": "1-DM-GoldmünzG", "paragraph": "4"}),
@@ -118,11 +118,11 @@ def test_citation_grammar_rejects_prose():
             parse_citation(text)
 
 
-# -- licences (P3-B) ---------------------------------------------------------------------------
+# -- licences ---------------------------------------------------------------------------
 
 
 def test_unknown_licence_refused():
-    """R9 / P3-B: build_corpus stops on 'unknown' and on unregistered licence ids -- it never
+    """Build_corpus stops on 'unknown' and on unregistered licence ids -- it never
     filters a licence problem away silently."""
     from lexhybrid.data.corpus.build import build_corpus
     from lexhybrid.data.corpus.licences import LicenceError, require_known
@@ -166,7 +166,7 @@ def test_register_lists_every_collector_and_licence():
     from lexhybrid.data.corpus.licences import LICENCES
     from tests.conftest import REPO_ROOT
 
-    text = (REPO_ROOT / "Docs" / "CORPUS_LICENCE_REGISTER.md").read_text()
+    text = (REPO_ROOT / "docs" / "CORPUS_LICENCE_REGISTER.md").read_text()
     for source in (
         "gii",
         "rii",
@@ -184,11 +184,11 @@ def test_register_lists_every_collector_and_licence():
     assert used and used <= set(LICENCES), used - set(LICENCES)
 
 
-# -- collectors: shared machinery (P3-E) -------------------------------------------------------
+# -- collectors: shared machinery -------------------------------------------------------
 
 
 def test_manifest_roundtrip(tmp_path):
-    """P3-E: the manifest keeps every schema field but the text, one line per document."""
+    """The manifest keeps every schema field but the text, one line per document."""
     from lexhybrid.data.corpus.manifest import read_manifest, write_manifest
 
     docs = [_doc(), _doc(id="gii:bgb:574", citation_id="BGB §574")]
@@ -276,7 +276,7 @@ def test_collector_cli_writes_documents_and_manifest(tmp_path):
     lines = (tmp_path / "raw" / "gii.jsonl").read_text().splitlines()
     assert len(lines) == 3 and Document.from_json(lines[0]).id == "gii:fake:0"
     assert len(read_manifest(tmp_path / "m" / "gii.jsonl")) == 3
-    # P4-K: `--limit all` collects everything the source has; nothing is left as .partial
+    # `--limit all` collects everything the source has; nothing is left as .partial
     assert (
         cli(Fake(), ["--limit", "all", "--out", str(tmp_path / "raw"), "--manifest-dir", str(tmp_path / "m")])
         == 0
@@ -318,7 +318,7 @@ main(Collector(), sys.argv[2:])
     [("ok", ["--limit", "2"], 0), ("empty", [], 1), ("raise", [], 1), ("ok", ["--limit", "0"], 2)],
 )
 def test_collector_entry_point_ends_the_process_at_once(tmp_path, mode, args, code):
-    """P4-K: a collector module ends its process right after writing its files (base.main), even
+    """A collector module ends its process right after writing its files (base.main), even
     with a worker thread still alive -- a stopped, shuffled datasets stream left one that kept the
     FineWeb-2 process alive past its summary line (2026-09-30) -- and exits with cli's code."""
     import subprocess
@@ -353,7 +353,7 @@ def test_every_collector_module_ends_through_the_entry_point():
 
 
 def test_collection_that_dies_leaves_the_last_complete_files_alone(tmp_path):
-    """A killed or failing at-scale collection (P4-K) streams into *.partial; the finished files of
+    """A killed or failing at-scale collection streams into *.partial; the finished files of
     the previous run are only replaced when a collection completes."""
     from lexhybrid.data.corpus.collectors.base import run_collector
 
@@ -378,7 +378,7 @@ def test_collection_that_dies_leaves_the_last_complete_files_alone(tmp_path):
 
 
 def test_http_cache_replays_responses_without_the_network(tmp_path):
-    """--http-cache (P4-K): a restarted collection is served what it already fetched -- GET by URL
+    """--http-cache: a restarted collection is served what it already fetched -- GET by URL
     and query, POST by JSON body -- without a request or a rate-limit wait; failures are not kept."""
     import requests
 
@@ -437,13 +437,13 @@ def test_http_cache_replays_responses_without_the_network(tmp_path):
     assert len(session.calls) == 7, "without a cache every call reaches the network"
 
 
-# -- collector: Gesetze im Internet (P3-F) ------------------------------------------------------
+# -- collector: Gesetze im Internet ------------------------------------------------------
 
 FIXTURES = __import__("pathlib").Path(__file__).parent / "fixtures" / "collectors"
 
 
 def test_gii_parser_on_fixture():
-    """P3-F: one document per provision, Absätze as sections, lists on their own lines, the Stand
+    """One document per provision, Absätze as sections, lists on their own lines, the Stand
     date as valid_from, licence and jurisdiction from the register; headings and TOC skipped."""
     from lexhybrid.data.corpus.collectors.gii import parse_gii_xml
 
@@ -488,7 +488,7 @@ def _gii_norm(enbez: str, text: str) -> str:
 
 
 def test_gii_ids_are_unique_when_articles_number_their_own_paragraphs():
-    """Job 2594824 (137 gii ids named 2-23 provisions): a § under an article heading is cited and
+    """A § under an article heading is cited and
     linked as that article's (EGBGB Art. 229 § 6, art_229__6.html, Roman numerals lowercased in the
     URL); a number the XML itself repeats gets the site's suffix (__8_1.html); every id is unique."""
     from lexhybrid.data.corpus.collectors.gii import parse_gii_xml
@@ -552,11 +552,11 @@ def test_gii_live_smoke():
     assert len(docs) == 2 and all(d.citation_id.startswith("BGB §") and d.valid_from for d in docs)
 
 
-# -- collector: Rechtsprechung im Internet (P3-G) -----------------------------------------------
+# -- collector: Rechtsprechung im Internet -----------------------------------------------
 
 
 def test_rii_parser_on_fixtures():
-    """P3-G: one document per decision; Randnummern become `Rn. N` sections; Tenor, Leitsatz,
+    """One document per decision; Randnummern become `Rn. N` sections; Tenor, Leitsatz,
     Tatbestand and Gründe keep their order; court + docket is the citation; the date is valid_from."""
     from lexhybrid.data.corpus.collectors.rii import parse_rii_xml
 
@@ -606,11 +606,11 @@ def test_rii_live_smoke():
     assert len(docs) == 2 and all(d.valid_from and d.sections for d in docs)
 
 
-# -- collector: Open Legal Data (P3-H) ----------------------------------------------------------
+# -- collector: Open Legal Data ----------------------------------------------------------
 
 
 def test_oldp_parser_on_fixtures():
-    """P3-H: one document per case; court name -> citation abbreviation; HTML paragraphs as
+    """One document per case; court name -> citation abbreviation; HTML paragraphs as
     sections under their part headings; ODbL-1.0; the decision date as valid_from."""
     import json
 
@@ -678,11 +678,11 @@ def test_oldp_live_smoke():
     assert len(docs) == 2 and all(d.valid_from and d.text for d in docs)
 
 
-# -- collector: EUR-Lex (P3-I) ------------------------------------------------------------------
+# -- collector: EUR-Lex ------------------------------------------------------------------
 
 
 def test_eurlex_parser_on_fixture():
-    """P3-I: one document per article of the German XHTML; paragraphs as `Art. N Abs. K` sections;
+    """One document per article of the German XHTML; paragraphs as `Art. N Abs. K` sections;
     lettered points on one line; short name as the citation code; the OJ date as valid_from."""
     from lexhybrid.data.corpus.collectors.eurlex import parse_eurlex_xhtml
 
@@ -758,7 +758,7 @@ def test_eurlex_live_smoke():
     assert [d.citation_id for d in docs] == ["RL (EU) 2011/83 Art. 1", "RL (EU) 2011/83 Art. 2"]
 
 
-# -- collector: RIS, Austria (P3-J) -------------------------------------------------------------
+# -- collector: RIS, Austria -------------------------------------------------------------
 
 
 def _ris_fixture(name):
@@ -770,7 +770,7 @@ def _ris_fixture(name):
 
 
 def test_ris_norm_versions_on_fixtures():
-    """P3-J: one document per norm VERSION with its validity window (the changelog's input);
+    """One document per norm VERSION with its validity window (the changelog's input);
     Absätze as sections even when the first starts with the paragraph symbol."""
     from lexhybrid.data.corpus.collectors.ris import parse_ris_norm
 
@@ -822,7 +822,7 @@ def test_ris_decision_on_fixture():
 
 
 def test_ris_stops_at_the_last_page_the_search_reports(monkeypatch):
-    """Job 2589358_4: RIS answers a page past the end with HTTP 500 ("Die Seitennummer ist höher als
+    """RIS answers a page past the end with HTTP 500 ("Die Seitennummer ist höher als
     die Anzahl der verfügbaren Seiten"), not an empty list, so the whole RIS task died after ABGB's
     last page. The collector stops at the page count in ``Hits`` and never asks for the next page."""
     from lexhybrid.data.corpus.collectors import ris
@@ -867,7 +867,7 @@ def test_ris_live_smoke():
     assert [d.doc_type for d in docs] == ["statute", "decision"] and all(d.valid_from for d in docs)
 
 
-# -- collector: Fedlex, Switzerland (P3-K) ------------------------------------------------------
+# -- collector: Fedlex, Switzerland ------------------------------------------------------
 
 
 def _fedlex(name):
@@ -878,7 +878,7 @@ def _fedlex(name):
 
 
 def test_fedlex_parser_on_fixtures():
-    """P3-K: one document per article of the Akoma Ntoso XML; Absätze as sections (``Abs. 2bis``
+    """One document per article of the Akoma Ntoso XML; Absätze as sections (``Abs. 2bis``
     too, and the superscript-numbered ones of the final title); list items one per line; footnotes
     never in the text; repealed articles and the provisions of single amendments skipped."""
     or_, zgb = _fedlex("or_excerpt"), _fedlex("zgb_excerpt")
@@ -925,7 +925,7 @@ def test_fedlex_parser_on_fixtures():
 
 
 def test_fedlex_valid_from_is_the_provisions_version():
-    """P3-K / P3-T: valid_from is the latest in-force date in the footnotes of the article or of the
+    """Valid_from is the latest in-force date in the footnotes of the article or of the
     headings above it, else the act's entry into force -- never after the version that prints it."""
     or_, zgb = _fedlex("or_excerpt"), _fedlex("zgb_excerpt")
     assert or_["OR Art. 1"].valid_from == "1912-01-01"  # original text: the act's entry into force
@@ -938,7 +938,7 @@ def test_fedlex_valid_from_is_the_provisions_version():
 
 
 def test_fedlex_versions_and_codes():
-    """P3-K: the version collected is the latest one applicable on the day; an act without a
+    """The version collected is the latest one applicable on the day; an act without a
     usable German abbreviation is cited by its SR number."""
     import json
 
@@ -968,7 +968,7 @@ def test_fedlex_live_smoke():
     assert [d.citation_id for d in docs] == ["GlG Art. 1", "GlG Art. 2"] and all(d.valid_from for d in docs)
 
 
-# -- collector: BGer, Swiss Federal Supreme Court (P3-L) ---------------------------------------
+# -- collector: BGer, Swiss Federal Supreme Court ---------------------------------------
 
 
 def _bger(name):
@@ -982,7 +982,7 @@ def _bger(name):
 
 
 def test_bger_parser_on_fixtures():
-    """P3-L: one document per decision; the heading, facts, considerations (``E. 4.4.2``), operative
+    """One document per decision; the heading, facts, considerations (``E. 4.4.2``), operative
     part and closing as sections; a numbered quotation inside a consideration stays inside it."""
     doc = _bger("CH_BGer_004_4A-102-2026_2026-08-17")
     assert (doc.id, doc.citation_id, doc.valid_from) == (
@@ -1119,7 +1119,7 @@ def test_bger_live_smoke():
     assert all(any(s.label.startswith("E. ") for s in d.sections) for d in docs)
 
 
-# -- collector: DIP, Bundestag printed papers (P3-M) -------------------------------------------
+# -- collector: DIP, Bundestag printed papers -------------------------------------------
 
 
 def _dip(name):
@@ -1132,7 +1132,7 @@ def _dip(name):
 
 
 def test_dip_parser_on_fixtures():
-    """P3-M: one document per printed paper, cited "BT-Drs. 21/8109" as DIP's terms prescribe;
+    """One document per printed paper, cited "BT-Drs. 21/8109" as DIP's terms prescribe;
     sections are the paragraphs under the bill's headings; the watermark, the printer's
     boilerplate and the PDF's line breaks and hyphenation are gone."""
     bill, report, bundesrat = _dip("bt_21_8109"), _dip("bt_21_8163"), _dip("br_506_26")
@@ -1206,11 +1206,11 @@ def test_dip_live_smoke():
     )
 
 
-# -- collector: FineWeb-2 German (P3-N) --------------------------------------------------------
+# -- collector: FineWeb-2 German --------------------------------------------------------
 
 
 def test_fineweb2_parser_on_fixture_rows():
-    """P3-N: one document per page; general German text, commercial-safe under ODC-By; the crawl
+    """One document per page; general German text, commercial-safe under ODC-By; the crawl
     date as valid_from; paragraphs as sections; no citation id."""
     import json
 
@@ -1246,11 +1246,11 @@ def test_fineweb2_live_smoke():
     assert len(docs) == 2 and all(d.doc_type == "general" and d.valid_from for d in docs)
 
 
-# -- collector: Multi Legal Pile, research-exception arm (P3-O) ---------------------------------
+# -- collector: Multi Legal Pile, research-exception arm ---------------------------------
 
 
 def test_multilegalpile_rows_are_research_only():
-    """P3-O / decision 2: every Multi Legal Pile document is research_only and never commercial-safe
+    """Every Multi Legal Pile document is research_only and never commercial-safe
     (CC BY-NC-SA 4.0); the research arm admits it, the commercial-safe arm refuses it."""
     import json
 
@@ -1295,7 +1295,7 @@ def test_multilegalpile_live_smoke():
     ] and all(d.research_only for d in docs)
 
 
-# -- tokenizer (P3-C) --------------------------------------------------------------------------
+# -- tokenizer --------------------------------------------------------------------------
 
 
 @pytest.fixture(scope="module")
@@ -1337,7 +1337,7 @@ def _check_qwen3(tok):
 
 
 def test_tokenizer_specials_fit_vocab(qwen3):
-    """P3-C: Qwen3's tokenizer plus decision 7's 87 specials fits the student's 151,936 rows; EOS is
+    """Qwen3's tokenizer plus its 87 specials fits the student's 151,936 rows; EOS is
     Qwen3's own 151,643; specials are single tokens but never come out of raw document text."""
     _check_qwen3(qwen3)
 
@@ -1351,14 +1351,14 @@ def test_tokenizer_download_and_specials(tmp_path, monkeypatch):
     _check_qwen3(T.load_tokenizer())
 
 
-# -- evaluation sets (P3-P, P3-Q) --------------------------------------------------------------
+# -- evaluation sets --------------------------------------------------------------
 
 EVALSETS = FIXTURES.parent / "evalsets"
 
 
 def test_gerlerb_parsers_on_fixture(tmp_path):
-    """P3-P: GerLeRB's TSV topics and qrels and its TREC corpus; passage ids map onto GII's corpus;
-    the set is evaluation-only and says why (GPT-4.1 questions, R10)."""
+    """GerLeRB's TSV topics and qrels and its TREC corpus; passage ids map onto GII's corpus;
+    the set is evaluation-only and says why (GPT-4.1 questions)."""
     import json
 
     from lexhybrid.data.evalsets import gerlerb
@@ -1409,7 +1409,7 @@ def test_gerdalir_select_on_fixture():
 
 
 def test_legalquad_and_gerlayqa_parsers_on_fixtures():
-    """P3-Q: LegalQuAD's SQuAD items keep the answer span and the Open Legal Data decision id;
+    """LegalQuAD's SQuAD items keep the answer span and the Open Legal Data decision id;
     GerLayQA's items carry their gold BGB paragraphs as citation ids and are research-only."""
     import json
 
@@ -1445,7 +1445,7 @@ def test_evalsets_live_smoke():
     assert len(lerb.queries) == 2 and all(any(p.id in r for p in lerb.corpus) for r in lerb.qrels.values())
 
 
-# -- LER scrub (P3-R) --------------------------------------------------------------------------
+# -- LER scrub --------------------------------------------------------------------------
 
 
 def _find(text, needle, start=0):
@@ -1454,7 +1454,7 @@ def _find(text, needle, start=0):
 
 
 def test_scrub_replaces_person_names():
-    """P3-R: judges, lawyers and persons become numbered typed placeholders in the text and the
+    """Judges, lawyers and persons become numbered typed placeholders in the text and the
     sections; a repeated name is caught where the model did not tag it; the scrub log holds
     hashes, never the names."""
     from lexhybrid.data.corpus.scrub_ler import Entity, scrub_document
@@ -1520,7 +1520,7 @@ def test_scrub_short_forms_are_replaced_only_where_tagged():
 
 
 def test_scrub_skips_a_span_that_trims_to_whitespace():
-    """Job 2593479 (9 tasks, KeyError ' '): a span of punctuation tokens (`„ “`, `( )`) trims to a
+    """A span of punctuation tokens (`„ “`, `( )`) trims to a
     space; it gets no placeholder and must not be replaced, while the real names still are."""
     from lexhybrid.data.corpus.scrub_ler import Entity, scrub_document
 
@@ -1537,7 +1537,7 @@ def test_scrub_skips_a_span_that_trims_to_whitespace():
 
 
 def test_scrub_worker_caps_every_piece_in_characters(script):
-    """Job 2593479_35 (CUDA OOM, 32 GiB): flair's character LM allocates per character, so a DIP
+    """Flair's character LM allocates per character, so a DIP
     table line of 200 long "words" or one 30,000-character run must reach the tagger in pieces of
     at most --max-chars characters, each at its own offset into the text."""
     worker = script("scrub_ner_worker")
@@ -1574,14 +1574,12 @@ def test_scrub_worker_tags_the_model_card_example():
     entities, stats = run_worker([doc], args=cache)
     (person,) = [e for e in entities["t:1"] if e.label == "PER"]
     assert doc.text[person.start : person.end] == "W." and person.score > 0.9 and stats["docs"] == 1
-    batched, stats = run_worker(
-        [doc, other], args=(*cache, "--docs-per-batch", "2")
-    )  # P4-L: one predict call
+    batched, stats = run_worker([doc, other], args=(*cache, "--docs-per-batch", "2"))  # one predict call
     assert batched["t:1"] == entities["t:1"] and batched["t:2"] == [] and stats["docs"] == 2
 
 
 def test_collectors_record_hierarchy_and_parts():
-    """P7-A/B's inputs (schema fields added 2026-09-29): statute collectors carry the act's
+    """Retrieval inputs (added schema fields): statute collectors carry the act's
     structural headings above each provision (Document.hierarchy, outermost first), decision
     collectors the part of the decision each paragraph belongs to (Section.part); records written
     before the fields existed still load, with the defaults."""
@@ -1626,7 +1624,7 @@ def test_collectors_record_hierarchy_and_parts():
 
 
 def test_scrub_worker_tags_a_batch_of_documents_in_one_predict_call(script, monkeypatch):
-    """P4-L: `--docs-per-batch` puts the sentences of several documents into ONE predict call (short
+    """`--docs-per-batch` puts the sentences of several documents into ONE predict call (short
     documents fill the GPU's mini-batches together) and yields the per-document entities unchanged."""
     import sys
     import types
@@ -1704,7 +1702,7 @@ print(json.dumps({"docs": n, "chars": 0, "seconds": 0.1, "docs_per_s": 1.0}), fi
 
 
 def test_scrub_streams_parts_through_one_worker(tmp_path):
-    """P4-L: stride parts of a source, streamed through one worker process with a bounded window
+    """Stride parts of a source, streamed through one worker process with a bounded window
     of documents in flight; outputs named per part and renamed from *.partial on completion; a
     worker that dies leaves only the *.partial files; a consumer that stops early does not hang."""
     import itertools
@@ -1751,7 +1749,7 @@ def test_scrub_streams_parts_through_one_worker(tmp_path):
 
 
 def test_scrub_parts_keep_only_the_market_jurisdictions(tmp_path, script):
-    """decisions.market (Germany only): with jurisdictions, a Swiss row is never scrubbed, the
+    """German law only: with jurisdictions, a Swiss row is never scrubbed, the
     stride runs over the kept rows, and build_shards' round-robin read restores their order."""
     import sys
 
@@ -1778,7 +1776,7 @@ def test_scrub_parts_keep_only_the_market_jurisdictions(tmp_path, script):
     assert [d.id for d in script("build_shards").iter_documents(paths)] == want
 
 
-# -- deduplication (P3-S) ----------------------------------------------------------------------
+# -- deduplication ----------------------------------------------------------------------
 
 
 def _oldp_docs():
@@ -1793,10 +1791,9 @@ def _oldp_docs():
 
 
 def test_dedup_catches_planted_near_duplicate():
-    """P3-S: exact-hash pre-pass, then MinHash (5-gram shingles, 128 permutations, Jaccard >= 0.8).
+    """Exact-hash pre-pass, then MinHash (5-gram shingles, 128 permutations, Jaccard >= 0.8).
     A near duplicate inside one source is dropped; the copy in another source (here the research-only
-    Multi Legal Pile copy of an OLDP decision) is kept and linked (decision 13 as amended by the user,
-    2026-09-29: "keep both and when cited cite both"); whatever the input order, the same answer."""
+    Multi Legal Pile copy of an OLDP decision) is kept and linked (keep both and cite both when cited); whatever the input order, the same answer."""
     import dataclasses
     import random
 
@@ -1832,7 +1829,7 @@ def test_dedup_catches_planted_near_duplicate():
 
 
 def test_dedup_at_scale_makes_the_same_decisions(tmp_path):
-    """P4-L: signatures (no text, 512 bytes of MinHash) computed in worker processes from a stream,
+    """Signatures (no text, 512 bytes of MinHash) computed in worker processes from a stream,
     then the same visiting order and decisions as `deduplicate`."""
     import dataclasses
 
@@ -1860,7 +1857,7 @@ def test_dedup_at_scale_makes_the_same_decisions(tmp_path):
 
 
 def test_dedup_refuses_an_id_that_names_two_documents():
-    """Job 2594824: two gii provisions under one id reached the LSH index ("The given key already
+    """Two gii provisions under one id reached the LSH index ("The given key already
     exists"); the deduplication now names the repeated ids before any work."""
     import dataclasses
 
@@ -1883,11 +1880,11 @@ def test_dedup_shingles():
     assert shingles("Zu kurz") == {"zu kurz"} and shingles("") == set()
 
 
-# -- currency changelog (P3-T) -----------------------------------------------------------------
+# -- currency changelog -----------------------------------------------------------------
 
 
 def test_changelog_from_fixture_versions(tmp_path):
-    """P3-T: RIS versions (linked to the version they replaced), Fedlex articles by their footnote
+    """RIS versions (linked to the version they replaced), Fedlex articles by their footnote
     dates, GII provisions by their act's Stand (granularity 'act'); nothing older than the date."""
     import json
 
@@ -1922,7 +1919,7 @@ def test_changelog_from_fixture_versions(tmp_path):
     assert json.loads(lines[0]) == {"since": "2011-01-01", "changes": 6} and len(lines) == 7
 
 
-# -- packing (P3-U) ----------------------------------------------------------------------------
+# -- packing ----------------------------------------------------------------------------
 
 
 def _char_codec():
@@ -1945,7 +1942,7 @@ def _unpack(rows, eos_id, decode):
 
 
 def test_packing_roundtrip_doc_ids(tmp_path):
-    """P3-U: EOS after every document, doc_ids stepping right after it, documents carried across
+    """EOS after every document, doc_ids stepping right after it, documents carried across
     rows (never dropped), the last row padded with EOS that joins its last document; shards
     round-trip through parquet."""
     from lexhybrid.data.packing import pack, read_rows, write_shards
@@ -1996,7 +1993,7 @@ def test_packing_with_the_qwen3_tokenizer(qwen3):
     assert _unpack(rows, EOS_ID, qwen3.decode) == [d.text for d in docs]
 
 
-# -- datasets: split, mixture, arms (P3-V) -----------------------------------------------------
+# -- datasets: split, mixture, arms -----------------------------------------------------
 
 
 def _mlp_docs():
@@ -2028,7 +2025,7 @@ def _build(tmp_path, docs, row_len=64, minimum=1):
 
 
 def test_val_split_by_document(tmp_path):
-    """P3-V: 0.1% of the documents or the minimum (2,000 by default), by seeded hash, disjoint from
+    """0.1% of the documents or the minimum (2,000 by default), by seeded hash, disjoint from
     training, the same every time; a corpus too small for it is refused; packing happens after the
     split, so every row belongs to one side."""
     import pyarrow.parquet as pq
@@ -2060,7 +2057,7 @@ def test_val_split_by_document(tmp_path):
 
 
 def test_no_research_only_in_commercial_safe_shard(tmp_path):
-    """R9 / P3-V: the commercial-safe arm never serves a research-only row -- the mixture leaves an
+    """The commercial-safe arm never serves a research-only row -- the mixture leaves an
     `arm: research` source out, and shards that are not commercial-safe are refused even when a
     config names them. The research arm serves both."""
     import yaml
@@ -2133,7 +2130,7 @@ def test_mixture_draws_the_configured_shares(tmp_path):
 
 
 def test_streaming_build_equals_the_in_memory_build_at_every_row_len(tmp_path):
-    """P4-L at scale: one pass, each document tokenised once, packed at two row lengths together --
+    """At scale: one pass, each document tokenised once, packed at two row lengths together --
     the same shards and meta.json as build_source_shards at each length on its own."""
     import json
 
@@ -2176,9 +2173,9 @@ def _char_encoder():
 
 
 def test_build_shards_streams_scrub_parts_dedups_and_packs_every_length(tmp_path, script):
-    """P4-L's pack step (scripts/build_shards.py): a whole scrubbed file and a source in scrub-array
+    """The pack step (scripts/build_shards.py): a whole scrubbed file and a source in scrub-array
     parts, deduplicated together (a cross-source copy is dropped from its source before packing),
-    packed at two row lengths; the summary P4-M reads; incomplete parts and unscrubbed sources
+    packed at two row lengths; the summary the next step reads; incomplete parts and unscrubbed sources
     are refused."""
     import argparse
     import dataclasses
@@ -2240,7 +2237,7 @@ def test_build_shards_streams_scrub_parts_dedups_and_packs_every_length(tmp_path
 
 
 def test_mixture_cuts_stored_rows_for_a_shorter_row_len(tmp_path):
-    """The P5 screen trains on 2,048-token rows and P4-L packs 4,096 and 8,192: a row length with
+    """The screen arms train on 2,048-token rows and the shard builder packs 4,096 and 8,192: a row length with
     no shards of its own is served from the smallest packed multiple, each stored row cut into
     consecutive sub-rows that are exactly the stored row's pieces (here 32 from 64)."""
     import torch
@@ -2280,7 +2277,7 @@ def test_mixture_cuts_stored_rows_for_a_shorter_row_len(tmp_path):
 
 
 def test_corpus_counts_per_source_jurisdiction_and_arm(tmp_path, script, capsys):
-    """P4-L verdict (scripts/corpus_counts.py): documents and characters from the manifests, tokens
+    """Corpus counts (scripts/corpus_counts.py): documents and characters from the manifests, tokens
     estimated per jurisdiction from a stride sample; rows outside the market are reported but not
     totalled; the research total includes the commercial-safe one; a missing manifest fails."""
     import json
@@ -2317,7 +2314,7 @@ def test_corpus_counts_per_source_jurisdiction_and_arm(tmp_path, script, capsys)
     assert "no manifest for: bger" in capsys.readouterr().out
 
 
-# -- probes: MQAR and statute recall (P3-W) ----------------------------------------------------
+# -- probes: MQAR and statute recall ----------------------------------------------------
 
 
 def test_mqar_generator_has_the_reference_semantics():
@@ -2376,7 +2373,7 @@ def _statute_docs():
 
 
 def test_statute_recall_items_need_the_context():
-    """P3-W: the prompt holds the provision, more law after it, then the question; the answer, its
+    """The prompt holds the provision, more law after it, then the question; the answer, its
     Absatz 2, is in the prompt verbatim; exact match and char-F1 behave on strings."""
     from lexhybrid.data.probes.statute_recall import build_items, char_f1, exact_match
 
@@ -2399,7 +2396,7 @@ def test_statute_recall_items_need_the_context():
 
 
 def test_statute_recall_max_items_stops_early_with_the_same_items():
-    """P5-G: run_probes needs 100 items from gii; building every statute's item first is quadratic.
+    """Run_probes needs 100 items from gii; building every statute's item first is quadratic.
     max_items stops early and returns exactly the first items of the full build."""
     from lexhybrid.data.probes.statute_recall import build_items
 
@@ -2440,11 +2437,11 @@ def test_evaluate_probes_runs_on_a_random_model(script):
     assert "multihop" in out and out["multihop"]["items"] >= 0
 
 
-# -- probe: two-hop cross-references (P3-X) ----------------------------------------------------
+# -- probe: two-hop cross-references ----------------------------------------------------
 
 
 def test_multihop_items_need_two_passages():
-    """P3-X: A refers to exactly one provision B of the same act; the question does not name B; the
+    """A refers to exactly one provision B of the same act; the question does not name B; the
     answer (B's title) is not in A, is in B, and leaves the context when B is taken out, so both
     passages are needed; distractors come from the same act."""
     from lexhybrid.data.probes.multihop import build_items, same_act_references, title
@@ -2469,7 +2466,7 @@ def test_multihop_items_need_two_passages():
 
 
 def test_multihop_builds_over_gii_codes_that_are_not_one_token():
-    """Job 2663318 (P5-G): every probe task crashed in build_items on gii's '1-DM-GoldmünzG §4', and
+    """Every probe task crashed in build_items on gii's '1-DM-GoldmünzG §4', and
     12.7% of gii's provisions carry such codes (SGB 5, 13. BImSchV). The same BGB items come out
     when the act is called 'SGB 5', and a corpus holding those codes builds."""
     import dataclasses
@@ -2489,7 +2486,7 @@ def test_multihop_builds_over_gii_codes_that_are_not_one_token():
     }
 
 
-# -- SFT format (P3-Y) -------------------------------------------------------------------------
+# -- SFT format -------------------------------------------------------------------------
 
 
 def _sft_example():
@@ -2510,7 +2507,7 @@ def _sft_example():
 
 
 def test_sft_format_roundtrip():
-    """P3-Y: the prompt is one document (no EOS inside), passages are sentence-numbered, answers are
+    """The prompt is one document (no EOS inside), passages are sentence-numbered, answers are
     text with <|q|><|cK|><|sJ|> and <|cite|><|cK|> pointers ending on the EOS; render/parse round-trip,
     unanswerable included; malformed examples are refused."""
     import dataclasses
@@ -2584,7 +2581,7 @@ def test_scrub_worker_reads_the_jobs_model_cache(script, monkeypatch):
 
 
 def test_evaluate_val_ppl_reads_the_val_split_at_the_screen_row_len(tmp_path, script, monkeypatch, capsys):
-    """P5-F: evaluate_val_ppl.py reads the packed validation rows through the dataset yaml (here oldp
+    """Evaluate_val_ppl.py reads the packed validation rows through the dataset yaml (here oldp
     packed at 64 and served cut to 32, like the screen's 2,048 from 4,096), scores every row once and
     prints the VALPPL line with late_doc and late_row counts."""
     import json
@@ -2627,10 +2624,9 @@ def test_evaluate_val_ppl_reads_the_val_split_at_the_screen_row_len(tmp_path, sc
 
 
 def test_p6_source_weights_cap_every_source_at_four_passes():
-    """decisions.p6_source_weights: at P6's 5 B tokens no source is read more than 4 times in either
+    """The final-run source weights: at 5 B tokens no source is read more than 4 times in either
     arm, and gii, the statutes the model must cite, sits at the cap in the commercial-safe arm (the
-    old 1 / 1 / 1 / 0.5 weights gave it 29 passes). Training tokens: pack job 2599735
-    (analysis/corpus_manifest.md)."""
+    old 1 / 1 / 1 / 0.5 weights gave it 29 passes)."""
     from omegaconf import OmegaConf
 
     from lexhybrid.data.datasets import effective_weights, source_specs
@@ -2649,7 +2645,7 @@ def test_p6_source_weights_cap_every_source_at_four_passes():
 
 
 def test_gold_nll_is_the_teacher_forced_ce_of_the_answer_and_both_probes_report_it():
-    """decisions.p6_probe_scores: the answer's per-token NLL after the prompt equals the CE of a full
+    """The answer's per-token NLL after the prompt equals the CE of a full
     forward pass over the target positions; statute recall and multi-hop return it beside exact match."""
     import math
 

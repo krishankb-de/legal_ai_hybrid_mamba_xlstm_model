@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Validation and training curves of the screen runs, read from their TensorBoard events (P5-D, P5-F).
+"""Validation and training curves of the screen runs, read from their TensorBoard events.
 
     .venv/bin/python scripts/screen_metrics.py --outputs $SCRATCH_ROOT/outputs --window 250
 
 ``val/perplexity`` reaches only the progress bar (not rendered into a SLURM log) and TensorBoard
-under ``outputs/<exp>/logs/<exp>/version_<n>/`` on scratch, which is never pulled (rule f). This
+under ``outputs/<exp>/logs/<exp>/version_<n>/`` on scratch, which is never pulled. This
 prints, per run directory matching ``--prefix``, from its highest ``version_<n>`` (an earlier
 version is an earlier attempt of the same experiment):
 
@@ -14,7 +14,7 @@ version is an earlier attempt of the same experiment):
 
 ``val_ppl`` is ``exp(val_loss)``: ``val/loss`` is the token-weighted mean CE, but the logged
 ``val/perplexity`` (``logged_ppl``) is the token-weighted mean of per-batch ``exp(CE)``, which is
-larger by Jensen's inequality and noisy (job 2636358: 31.69 against exp(loss) = 8.19); it is not the
+larger by Jensen's inequality and noisy (e.g. 31.69 against exp(loss) = 8.19); it is not the
 validation PPL. ``CURVE`` rows are means over ``--window`` optimizer steps (``grad_norm_max`` the maximum,
 ``nan_skips`` and ``lr`` the last value); a tag the run never logged is left out.
 

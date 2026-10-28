@@ -1,4 +1,4 @@
-"""What every evaluation set shares (plan P3-P, P3-Q): records, the info block, writers, the CLI."""
+"""What every evaluation set shares: records, the info block, writers, the CLI."""
 
 import argparse
 import json

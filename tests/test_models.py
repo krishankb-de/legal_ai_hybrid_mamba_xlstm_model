@@ -1,4 +1,4 @@
-"""Model-level behaviour of HybridLanguageModel (plan P1-N)."""
+"""Model-level behaviour of HybridLanguageModel."""
 
 import copy
 
@@ -139,7 +139,7 @@ def test_mamba3_config_flags_reach_the_block():
         tiny(["mamba3"], mamba3_mimo_rank=4)
 
 
-# Reference M1-B/F: Delta at init under each norm topology and dt init.
+# Delta at init under each norm topology and dt init.
 def _delta_at_init(model, seq_len=128, batch=4):
     torch.manual_seed(0)
     block = next(la for la in model.layers if la.layer_type == "mamba")
@@ -168,7 +168,7 @@ def _delta_model(norm_topology, dt_init_strategy="none"):
     )
 
 
-_DEFECT_DELTA = "reference M1: no Mamba dt init, and dt_norm would erase one. strict=True."
+_DEFECT_DELTA = "upstream reference: no Mamba dt init, and dt_norm would erase one. strict=True."
 
 
 @pytest.mark.parametrize(
@@ -202,7 +202,7 @@ def test_dt_proj_bias_is_zeroed_by_model_init():
 
 @pytest.mark.parametrize("forget_bias", [0.0, 3.0])
 def test_mlstm_gate_bias_survives_model_init(forget_bias):
-    """Defect 3 (P2-B): the model's weight pass zeroed both gate biases; `post_model_init` restores
+    """The model's weight pass zeroed both gate biases; `post_model_init` restores
     the -10 input bias and the configured forget bias inside the built model."""
     model = tiny(["mlstm", "mamba3"], mlstm_forget_gate_bias_init=forget_bias)
     mixer = model.layers[0].mixer
@@ -221,7 +221,7 @@ def test_hybrid_bc_keeps_bc_norms_but_drops_dt_norm():
 
 @pytest.mark.parametrize("pattern", [["mamba3"], ["mamba3", "mlstm"]])
 def test_ssd_runs_in_a_pure_bf16_model_without_autocast(pattern):
-    """A `.to(bfloat16)` model without autocast once died in the SSD einsums (reference job 2560261)."""
+    """A `.to(bfloat16)` model without autocast once died in the SSD einsums."""
     ref = tiny(pattern).eval()
     ids = torch.randint(0, 128, (2, 48))
     with torch.no_grad():
@@ -258,7 +258,7 @@ def test_every_layer_type_runs_in_both_dtypes(dtype):
 
 
 def test_loss_masks_boundary_keeps_eos():
-    """Defect 6 (P2-L): a document's last token (its EOS) does not predict the next document's
+    """A document's last token (its EOS) does not predict the next document's
     first; the EOS itself stays a target; a row that starts mid-document needs no mask at its start;
     -100 labels are ignored; `n_supervised_tokens` counts what entered the loss."""
     import torch.nn.functional as F
@@ -293,7 +293,7 @@ def test_loss_with_nothing_supervised_is_zero_not_nan():
 
 
 def test_param_counts_tied_untied():
-    """Defect 17 and decision 11 (P2-M): init then tie; `non_embedding = total - embedding - (lm_head if
+    """Init then tie; `non_embedding = total - embedding - (lm_head if
     untied)`, so tying changes the total but never the non-embedding count; both are in the ARCH line."""
     untied = tiny(["mamba3", "mlstm", "attention"], tie_word_embeddings=False)
     tied = tiny(["mamba3", "mlstm", "attention"], tie_word_embeddings=True)
@@ -313,7 +313,7 @@ def test_param_counts_tied_untied():
 
 
 def test_mtp_head_off_is_bit_identical():
-    """P2-S: at mtp_n = 1 nothing is built -- the other MTP settings are inert -- and turning MTP on
+    """At mtp_n = 1 nothing is built -- the other MTP settings are inert -- and turning MTP on
     leaves every main-model weight and the main logits bit-identical (the head is built last)."""
     pattern = ["mamba3", "mlstm", "attention"]
     off = tiny(pattern, dropout=0.0).eval()
@@ -395,8 +395,8 @@ def test_gradient_checkpointing_matches_the_plain_forward():
 @pytest.mark.linux_only
 @pytest.mark.slow
 def test_compile_forward_chunk128(monkeypatch):
-    """P2-Y: hybrid_legal_base at reduced width -- chunk 128 for both Mamba-3 and mLSTM, packed rows
-    -- compiled on the Inductor CPU backend (gcc; runs in CI, the CUDA variant runs in P4-J1) equals
+    """Hybrid_legal_base at reduced width -- chunk 128 for both Mamba-3 and mLSTM, packed rows
+    -- compiled on the Inductor CPU backend (gcc; runs in CI, the CUDA variant runs on the cluster) equals
     eager at 1e-4, and exact TFLA stays on its factorised path: the sequential fallback is spied
     and tfla_fallback is "error", so either path would fail the test."""
     import lexhybrid.kernels.tfla.tfla_interface as tfla

@@ -1,11 +1,11 @@
-"""Retrieval chunks (plan P7-A, P7-B): the units the retriever indexes and a prompt quotes.
+"""Retrieval chunks: the units the retriever indexes and a prompt quotes.
 
-A chunk is what one ``<|passage|>`` of the SFT prompt (P3-Y) holds: a citation header and at most
+A chunk is what one ``<|passage|>`` of the SFT prompt holds: a citation header and at most
 64 numbered sentences (``<|s1|>`` .. ``<|s64|>``), each with the label the renderer prints beside a
 quote of it (``BeurkG §3 Abs. 1 Nr. 2``, ``BAG 3 AZR 158/22 Rn. 14``). The sentences are the
-source's own text, whitespace-normalised, so a quote can be checked against it (P7-H).
+source's own text, whitespace-normalised, so a quote can be checked against it.
 
-**Statutes** (P7-A, ``chunk_statute``): one chunk per § / Artikel -- the statute collectors emit one
+**Statutes** (``chunk_statute``): one chunk per § / Artikel -- the statute collectors emit one
 document per provision -- with its hierarchy, outermost first: the act (``BGB``), the structural
 headings the source records (``Document.hierarchy``: Buch, Abschnitt, Titel), the provision
 (``§ 573 Ordentliche Kündigung des Vermieters``); below it every Absatz (``Section.absatz``) is cut
@@ -13,7 +13,7 @@ into its sentences (``Satz``) and its numbered or lettered items (``Nr.``, ``lit
 down to that grain. ``valid_from`` / ``valid_to`` are the version's validity window. A provision of
 more than 64 units continues in the next chunk.
 
-**Decisions** (P7-B, ``chunk_case_law``): part by part (``Section.part``: Leitsatz, Tenor,
+**Decisions** (``chunk_case_law``): part by part (``Section.part``: Leitsatz, Tenor,
 Tatbestand, Entscheidungsgründe or Gründe; Swiss Sachverhalt, Erwägungen, Dispositiv; Austrian
 Spruch, Begründung), each part cut into windows of 300 to 500 tokens: a window ends at a paragraph
 boundary once it holds 300 and the next paragraph would not fit, and inside a paragraph only at a
@@ -21,11 +21,10 @@ sentence end when the next sentence would pass 500 (a single sentence longer tha
 spaces); only a part's last window, or a short part, holds fewer than 300. A window's anchor is the
 Randnummern (or Erwägungen) it covers, ``Rn. 7–12``, and its header cites the decision there. Tokens are counted by ``count_tokens`` (the index build passes
 the student tokenizer's length); the default estimates 2.28 Qwen3 tokens per whitespace word, the
-pooled DACH legal fertility P3-D measured.
+pooled DACH legal fertility measured on a 1M-word sample.
 
-``copies`` lists the documents that hold the same text in other sources (decision 13 as amended:
-every copy is kept); the index fills it from the dedup links, and the renderer cites all of them
-(``decisions.cite_every_copy``).
+``copies`` lists the documents that hold the same text in other sources (every copy is
+kept); the index fills it from the dedup links, and the renderer cites all of them.
 """
 
 import json
@@ -39,8 +38,8 @@ from lexhybrid.data.schema import Document, Section, parse_citation
 from lexhybrid.data.sft_format import Passage, split_sentences
 from lexhybrid.data.tokenizer import N_SENTENCES
 
-TOKENS_PER_WORD = 2.28  # Qwen3 tokens per whitespace word on the 1M-word legal sample (P3-D)
-MIN_TOKENS, MAX_TOKENS = 300, 500  # P7-B's window
+TOKENS_PER_WORD = 2.28  # Qwen3 tokens per whitespace word on the 1M-word legal sample
+MIN_TOKENS, MAX_TOKENS = 300, 500  # token window of a decision chunk
 STATUTE_TYPES = ("statute", "regulation")
 _ITEM = re.compile(r"^(\d+[a-z]?)\.\s+\S")  # "1. eigene Angelegenheiten"
 _LETTER = re.compile(r"^([a-z]{1,2})\)\s+\S")  # "a) die betroffene Person"
@@ -86,7 +85,7 @@ class Chunk:
         return "\n".join([self.citation_id, " › ".join(self.hierarchy), *self.sentences])
 
     def passage(self) -> Passage:
-        """The P3-Y prompt passage: ``<|passage|><|cK|>`` header, then the numbered sentences."""
+        """The SFT prompt passage: ``<|passage|><|cK|>`` header, then the numbered sentences."""
         return Passage(self.citation_id, self.sentences)
 
     def to_json(self) -> str:
@@ -108,7 +107,7 @@ def _common(doc: Document) -> dict:
 
 
 # ---------------------------------------------------------------------------------------------
-# statutes (P7-A)
+# statutes
 # ---------------------------------------------------------------------------------------------
 
 
@@ -152,7 +151,7 @@ def provision_heading(doc: Document) -> str:
 
 
 def chunk_statute(doc: Document) -> list[Chunk]:
-    """The chunks of one statute provision (P7-A); see the module docstring."""
+    """The chunks of one statute provision; see the module docstring."""
     if doc.doc_type not in STATUTE_TYPES:
         raise ValueError(f"{doc.id}: doc_type {doc.doc_type!r} is not a statute or regulation")
     hierarchy = (act_of(doc.citation_id), *doc.hierarchy, provision_heading(doc))
@@ -176,7 +175,7 @@ def chunk_statute(doc: Document) -> list[Chunk]:
 
 
 # ---------------------------------------------------------------------------------------------
-# decisions (P7-B)
+# decisions
 # ---------------------------------------------------------------------------------------------
 
 
@@ -252,7 +251,7 @@ def chunk_case_law(
     min_tokens: int = MIN_TOKENS,
     max_tokens: int = MAX_TOKENS,
 ) -> list[Chunk]:
-    """The chunks of one decision (P7-B); see the module docstring."""
+    """The chunks of one decision; see the module docstring."""
     if doc.doc_type != "decision":
         raise ValueError(f"{doc.id}: doc_type {doc.doc_type!r} is not a decision")
     groups: list[tuple[str, list[Section]]] = []  # consecutive sections of one part

@@ -10,15 +10,15 @@
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.log
 #
-# cleanup.sh -- delete what the user approved, by an explicit list. The login node runs no rm, so
-# deletion goes through a job (rule e).
+# cleanup.sh -- delete an explicit, reviewed list of paths. The login node runs no rm, so
+# deletion goes through a job.
 #   ssh $CLUSTER_HOST "cd $CLUSTER_REPO && DELETE='outputs/screen_S0_s42 .torchinductor repo:envs/scrub/.venv' sbatch scripts/slurm/cleanup.sh"
 # DELETE holds paths relative to $SCRATCH_ROOT, or relative to the repository when they carry a
 # "repo:" prefix. The whole list is checked before anything is deleted, and any refusal stops the job
 # with nothing removed. Refused: an absolute path, "..", and anything outside the deletable roots below.
 #   - scratch: outputs/screen_* outputs/screen2_* outputs/diag_* .torchinductor .uv-cache data/raw data/http_cache
 #   - repo:    envs/scrub/.venv
-# Never deletable: P6's outputs (outputs/p6_*), the training shards (data/shards), the scrubbed
+# Never deletable: the pretraining outputs (outputs/p6_*), the training shards (data/shards), the scrubbed
 # corpus (data/scrubbed), data/manifests, the HF cache (.hf) and the project .venv. A listed path
 # that is already gone is reported and skipped. The log ends in "CLEANUP DONE".
 set -euo pipefail

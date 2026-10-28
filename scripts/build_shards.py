@@ -1,27 +1,27 @@
 #!/usr/bin/env python3
-"""Packed shards from the collected documents (plan P3-V; the P3-Z smoke shards; P4-L at scale).
+"""Packed shards from the collected documents (smoke scale and full corpus).
 
     .venv/bin/python scripts/build_shards.py --root data/shards/smoke --row-len 4096 \
         --val-fraction 0.1 --min-val-docs 2
     .venv/bin/python scripts/build_shards.py --root $SCRATCH_ROOT/data/shards --row-len 4096 8192 \
-        --scrubbed $SCRATCH_ROOT/data/scrubbed --raw $SCRATCH_ROOT/data/raw --workers 32   # P4-L
+        --scrubbed $SCRATCH_ROOT/data/scrubbed --raw $SCRATCH_ROOT/data/raw --workers 32   # full corpus
 
-Per source the documents come from ``<scrubbed>/<source>.jsonl`` (the LER scrub, P3-R), or from the
-parts ``<source>.part-<k>-of-<n>.jsonl`` a scrub array wrote (every part must be there). R11 runs
-the scrub before pretraining, so a source with only ``<raw>/<source>/<source>.jsonl`` is refused
+Per source the documents come from ``<scrubbed>/<source>.jsonl`` (the LER scrub), or from the
+parts ``<source>.part-<k>-of-<n>.jsonl`` a scrub array wrote (every part must be there). The scrub runs
+before pretraining, so a source with only ``<raw>/<source>/<source>.jsonl`` is refused
 unless ``--allow-unscrubbed`` is given, and ``meta.json`` records ``scrubbed`` either way.
 
 Documents are packed in collection order (the order of the collected file, which keeps a law's
 provisions and a court's decisions together), not in the deduplication's visiting order.
 
 Streaming, so the corpus never has to fit in memory. Pass 1 reads every document once for its
-deduplication signature, all sources together (P3-S; decision 13 as amended: a duplicate inside one
+deduplication signature, all sources together (a duplicate inside one
 source is dropped, a copy in another source is kept and linked; the log of both goes to
 ``<root>/<row_len>/dedup.jsonl``, and the links let retrieval cite every source of a passage). Pass 2 packs each source -- ``--workers`` sources at a time --
 at every ``--row-len`` from one tokenisation, after its split by document. One source per shard
 directory, so a research-only source (``multilegalpile``) is always a shard set of its own and the
-commercial-safe arm never reads it (P3-V). ``<root>/build_summary.json`` holds the per-source
-counts the corpus manifest (P4-M) reads.
+commercial-safe arm never reads it. ``<root>/build_summary.json`` holds the per-source
+counts the corpus manifest reads.
 """
 
 import argparse
@@ -63,7 +63,7 @@ def source_files(
     if raw.exists():
         if not allow_unscrubbed:
             raise SystemExit(
-                f"{source}: not scrubbed (R11); run lexhybrid.data.corpus.scrub_ler or pass --allow-unscrubbed"
+                f"{source}: not scrubbed; run lexhybrid.data.corpus.scrub_ler or pass --allow-unscrubbed"
             )
         return [raw], False
     return None
