@@ -1,6 +1,9 @@
-# Online logit distillation (decision 9) from the default teacher (decision 8). P4-U measures
-# whether Qwen3-8B-Base fits at 4,096-token rows on 4 x H100; until then this is the teacher.
+# Online logit distillation (decision 9) from the smaller teacher of decision 8. P4-U chose
+# Qwen3-8B-Base (qwen3_8b.yaml); this one stays for comparisons.
 teacher: Qwen/Qwen3-1.7B-Base
+# = lexhybrid.data.tokenizer.QWEN3_REVISION: fetch_hf.sh fetches only this snapshot, which writes no
+# refs/main, so an offline load without it fails (job 2589362). tests/test_slurm_wrappers.py ties the two.
+revision: ea980cb0a6c2ae4b936e82123acc929f1cec04c1
 dtype: bfloat16
 alpha: 0.5
 temperature: 2.0

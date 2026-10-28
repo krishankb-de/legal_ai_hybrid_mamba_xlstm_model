@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-#SBATCH --partition=aisc-batch
+#SBATCH --partition=pot-hpi-aisc-batch
 #SBATCH --account=aisc
-#SBATCH --exclude=ga03   # ARM/Grace node; x86 .venv python -> "cannot execute binary file: Exec format error"
+#SBATCH --exclude=ga03,gx17v1,gx13v1   # ga03: ARM/Grace node (x86 .venv -> "Exec format error"); gx13v1: faulty GPU
 #SBATCH --constraint=GLB_SCRATCH   # HF_HOME lives on /sc/scratch, mounted only on these nodes
 #SBATCH --mem=16G
 #SBATCH --cpus-per-task=8
@@ -9,7 +9,7 @@
 #SBATCH --job-name=fetch_hf
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.log
-#SBATCH --open-mode=append   # aisc-batch is preemptible; hf download resumes after a requeue
+#SBATCH --open-mode=append   # pot-hpi-aisc-batch is preemptible; hf download resumes after a requeue
 #SBATCH --requeue
 #
 # fetch_hf.sh -- download every Hugging Face model the plan needs into $HF_HOME (plan P4-G).

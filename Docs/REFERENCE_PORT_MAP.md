@@ -158,6 +158,8 @@ Mechanics to keep: `log_f = log(f.clamp(min=1e-6))`, `f_cum = cumsum(log_f)` per
 
 **At init with `forget_gate_bias_init 0.0` and chunk 128, `half_range ≈ 44.4 > 40`: the exact path starts on the sequential fallback** (defect 9). Decision 10 sets the bias to 3.0 (f ≈ 0.95, half-range ≈ 3.1).
 
+**Trained gates widen it again (job 2599890, 2026-10-03):** both S1 seeds reached half-ranges of 43.2 and 54.6 at chunk 128 within 840 steps and raised under `tfla_fallback: error`. `decisions.tfla_overflow` (user, 2026-10-09): a too-wide chunk is factorised per row block (`_row_block` picks the largest divisor of the chunk whose own half-range fits; `_blockwise_scores` re-centres each block on its midpoint, keys after the block set to 0 before the exponential), exact and with the configured chunk kept. The plain, non-restarted cumulative log-decay serves there because it only decreases. `fallback` applies only when no block of at least `min_block` (default 1) fits, which the 1e-6 gate clamp makes impossible for blocks of up to 6 rows.
+
 fp64 oracle, from `tests/test_mamba3_numerics.py:287-314`, moves into `tfla_reference.py`:
 
 ```python
@@ -294,7 +296,7 @@ Principles: CPU-collected and unconditionally run (never behind `cuda`); paramet
 Training wrapper (1 GPU), from `scripts/train_stage0_150m_h100.sh:19-31`:
 
 ```bash
-#SBATCH --partition=aisc-batch
+#SBATCH --partition=pot-hpi-aisc-batch
 #SBATCH --account=aisc
 #SBATCH --gpus=1
 #SBATCH --exclude=ga03,gx17v1,gx13v1   # ga03: ARM/Grace node; gx13v1: faulty GPU (cudaErrorContained)
@@ -304,7 +306,7 @@ Training wrapper (1 GPU), from `scripts/train_stage0_150m_h100.sh:19-31`:
 #SBATCH --job-name=h100_stage0_150m
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.log
-#SBATCH --open-mode=append   # aisc-batch is preemptible: without this a requeue TRUNCATES the log
+#SBATCH --open-mode=append   # pot-hpi-aisc-batch is preemptible: without this a requeue TRUNCATES the log
 #SBATCH --requeue
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
@@ -313,7 +315,7 @@ cd "${SLURM_SUBMIT_DIR:-.}"
 Array wrapper, from `scripts/screen_arms_h100.sh:266-278, 282-320`:
 
 ```bash
-#SBATCH --partition=aisc-batch
+#SBATCH --partition=pot-hpi-aisc-batch
 #SBATCH --account=aisc
 #SBATCH --gpus=1
 #SBATCH --exclude=ga03,gx17v1,gx13v1
@@ -340,7 +342,7 @@ bash scripts/slurm/train_pretrain_1gpu.sh
 CPU job (env setup), from `scripts/setup_env_h100.sh:453-461`:
 
 ```bash
-#SBATCH --partition=aisc-batch
+#SBATCH --partition=pot-hpi-aisc-batch
 #SBATCH --exclude=ga03   # ARM/Grace node; x86 .venv python -> "cannot execute binary file: Exec format error"
 #SBATCH --account=aisc
 #SBATCH --mem=16G
@@ -354,7 +356,7 @@ CPU job (env setup), from `scripts/setup_env_h100.sh:453-461`:
 Preflight / watch (CPU, with qos), from `scripts/preflight_mamba3_h100.sh:344-353` and `mamba3_watch.sh:542-551`:
 
 ```bash
-#SBATCH --partition=aisc-batch
+#SBATCH --partition=pot-hpi-aisc-batch
 #SBATCH --account=aisc
 #SBATCH --qos=aisc
 #SBATCH --exclude=ga03,gx17v1,gx13v1

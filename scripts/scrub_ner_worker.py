@@ -8,7 +8,9 @@ Runs in the scrub environment (``envs/scrub``: flair with transformers < 5) and 
 
 Input lines ``{"id": ..., "text": ...}``; output lines ``{"id": ..., "entities": [[start, end,
 label, score], ...]}`` with character offsets into ``text``. Each line of a text is tagged on its own,
-long lines in chunks of at most ``--max-tokens`` whitespace tokens split after sentence ends;
+long lines in chunks of at most ``--max-tokens`` whitespace tokens split after sentence ends and of
+at most ``--max-chars`` characters (flair's character LM allocates per character: one DIP table line
+of ~33,000 characters in a mini-batch asked for 32 GiB, job 2593479_35);
 ``Sentence(use_tokenizer=False)`` as the model card advises for legal text. Throughput goes to
 stderr at the end. The model is ``flair/ner-german-legal`` at a pinned revision (LER German F1 96.35;
 19 tags), read from ``--cache-dir`` (default ``HF_HUB_CACHE``, else ``$HF_HOME/hub``, else
@@ -27,6 +29,7 @@ MODEL = "flair/ner-german-legal"
 REVISION = "69c73dd705665388224cff919a529dd53750fca6"
 REPO_ROOT = Path(__file__).resolve().parent.parent
 _SENTENCE_END = re.compile(r"(?<=[.!?;:])\s+(?=\S)")
+MAX_CHARS = 4096
 
 
 def default_cache_dir() -> str:
@@ -38,9 +41,27 @@ def default_cache_dir() -> str:
     return str(REPO_ROOT / "data" / "hf" / "hub")
 
 
-def chunks(text: str, max_tokens: int) -> list[tuple[int, str]]:
+def cap(offset: int, piece: str, max_chars: int) -> list[tuple[int, str]]:
+    """``piece`` in parts of at most ``max_chars`` characters, cut at the last space before the limit
+    (a longer run without a space is cut at the limit)."""
+    out = []
+    while len(piece) > max_chars:
+        cut = piece.rfind(" ", 0, max_chars + 1)
+        cut = cut if cut > 0 else max_chars
+        if piece[:cut].strip():
+            out.append((offset, piece[:cut].rstrip()))
+        rest = piece[cut:]
+        skip = len(rest) - len(rest.lstrip())
+        offset, piece = offset + cut + skip, rest[skip:]
+    if piece.strip():
+        out.append((offset, piece))
+    return out
+
+
+def chunks(text: str, max_tokens: int, max_chars: int = MAX_CHARS) -> list[tuple[int, str]]:
     """``(offset, piece)`` for every line of ``text``, long lines cut after sentence ends into pieces
-    of at most ``max_tokens`` whitespace tokens (a single longer sentence is cut at the limit)."""
+    of at most ``max_tokens`` whitespace tokens (a single longer sentence is cut at the limit), and
+    every piece capped at ``max_chars`` characters."""
     out, pos = [], 0
     for line in text.split("\n"):
         start = pos
@@ -70,7 +91,7 @@ def chunks(text: str, max_tokens: int) -> list[tuple[int, str]]:
             cur_end, n = b, n + words
         if cur_start is not None:
             out.append((start + cur_start, line[cur_start:cur_end]))
-    return out
+    return [part for offset, piece in out for part in cap(offset, piece, max_chars)]
 
 
 def load_tagger(cache_dir: str):
@@ -81,15 +102,20 @@ def load_tagger(cache_dir: str):
     return SequenceTagger.load(path)
 
 
-def tag(tagger, docs: list[dict], max_tokens: int, batch_size: int) -> list[dict]:
+def tag(tagger, docs: list[dict], max_tokens: int, batch_size: int, max_chars: int = MAX_CHARS) -> list[dict]:
+    """Entities of every document, the sentences of all ``docs`` tagged in ONE ``predict`` call (on
+    a GPU, short documents fill the mini-batches together; the tags do not depend on the batch)."""
     from flair.data import Sentence
 
-    out = []
+    prepared = []
     for doc in docs:
-        pieces = chunks(doc["text"], max_tokens)
-        sentences = [Sentence(piece, use_tokenizer=False) for _, piece in pieces]
-        if sentences:
-            tagger.predict(sentences, mini_batch_size=batch_size)
+        pieces = chunks(doc["text"], max_tokens, max_chars)
+        prepared.append((doc, pieces, [Sentence(piece, use_tokenizer=False) for _, piece in pieces]))
+    everything = [s for _, _, sentences in prepared for s in sentences]
+    if everything:
+        tagger.predict(everything, mini_batch_size=batch_size)
+    out = []
+    for doc, pieces, sentences in prepared:
         entities = []
         for (offset, piece), sentence in zip(pieces, sentences, strict=True):
             for span in sentence.get_spans("ner"):
@@ -105,20 +131,31 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="German legal NER over JSONL documents (stdin -> stdout).")
     parser.add_argument("--cache-dir", default=default_cache_dir())
     parser.add_argument("--max-tokens", type=int, default=200)
-    parser.add_argument("--batch-size", type=int, default=32)
+    parser.add_argument("--max-chars", type=int, default=MAX_CHARS, help="characters per tagged piece")
+    parser.add_argument("--batch-size", type=int, default=32, help="sentences per mini-batch")
+    parser.add_argument("--docs-per-batch", type=int, default=1, help="documents tagged per predict call")
     args = parser.parse_args(argv)
     # flair logs to sys.stdout; keep stdout for the JSONL results and send everything else to stderr.
     out, sys.stdout = sys.stdout, sys.stderr
     tagger = load_tagger(args.cache_dir)
-    t0, n_docs, n_chars = time.perf_counter(), 0, 0
+    t0, n_docs, n_chars, batch = time.perf_counter(), 0, 0, []
+
+    def flush():
+        for result in tag(tagger, batch, args.max_tokens, args.batch_size, args.max_chars):
+            out.write(json.dumps(result, ensure_ascii=False) + "\n")
+        out.flush()
+        batch.clear()
+
     for line in sys.stdin:
         if not line.strip():
             continue
         doc = json.loads(line)
-        (result,) = tag(tagger, [doc], args.max_tokens, args.batch_size)
-        out.write(json.dumps(result, ensure_ascii=False) + "\n")
-        out.flush()
+        batch.append(doc)
         n_docs, n_chars = n_docs + 1, n_chars + len(doc["text"])
+        if len(batch) >= args.docs_per_batch:
+            flush()
+    if batch:
+        flush()
     dt = time.perf_counter() - t0
     print(json.dumps({"docs": n_docs, "chars": n_chars, "seconds": round(dt, 2),
                       "docs_per_s": round(n_docs / dt, 3) if dt else None}), file=sys.stderr)  # fmt: skip

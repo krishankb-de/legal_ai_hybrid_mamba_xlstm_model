@@ -8,8 +8,13 @@ Two intra-chunk implementations (reference M1-C / M1-H):
   reciprocal's denominator at 1e-6. Where ``f_cum`` underflows that clamp (70.9% of entries at the
   reference's forget-gate init) the decay collapses to ~0 even for nearby positions: rel-max-err
   0.882 against the fp64 recurrence. Kept only for the ``hybrid_legal_legacy`` ablation arm.
-- ``"exact"`` re-centres both sides on half the chunk's widest log-decay, so nothing is clamped;
-  when even that would overflow fp32 it either raises or scans within the chunk (``fallback``).
+- ``"exact"`` re-centres both sides on half the chunk's widest log-decay, so nothing is clamped.
+  When that one factorisation would overflow fp32 -- trained forget gates reach it: S1's screen
+  runs hit half-ranges of 43.2 and 54.6 at chunk 128 within 840 steps (job 2599890) -- the chunk's
+  rows are split into blocks and each block is re-centred on its own log-decay range
+  (``_row_block``, ``_blockwise_scores``): still exact, the configured chunk size kept. Only when
+  no block size fits does it raise or scan within the chunk (``fallback``); with forget gates
+  clamped at 1e-6 a block of at most 6 rows always fits, so that needs ``min_block`` above it.
 
 P2-C (defect 9): the chunk size comes from the block (``mlstm_chunk_size``) instead of being picked
 from the sequence length; the reference's ``m_state`` stabiliser, computed and never applied, is
@@ -66,6 +71,48 @@ def _intra_chunk_sequential(q_c, k_gated, v_c, f_c, starts_c=None):
     return torch.stack(nums, dim=3), torch.stack(dens, dim=3).unsqueeze(-1)
 
 
+def _row_block(log_f_cum: torch.Tensor, min_block: int = 1) -> int | None:
+    """The largest row block -- a divisor of the chunk length, below it and at least ``min_block``
+    -- whose own log-decay half-range fits fp32; None if none does. ``log_f_cum`` is the plain
+    cumulative log-decay (B, H, nc, C, D), which only decreases along a chunk."""
+    chunk = log_f_cum.shape[3]
+    for block in range(chunk - 1, max(min_block, 1) - 1, -1):
+        if chunk % block:
+            continue
+        rows = log_f_cum.unflatten(3, (chunk // block, block))
+        if 0.5 * (rows.amax(dim=4) - rows.amin(dim=4)).max() < _EXP_SAFE:
+            return block
+    return None
+
+
+def _blockwise_scores(q_c, k_gated, log_f_cum, block: int) -> torch.Tensor:
+    """The intra-chunk scores ``sum_d q[i,d] k[j,d] exp(L[i,d] - L[j,d])`` with one factorisation per
+    row block of ``block`` positions, re-centred on that block's own log-decay range.
+
+    ``L`` is the plain cumulative log-decay, non-increasing along the chunk, and ``r`` the centre of
+    row block ``a``'s range. A query factor ``exp(L[i] - r)`` and a key factor of the same block
+    ``exp(r - L[j])`` lie within ``exp(+-range_a / 2)``, which ``_row_block`` keeps below fp32's
+    limit; a key of an earlier block has ``L[j] >= r``, so its factor is at most 1 (what underflows
+    to 0 is a decay below exp(-47)); a key after the block is causal-masked and set to 0 before the
+    exponential, so no factor is ever infinite (a masked inf would still poison the backward).
+    Pairs across documents are masked by the caller, so the plain ``L`` (not the per-document one)
+    serves: within a document the difference is the same. Returns (B, H, nc, C, C) unmasked scores.
+    """
+    batch, heads, num_chunks, chunk, head_dim = q_c.shape
+    n_blocks = chunk // block
+    rows = log_f_cum.unflatten(3, (n_blocks, block))  # (B, H, nc, nb, S, D)
+    centre = 0.5 * (rows.amax(dim=4) + rows.amin(dim=4))  # (B, H, nc, nb, D)
+    q_w = q_c.unflatten(3, (n_blocks, block)) * torch.exp(rows - centre.unsqueeze(4))
+    arg = centre.unsqueeze(4) - log_f_cum.unsqueeze(3)  # (B, H, nc, nb, C, D): every key, every row block
+    later = (
+        torch.arange(chunk, device=q_c.device) // block > torch.arange(n_blocks, device=q_c.device)[:, None]
+    )
+    arg = arg.masked_fill(later[:, :, None], float("-inf"))  # (nb, C, 1) broadcasts
+    k_w = k_gated.unsqueeze(3) * torch.exp(arg)
+    scores = torch.einsum("bhcaid, bhcajd -> bhcaij", q_w, k_w)  # (B, H, nc, nb, S, C)
+    return scores.reshape(batch, heads, num_chunks, chunk, chunk)
+
+
 def tfla_forward_parallel(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -77,6 +124,7 @@ def tfla_forward_parallel(
     fallback: str = "error",
     doc_ids: torch.Tensor | None = None,
     return_state: bool = False,
+    min_block: int = 1,
 ):
     """Chunk-parallel TFLA.
 
@@ -86,12 +134,14 @@ def tfla_forward_parallel(
         f_gate: forget gates (B, H, L, D), already sigmoided
         chunk_size: chunk length
         tfla_impl: ``"legacy"`` | ``"exact"``
-        fallback: what ``exact`` does when a chunk's log-decay is too wide to factorise in fp32:
-            ``"error"`` raises ``TFLAFallbackError``; ``"sequential"`` scans within the chunk
-            (exact, and ``chunk_size`` times slower for the intra-chunk term).
+        fallback: what ``exact`` does when a chunk's log-decay is too wide to factorise in fp32
+            even per row block: ``"error"`` raises ``TFLAFallbackError``; ``"sequential"`` scans
+            within the chunk (exact, and ``chunk_size`` times slower for the intra-chunk term).
         doc_ids: optional (B, L) document ids; the recurrence restarts where the id changes.
         return_state: also return ``(C, n)`` after the last token, shaped (B, H, D, D) and
             (B, H, D) -- the state ``mLSTMBlock.step`` continues from.
+        min_block: the smallest row block a too-wide chunk may be split into before ``fallback``
+            applies (1: never needed in practice; ``chunk_size`` restores the pre-block behaviour).
 
     Returns:
         (B, H, L, D), or ``(h, C, n)`` with ``return_state``.
@@ -126,6 +176,7 @@ def tfla_forward_parallel(
     # Cumulative forget-gate products within each chunk, in log space.
     log_f = torch.log(f_c.clamp(min=1e-6))
     log_f_cum = torch.cumsum(log_f, dim=3)  # (B, H, nc, C, D)
+    log_f_plain = log_f_cum  # not restarted at documents: non-increasing along every chunk
 
     if docs:
         seg = pad_segments(segment_ids(doc_ids, batch, seq_len, device), pad_len)
@@ -155,6 +206,7 @@ def tfla_forward_parallel(
     # ---- intra-chunk (parallel across all chunks) --------------------------------------------
     # decay[i,j,d] = f_cum[i,d] / f_cum[j,d] (i >= j), absorbed into the query/key scaling.
     k_gated_intra = k_c * i_c  # per-dimension input gating
+    scores = None  # set directly by the per-block path
     if tfla_impl == "legacy":
         # M1-C: `f_cum` underflows 1e-6 within a chunk for any realistic forget gate, and the
         # clamp then pins the denominator, so decay[i, j] collapses to ~0 even for j close to i.
@@ -171,24 +223,26 @@ def tfla_forward_parallel(
         if half_range < _EXP_SAFE:
             q_weighted = q_c * torch.exp(log_f_cum - m)
             k_weighted = k_gated_intra * torch.exp(m - log_f_cum)
-        elif fallback == "error":
-            raise TFLAFallbackError(
-                f"exact TFLA at chunk {chunk_size}: a chunk's log-decay half-range is "
-                f"{float(half_range):.1f} >= {_EXP_SAFE} and would overflow fp32. Keep the factorised "
-                "path by configuration (mlstm_forget_gate_bias_init 3.0 gives 3.1 at chunk 128 at "
-                "init; a smaller mlstm_chunk_size halves the range), or set tfla_fallback: sequential "
-                "(exact, slow)."
-            )
         else:
             # Re-centring halves the dynamic range but cannot remove it; a chunk whose log-decay
-            # exceeds 2 * _EXP_SAFE still overflows fp32 on one side and inf * 0 = NaN. Scan
-            # within the chunk instead of factorising across it.
+            # exceeds 2 * _EXP_SAFE overflows fp32 on one side and inf * 0 = NaN. Factorise per
+            # row block instead (exact), and only if no block fits, raise or scan within the chunk.
             q_weighted = k_weighted = None
+            block = _row_block(log_f_plain, min_block)
+            if block is not None:
+                scores = _blockwise_scores(q_c, k_gated_intra, log_f_plain, block)
+            elif fallback == "error":
+                raise TFLAFallbackError(
+                    f"exact TFLA at chunk {chunk_size}: a chunk's log-decay half-range is "
+                    f"{float(half_range):.1f} >= {_EXP_SAFE} and no row block of at least {min_block} "
+                    "fits fp32. Lower min_block, or set tfla_fallback: sequential (exact, slow)."
+                )
 
-    if q_weighted is None:
+    if scores is None and q_weighted is None:
         h_intra_num, h_intra_den = _intra_chunk_sequential(q_c, k_gated_intra, v_c, f_c, starts_c)
     else:
-        scores = torch.einsum("bhcid, bhcjd -> bhcij", q_weighted, k_weighted)  # (B, H, nc, C, C)
+        if scores is None:
+            scores = torch.einsum("bhcid, bhcjd -> bhcij", q_weighted, k_weighted)  # (B, H, nc, C, C)
         scores = scores.masked_fill(causal_mask, 0.0)
         if docs:
             scores = scores.masked_fill(~same.unsqueeze(1), 0.0)

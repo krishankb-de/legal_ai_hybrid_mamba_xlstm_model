@@ -81,4 +81,7 @@ weight_decay: 0.1
 warmup_steps: 2000
 scheduler: wsd
 beta2_schedule: false
+# AdamW beta2 (decisions.p5_fix, 2026-10-11): 0.999 let one KD-amplified spike collapse screen
+# runs S1-s42 and S3-s43 (jobs 2626202, 2629409); the second moment now adapts in ~20 steps.
+adam_beta2: 0.95
 gradient_clip_val: 1.0

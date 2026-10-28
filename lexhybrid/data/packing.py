@@ -46,24 +46,29 @@ class Row:
         return "+".join(sorted(set(self.licences)))
 
 
-def pack(
-    documents: Iterable[Document], encode: Callable[[str], list[int]], eos_id: int, row_len: int
-) -> Iterator[Row]:
-    """Rows of ``row_len`` tokens from the documents of one source, in order."""
-    row: Row | None = None
-    source = None
-    for doc in documents:
-        if source is None:
-            source = doc.source
-        elif doc.source != source:
-            raise ValueError(f"one source per pack: {source!r} then {doc.source!r}")
-        tokens = [*encode(doc.text), eos_id]
+class Packer:
+    """Rows of ``row_len`` tokens from one source's documents, fed one tokenised document at a time
+    (``pack`` is this over an iterable). One token stream can feed several packers -- one per row
+    length and split -- so the at-scale build (P4-L) tokenises every document once."""
+
+    def __init__(self, row_len: int, eos_id: int):
+        self.row_len, self.eos_id = row_len, eos_id
+        self.source: str | None = None
+        self.row: Row | None = None
+
+    def add(self, doc: Document, tokens: list[int]) -> Iterator[Row]:
+        """The rows ``doc`` completes; ``tokens`` is its encoding followed by the EOS."""
+        if self.source is None:
+            self.source = doc.source
+        elif doc.source != self.source:
+            raise ValueError(f"one source per pack: {self.source!r} then {doc.source!r}")
         pos = 0
         while pos < len(tokens):
-            if row is None:
-                row = Row([], [], 0, source)
+            if self.row is None:
+                self.row = Row([], [], 0, self.source)
+            row = self.row
             local = row.doc_ids[-1] + 1 if row.doc_ids else 0
-            take = tokens[pos : pos + row_len - len(row.input_ids)]
+            take = tokens[pos : pos + self.row_len - len(row.input_ids)]
             row.input_ids += take
             row.doc_ids += [local] * len(take)
             row.documents.append(doc.id)
@@ -71,45 +76,80 @@ def pack(
             row.commercial_safe &= doc.commercial_safe
             row.research_only |= doc.research_only
             pos += len(take)
-            if len(row.input_ids) == row_len:
-                row.length = row_len
+            if len(row.input_ids) == self.row_len:
+                row.length = self.row_len
+                self.row = None
                 yield row
-                row = None
-    if row is not None and row.input_ids:  # the last row: EOS padding joins the last document
-        row.length = len(row.input_ids)
-        pad = row_len - row.length
-        row.input_ids += [eos_id] * pad
-        row.doc_ids += [row.doc_ids[-1]] * pad
-        yield row
+
+    def finish(self) -> Iterator[Row]:
+        """The last row, padded with EOS tokens that join its last document."""
+        row, self.row = self.row, None
+        if row is not None and row.input_ids:
+            row.length = len(row.input_ids)
+            pad = self.row_len - row.length
+            row.input_ids += [self.eos_id] * pad
+            row.doc_ids += [row.doc_ids[-1]] * pad
+            yield row
 
 
-def write_shards(rows: Iterable[Row], out_dir: Path, rows_per_shard: int = ROWS_PER_SHARD) -> list[Path]:
-    """Parquet shards ``shard-00000.parquet``... of at most ``rows_per_shard`` rows."""
+def pack(
+    documents: Iterable[Document], encode: Callable[[str], list[int]], eos_id: int, row_len: int
+) -> Iterator[Row]:
+    """Rows of ``row_len`` tokens from the documents of one source, in order."""
+    packer = Packer(row_len, eos_id)
+    for doc in documents:
+        yield from packer.add(doc, [*encode(doc.text), eos_id])
+    yield from packer.finish()
+
+
+def _schema():
     import pyarrow as pa
-    import pyarrow.parquet as pq
 
-    schema = pa.schema([
+    return pa.schema([
         ("input_ids", pa.list_(pa.int32())), ("doc_ids", pa.list_(pa.int32())), ("length", pa.int32()),
         ("source", pa.string()), ("licence", pa.string()), ("commercial_safe", pa.bool_()),
         ("research_only", pa.bool_()), ("documents", pa.list_(pa.string())),
     ])  # fmt: skip
-    out_dir.mkdir(parents=True, exist_ok=True)
-    paths, batch = [], []
 
-    def flush():
-        path = out_dir / f"shard-{len(paths):05d}.parquet"
-        cols = {name: [getattr(r, name) for r in batch] for name in schema.names}
-        pq.write_table(pa.table(cols, schema=schema), path)
-        paths.append(path)
-        batch.clear()
 
+class ShardWriter:
+    """Parquet shards ``shard-00000.parquet``... of at most ``rows_per_shard`` rows, written as rows
+    arrive (``write_shards`` is this over an iterable); ``close`` writes the last, partial shard."""
+
+    def __init__(self, out_dir: Path, rows_per_shard: int = ROWS_PER_SHARD):
+        self.out_dir, self.rows_per_shard = Path(out_dir), rows_per_shard
+        self.out_dir.mkdir(parents=True, exist_ok=True)
+        self.paths: list[Path] = []
+        self._batch: list[Row] = []
+        self._schema = _schema()
+
+    def write(self, row: Row) -> None:
+        self._batch.append(row)
+        if len(self._batch) == self.rows_per_shard:
+            self._flush()
+
+    def _flush(self) -> None:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        path = self.out_dir / f"shard-{len(self.paths):05d}.parquet"
+        cols = {name: [getattr(r, name) for r in self._batch] for name in self._schema.names}
+        pq.write_table(pa.table(cols, schema=self._schema), path)
+        self.paths.append(path)
+        self._batch.clear()
+
+    def close(self) -> list[Path]:
+        if self._batch:
+            self._flush()
+        return self.paths
+
+
+def write_shards(rows: Iterable[Row], out_dir: Path, rows_per_shard: int = ROWS_PER_SHARD) -> list[Path]:
+    """Parquet shards ``shard-00000.parquet``... of at most ``rows_per_shard`` rows."""
+    writer = ShardWriter(out_dir, rows_per_shard)
     for row in rows:
-        batch.append(row)
-        if len(batch) == rows_per_shard:
-            flush()
-    if batch:
-        flush()
-    return paths
+        writer.write(row)
+    return writer.close()
 
 
 def read_rows(path: Path) -> list[dict]:

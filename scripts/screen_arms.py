@@ -31,6 +31,10 @@ from lexhybrid.config import load_model_config
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SEEDS = (42, 43)
 BASE_ARM = "S1"
+# Screen attempt 2 (decisions.p5_fix, 2026-10-11): AdamW beta2 0.95 in every arm's yaml, S6 without the
+# teacher. Its runs live in outputs/screen2_<arm>_s<seed>, so none resumes from attempt 1's
+# step-12,000 last.ckpt in outputs/screen_<arm>_s<seed>.
+ATTEMPT = 2
 
 # Plan P5: 12,000 steps, 2,048-token rows, micro-batch 8 x accum 2 (32,768 tokens/step), warmup 500,
 # LR 4e-4, clip 1.0, WSD, SAVE_TOP_K 0, validation every 4,000 optimizer steps.
@@ -143,10 +147,11 @@ def env_lines(name: str) -> list[str]:
         "ARM": f"{arm_name}-s{seed}",
         "MODEL_CONFIG": arm.config,
         "SEED": str(seed),
-        "EXPERIMENT": f"screen_{arm_name}_s{seed}",
+        "EXPERIMENT": f"screen{ATTEMPT}_{arm_name}_s{seed}",
         "SAVE_TOP_K": "0",
         "EXTRA_OVERRIDES": " ".join(hydra_overrides(arm_name)),
         "ARM_EXPECT": "|".join(arm.expect),
+        "ARM_FORBID": "|".join(arm.forbid),
         "ARM_WALLTIME": arm.walltime,
     }
     return [f"export {k}={shlex.quote(v)}" for k, v in exports.items()]

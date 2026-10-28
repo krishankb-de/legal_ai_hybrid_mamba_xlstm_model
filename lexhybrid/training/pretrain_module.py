@@ -138,13 +138,7 @@ class PretrainLightningModule(HybridLightningModule):
         out = self.compute_losses(batch, use_teacher=False, use_mtp=False)
         n = int(out["n_supervised"])
         self.log("val/loss", out["ce"], prog_bar=True, on_epoch=True, batch_size=max(n, 1), sync_dist=True)
-        self.log(
-            "val/perplexity",
-            compute_perplexity(out["ce"]),
-            on_epoch=True,
-            batch_size=max(n, 1),
-            sync_dist=True,
-        )
+        self._accumulate_val(out["ce"], n)  # val/perplexity = exp(token-weighted mean CE), at epoch end
         return out["ce"]
 
     def on_before_optimizer_step(self, optimizer):

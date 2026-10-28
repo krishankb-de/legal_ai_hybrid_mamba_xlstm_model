@@ -36,6 +36,10 @@ class Section:
         satz_idx: sentence number within the Absatz, when the section is one sentence.
         randnummer: margin number (Randnummer / Rz.) of a decision, when it has one.
         text: the section's exact text (what a quote is checked against).
+        part: the part of a decision the section belongs to -- ``"Leitsatz"``, ``"Tenor"``,
+            ``"Tatbestand"``, ``"Entscheidungsgründe"``, ``"Gründe"``, ``"Sachverhalt"``,
+            ``"Erwägungen"``, ``"Spruch"``, ``"Begründung"`` -- when the source marks it (P7-B chunks a
+            decision part by part); None for statutes and sources without parts.
     """
 
     label: str
@@ -43,6 +47,7 @@ class Section:
     satz_idx: int | None = None
     randnummer: int | None = None
     text: str = ""
+    part: str | None = None
 
 
 @dataclass
@@ -64,6 +69,9 @@ class Document:
     sha256: str = ""  # filled from ``text`` when empty
     research_only: bool = False
     sections: list[Section] = field(default_factory=list)
+    # The act's structural headings above this provision, outermost first, when the source has them
+    # (P7-A): ["Buch 2 Recht der Schuldverhältnisse", "Abschnitt 8 Einzelne Schuldverhältnisse", ...].
+    hierarchy: list[str] = field(default_factory=list)
 
     def __post_init__(self):
         self.sections = [s if isinstance(s, Section) else Section(**s) for s in self.sections]
@@ -130,12 +138,18 @@ class Document:
 # ---------------------------------------------------------------------------------------------
 
 _NUM = r"\d+[a-z]*"  # 573, 573a, 334bis
+# The act's code is whatever precedes the provision, matched lazily so the earliest split that
+# leaves a whole provision wins. gii's official abbreviations are not one capitalised token: 12.7% of
+# its 90,255 provisions (job 2663318, 2026-10-15) have codes such as "SGB 5", "13. BImSchV",
+# "1-DM-GoldmünzG", "eIDKG", "II. BV" or "V zu § 180 Abs. 2 AO". The old one-token rule rejected them,
+# and 111 more ("DBAbkG ARM Art. 3") fell through to the decision grammar, whose court pattern
+# accepts any word ending in G.
 _STATUTE = re.compile(
-    rf"^(?P<code>SR \d+(?:\.\d+)*|[A-ZÄÖÜ][\wÄÖÜäöüß\-/]*(?: \([A-Z]+\) \d{{4}}/\d+)?)"
+    rf"^(?P<code>SR \d+(?:\.\d+)*|\S.*?)"
     rf"(?: (?P<part>SchlT))? "
-    rf"(?:§ ?(?P<paragraph>{_NUM})|Art\. (?P<article>{_NUM}))"
+    rf"(?:(?:Art\. (?P<within>{_NUM}|[IVXLC]+) )?§ ?(?P<paragraph>{_NUM})|Art\. (?P<article>{_NUM}))"
     rf"(?: Abs\. (?P<absatz>{_NUM}))?(?: (?:S\.|Satz) (?P<satz>\d+))?"
-    rf"(?: Nr\. (?P<nummer>\d+))?(?: lit\. (?P<litera>[a-z]{{1,2}}))?$"
+    rf"(?: Nr\. (?P<nummer>{_NUM}))?(?: lit\. (?P<litera>[a-z]{{1,2}}))?$"
 )
 _DECISION = re.compile(
     r"^(?P<court>BGH|BVerfG|BVerwG|BFH|BAG|BSG|BPatG|OGH|VfGH|VwGH|BGer|BVGer|EuGH|EuG|[A-Z][A-Za-z]*G|[A-Z][A-Za-z]*GH) "
@@ -151,7 +165,10 @@ _PAPER = re.compile(
 def parse_citation(citation_id: str) -> dict:
     """The parts of a citation id; raises ``ValueError`` if it matches neither grammar.
 
-    Statutes: ``<code> [SchlT] §<n>|Art. <n> [Abs. <k>] [Satz|S. <s>] [Nr. <m>] [lit. <x>]``
+    Statutes: ``<code> [SchlT] [Art. <a>] §<n>|Art. <n> [Abs. <k>] [Satz|S. <s>] [Nr. <m>] [lit. <x>]``,
+    where ``<code>`` is everything before the provision (``SGB 5 §20``, ``13. BImSchV §3``)
+    (``Art. <a> §<n>``: a paragraph of an article that numbers its own, ``BGBEG Art. 229 §6``; the
+    result then has both ``article`` and ``paragraph``)
     (``BGB §573 Abs. 2 Nr. 1``, ``ABGB §1295``, ``OR Art. 97``, ``DSGVO Art. 6 Abs. 1 lit. f``,
     ``ZGB SchlT Art. 1``, ``SR 221.214.111 Art. 3``, ``ZGB Art. 334bis``).
     Decisions: ``<court> <docket> [Rn.|Rz. <n>] [E. <n.n>]`` (``BGH VIII ZR 12/20 Rn. 14``,
@@ -160,7 +177,10 @@ def parse_citation(citation_id: str) -> dict:
     """
     m = _STATUTE.match(citation_id)
     if m:
-        return {"kind": "statute", **{k: v for k, v in m.groupdict().items() if v is not None}}
+        parts = {k: v for k, v in m.groupdict().items() if v is not None}
+        if "within" in parts:
+            parts["article"] = parts.pop("within")
+        return {"kind": "statute", **parts}
     m = _DECISION.match(citation_id)
     if m:
         return {"kind": "decision", **{k: v.strip() for k, v in m.groupdict().items() if v is not None}}

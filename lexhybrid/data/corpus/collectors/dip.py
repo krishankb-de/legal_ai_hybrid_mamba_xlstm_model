@@ -27,7 +27,7 @@ import os
 import re
 from collections.abc import Iterator
 
-from lexhybrid.data.corpus.collectors.base import cli, http_get, licence_flags, utc_now
+from lexhybrid.data.corpus.collectors.base import http_get, licence_flags, main, utc_now
 from lexhybrid.data.schema import Document, Section
 
 API = "https://search.dip.bundestag.de/api/v1"
@@ -202,4 +202,4 @@ class DIPCollector:
 
 
 if __name__ == "__main__":
-    raise SystemExit(cli(DIPCollector()))
+    main(DIPCollector())

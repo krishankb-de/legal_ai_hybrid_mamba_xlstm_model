@@ -32,7 +32,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Iterator
 from datetime import UTC, date, datetime
 
-from lexhybrid.data.corpus.collectors.base import cli, http_get, licence_flags, utc_now
+from lexhybrid.data.corpus.collectors.base import http_get, licence_flags, main, utc_now
 from lexhybrid.data.schema import Document, Section
 
 SPARQL = "https://fedlex.data.admin.ch/sparqlendpoint"
@@ -60,6 +60,8 @@ _MONTHS = {
 _IN_FORCE = re.compile(r"(?:in Kraft|Wirkung) seit\s+(\d{1,2})\.\s*([A-Za-zÄäÖöÜü]+)\.?\s+(\d{4})")
 # Containers whose headings sit above an article (their footnotes date it).
 _CONTAINERS = {"book", "part", "title", "chapter", "section", "level", "proviso", "transitional"}
+# The containers that are the act's structure (Document.hierarchy); a "level" is a marginal note.
+_STRUCTURE = {"book", "part", "title", "chapter", "section", "proviso", "transitional"}
 # Block elements: each starts on a new line.
 _BLOCKS = {"p", "listIntroduction", "listWrapUp", "item", "blockList", "tr", "table", "content"}
 
@@ -222,6 +224,11 @@ def parse_fedlex_xml(xml_bytes: bytes, retrieved_at: str | None = None) -> list[
             if _local(a.tag) == "level" and a.get(f"{FEDLEX}role") == "marginal"
         ]
         title = _inline(article.find(f"{AKN}heading")) or " / ".join(t for t in marginal if t)
+        hierarchy = [  # "Erste Abteilung: Allgemeine Bestimmungen", ..., outermost first
+            " ".join(f"{_inline(a.find(f'{AKN}num'))} {_inline(a.find(f'{AKN}heading'))}".split())
+            for a in reversed(ancestors)
+            if _local(a.tag) in _STRUCTURE
+        ]
         dates = _note_dates(article) + [
             d
             for a in ancestors
@@ -245,6 +252,7 @@ def parse_fedlex_xml(xml_bytes: bytes, retrieved_at: str | None = None) -> list[
                 valid_from=valid_from,
                 retrieved_at=retrieved_at,
                 sections=sections,
+                hierarchy=[h for h in hierarchy if h],
                 **flags,
             )
         )
@@ -339,4 +347,4 @@ class FedlexCollector:
 
 
 if __name__ == "__main__":
-    raise SystemExit(cli(FedlexCollector()))
+    main(FedlexCollector())

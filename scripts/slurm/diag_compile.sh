@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#SBATCH --partition=aisc-batch
+#SBATCH --partition=pot-hpi-aisc-batch
 #SBATCH --account=aisc
 #SBATCH --gpus=1
 #SBATCH --nodes=1

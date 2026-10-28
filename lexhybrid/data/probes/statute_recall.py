@@ -55,11 +55,18 @@ def build_items(
     encode: Callable[[str], list[int]],
     context_tokens: int = 2048,
     seed: int = 0,
+    max_items: int | None = None,
 ) -> list[RecallItem]:
-    """One item per statute that has an Absatz 2 and fits the context with room to spare."""
+    """One item per statute that has an Absatz 2 and fits the context with room to spare.
+
+    ``max_items`` stops after that many items, which equals ``build_items(...)[:max_items]``. Without
+    it every statute of the corpus is built, and each item copies and shuffles the whole statute
+    list, which is quadratic: hours at gii's size (P5-G)."""
     statutes = [d for d in documents if d.doc_type in ("statute", "regulation")]
     items = []
     for doc in statutes:
+        if max_items is not None and len(items) >= max_items:
+            break
         absatz2 = next((s for s in doc.sections if s.absatz == 2), None)
         if absatz2 is None or not doc.citation_id:
             continue
@@ -89,21 +96,24 @@ def score(
     decode: Callable[[list[int]], str],
     device: str = "cpu",
 ) -> dict:
-    """Mean exact match and char-F1 over the items (greedy decoding; cached where supported)."""
+    """Mean exact match, char-F1 and gold-answer NLL over the items (greedy decoding; cached where supported)."""
+    from lexhybrid.data.probes.likelihood import gold_nll
     from lexhybrid.decoding.generate import greedy, greedy_cached
 
     run = greedy_cached if model.supports_cached_decode() else greedy
-    em, f1 = [], []
+    em, f1, nll = [], [], []
     for item in items:
-        prompt = torch.tensor([encode(item.prompt)], device=device)
-        n = len(encode(item.target))
-        out = run(model, prompt, max_new_tokens=n)
+        prompt_ids, target_ids = encode(item.prompt), encode(item.target)
+        prompt = torch.tensor([prompt_ids], device=device)
+        out = run(model, prompt, max_new_tokens=len(target_ids))
         prediction = decode(out[0, prompt.shape[1] :].tolist())
         em.append(exact_match(prediction, item.target))
         f1.append(char_f1(prediction, item.target))
+        nll.append(gold_nll(model, prompt_ids, target_ids, device=device))
     k = len(items)
     return {
         "exact_match": sum(em) / k if k else float("nan"),
         "char_f1": sum(f1) / k if k else float("nan"),
+        "gold_nll": sum(nll) / k if k else float("nan"),  # decisions.p6_probe_scores; lower is better
         "items": k,
     }

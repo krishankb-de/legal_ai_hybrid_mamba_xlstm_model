@@ -25,6 +25,7 @@ import torch
 
 from lexhybrid.config.loading import load_model_config
 from lexhybrid.kernels.ssd import ssd_chunked_scan, ssd_sequential_reference
+from lexhybrid.layers.mamba3_block import Mamba3Block
 from lexhybrid.models.hybrid_lm import HybridLanguageModel
 
 R1_TOLERANCE = 1e-4
@@ -87,6 +88,15 @@ def check_operator(device, chunk_sizes, verbose=True, baseline_chunk=64):
     return failures
 
 
+def set_mamba3_chunk_size(model, chunk_size):
+    """The sweep is over the SSD chunk (``mamba3_chunk_size``) only. The mLSTM mixers also carry a
+    ``chunk_size`` (the TFLA chunk, ``mlstm_chunk_size``), which may differ: ref_hybrid_m3 runs
+    Mamba-3 at 64 and mLSTM at 128, and resetting both to 64 moved its logits by 4.5e-4 (job 2589360)."""
+    for layer in model.layers:
+        if isinstance(layer.mixer, Mamba3Block):
+            layer.mixer.chunk_size = chunk_size
+
+
 def check_model(device, model_name, chunk_sizes, seq_length, do_compile, verbose=True, dim=None):
     """Model level: do the logits move? This is what a decoded token actually sees."""
     failures = []
@@ -107,9 +117,7 @@ def check_model(device, model_name, chunk_sizes, seq_length, do_compile, verbose
         print(f"\n  model {model_name} @ L={seq_length}, chunk_size={baseline_chunk} (baseline)")
 
     for cs in chunk_sizes:
-        for layer in model.layers:
-            if hasattr(layer.mixer, "chunk_size"):
-                layer.mixer.chunk_size = cs
+        set_mamba3_chunk_size(model, cs)
         with torch.no_grad():
             variant = model(input_ids).logits.float()
         err = rel_max_err(variant, baseline)
@@ -118,9 +126,7 @@ def check_model(device, model_name, chunk_sizes, seq_length, do_compile, verbose
             print(f"    chunk_size={cs:>3} logits vs baseline : {err:.3e}   {'PASS' if ok else 'FAIL'}")
         if not ok:
             failures.append(f"model/chunk_size={cs}")
-    for layer in model.layers:
-        if hasattr(layer.mixer, "chunk_size"):
-            layer.mixer.chunk_size = baseline_chunk
+    set_mamba3_chunk_size(model, baseline_chunk)
 
     if do_compile:
         compiled = torch.compile(model)

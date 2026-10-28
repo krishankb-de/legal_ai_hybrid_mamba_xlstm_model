@@ -88,6 +88,19 @@ def test_document_rejects_invalid_records(bad, match):
             {"kind": "statute", "code": "OR", "article": "40a", "absatz": "2bis"},
         ),
         ("ZGB Art. 334bis", {"kind": "statute", "code": "ZGB", "article": "334bis"}),
+        # gii's official abbreviations (job 2663318: 12.7% of its provisions failed the one-token code)
+        ("SGB 5 §20", {"kind": "statute", "code": "SGB 5", "paragraph": "20"}),
+        ("13. BImSchV §3", {"kind": "statute", "code": "13. BImSchV", "paragraph": "3"}),
+        ("1-DM-GoldmünzG §4", {"kind": "statute", "code": "1-DM-GoldmünzG", "paragraph": "4"}),
+        ("eIDKG §8", {"kind": "statute", "code": "eIDKG", "paragraph": "8"}),
+        ("V zu § 180 Abs. 2 AO §5", {"kind": "statute", "code": "V zu § 180 Abs. 2 AO", "paragraph": "5"}),
+        (
+            "SGB 10/Kap1/2 Art. II §40",
+            {"kind": "statute", "code": "SGB 10/Kap1/2", "article": "II", "paragraph": "40"},
+        ),
+        ("EEG 2023 §19 Abs. 1", {"kind": "statute", "code": "EEG 2023", "paragraph": "19", "absatz": "1"}),
+        # was read as a decision of a court "DBAbkG" (the court pattern takes any word ending in G)
+        ("DBAbkG ARM Art. 3", {"kind": "statute", "code": "DBAbkG ARM", "article": "3"}),
         ("BT-Drs. 21/8109", {"kind": "parliament", "series": "BT-Drs.", "number": "21/8109"}),
         (
             "BR-Drs. 506/26 S. 12",
@@ -100,8 +113,9 @@ def test_citation_grammar(citation, parts):
 
 
 def test_citation_grammar_rejects_prose():
-    with pytest.raises(ValueError):
-        parse_citation("see the tenancy rules")
+    for text in ("see the tenancy rules", "BGB 573", "§573 BGB", " BGB §573", "BGB §"):
+        with pytest.raises(ValueError):
+            parse_citation(text)
 
 
 # -- licences (P3-B) ---------------------------------------------------------------------------
@@ -262,6 +276,165 @@ def test_collector_cli_writes_documents_and_manifest(tmp_path):
     lines = (tmp_path / "raw" / "gii.jsonl").read_text().splitlines()
     assert len(lines) == 3 and Document.from_json(lines[0]).id == "gii:fake:0"
     assert len(read_manifest(tmp_path / "m" / "gii.jsonl")) == 3
+    # P4-K: `--limit all` collects everything the source has; nothing is left as .partial
+    assert (
+        cli(Fake(), ["--limit", "all", "--out", str(tmp_path / "raw"), "--manifest-dir", str(tmp_path / "m")])
+        == 0
+    )
+    assert len((tmp_path / "raw" / "gii.jsonl").read_text().splitlines()) == 5
+    assert [r["id"] for r in read_manifest(tmp_path / "m" / "gii.jsonl")] == [
+        f"gii:fake:{i}" for i in range(5)
+    ]
+    assert not list(tmp_path.rglob("*.partial"))
+    for bad in ("0", "-2", "many"):
+        with pytest.raises(SystemExit):
+            cli(Fake(), ["--limit", bad])
+
+
+_ENTRY_POINT_SCRIPT = r"""
+import sys, threading, time
+from lexhybrid.data.corpus.collectors.base import main
+from lexhybrid.data.schema import Document
+
+class Collector:
+    name, licence, jurisdiction = "gii", "DE-UrhG-5", "DE"
+
+    def iter_documents(self, limit=None):
+        mode = sys.argv[1]
+        if mode == "raise":
+            raise ConnectionError("network gone")
+        # a download worker left behind, as a stopped datasets stream leaves them
+        threading.Thread(target=time.sleep, args=(120,)).start()
+        for i in range(0 if mode == "empty" else (limit or 3)):
+            yield Document(id=f"gii:x:{i}", source="gii", jurisdiction="DE", doc_type="statute",
+                           licence="DE-UrhG-5", commercial_safe=True, text=f"Satz {i}.")
+
+main(Collector(), sys.argv[2:])
+"""
+
+
+@pytest.mark.parametrize(
+    "mode, args, code",
+    [("ok", ["--limit", "2"], 0), ("empty", [], 1), ("raise", [], 1), ("ok", ["--limit", "0"], 2)],
+)
+def test_collector_entry_point_ends_the_process_at_once(tmp_path, mode, args, code):
+    """P4-K: a collector module ends its process right after writing its files (base.main), even
+    with a worker thread still alive -- a stopped, shuffled datasets stream left one that kept the
+    FineWeb-2 process alive past its summary line (2026-09-30) -- and exits with cli's code."""
+    import subprocess
+    import sys
+    import time
+
+    script = tmp_path / "collect.py"
+    script.write_text(_ENTRY_POINT_SCRIPT)
+    out, manifests = tmp_path / "raw", tmp_path / "m"
+    start = time.monotonic()
+    res = subprocess.run(
+        [sys.executable, str(script), mode, *args, "--out", str(out), "--manifest-dir", str(manifests)],
+        capture_output=True, text=True, timeout=90,
+    )  # fmt: skip
+    assert time.monotonic() - start < 60, "the lingering worker kept the process alive"
+    assert res.returncode == code, res.stdout + res.stderr
+    if code == 0:
+        assert "gii: 2 documents" in res.stdout and len((out / "gii.jsonl").read_text().splitlines()) == 2
+    if mode == "raise":
+        assert "ConnectionError: network gone" in res.stderr
+
+
+def test_every_collector_module_ends_through_the_entry_point():
+    import re
+
+    root = FIXTURES.parents[1].parent / "lexhybrid" / "data" / "corpus" / "collectors"
+    modules = [p for p in root.glob("*.py") if p.name not in ("__init__.py", "base.py", "htmltext.py")]
+    assert len(modules) == 10
+    for p in modules:
+        tail = p.read_text().split('if __name__ == "__main__":', 1)[1]
+        assert re.fullmatch(r"\s*main\(\w+\(\)\)\s*", tail), p.name
+
+
+def test_collection_that_dies_leaves_the_last_complete_files_alone(tmp_path):
+    """A killed or failing at-scale collection (P4-K) streams into *.partial; the finished files of
+    the previous run are only replaced when a collection completes."""
+    from lexhybrid.data.corpus.collectors.base import run_collector
+
+    class Dies:
+        name, licence, jurisdiction = "gii", "DE-UrhG-5", "DE"
+
+        def __init__(self, fail_after):
+            self.fail_after = fail_after
+
+        def iter_documents(self, limit=None):
+            for i in range(10):
+                if self.fail_after is not None and i == self.fail_after:
+                    raise ConnectionError("network gone")
+                yield _doc(id=f"gii:fake:{i}")
+
+    raw, man = tmp_path / "raw", tmp_path / "m"
+    assert run_collector(Dies(None), None, raw, man, progress_every=4) == 10
+    with pytest.raises(ConnectionError):
+        run_collector(Dies(3), None, raw, man)
+    assert len((raw / "gii.jsonl").read_text().splitlines()) == 10  # the complete run survives
+    assert len((raw / "gii.jsonl.partial").read_text().splitlines()) == 3
+
+
+def test_http_cache_replays_responses_without_the_network(tmp_path):
+    """--http-cache (P4-K): a restarted collection is served what it already fetched -- GET by URL
+    and query, POST by JSON body -- without a request or a rate-limit wait; failures are not kept."""
+    import requests
+
+    from lexhybrid.data.corpus.collectors import base
+
+    class Session:
+        def __init__(self):
+            self.calls = []
+
+        def _reply(self, url, status=200, body=b'{"hits": [1, 2]}'):
+            r = requests.Response()
+            r.status_code, r._content, r.url, r.encoding = status, body, url, "utf-8"
+            r.headers = requests.structures.CaseInsensitiveDict({"Content-Type": "application/json"})
+            return r
+
+        def get(self, url, params=None, **kw):
+            self.calls.append(("GET", url, params))
+            return self._reply(url, 404 if url.endswith("/missing") else 200)
+
+        def post(self, url, json=None, **kw):
+            self.calls.append(("POST", url, json))
+            return self._reply(url, body=b'{"page": %d}' % json["page"])
+
+    waits = []
+
+    class Limiter:
+        def wait(self, host):
+            waits.append(host)
+
+    session, limiter = Session(), Limiter()
+    try:
+        base.set_http_cache(tmp_path / "cache")
+        first = base.http_get("https://ex.org/a", params={"q": 1}, session=session, limiter=limiter)
+        again = base.http_get("https://ex.org/a", params={"q": 1}, session=session, limiter=limiter)
+        other = base.http_get("https://ex.org/a", params={"q": 2}, session=session, limiter=limiter)
+        assert first.json() == again.json() == other.json() == {"hits": [1, 2]}
+        assert again.reason == "OK (http cache)" and again.headers["content-type"] == "application/json"
+        assert [c[2] for c in session.calls] == [{"q": 1}, {"q": 2}] and len(waits) == 2
+        p1 = base.http_post("https://ex.org/s", json={"page": 1}, session=session, limiter=limiter)
+        p2 = base.http_post("https://ex.org/s", json={"page": 2}, session=session, limiter=limiter)
+        assert (p1.json(), p2.json()) == ({"page": 1}, {"page": 2})
+        assert base.http_post(
+            "https://ex.org/s", json={"page": 1}, session=session, limiter=limiter
+        ).json() == {"page": 1}
+        assert len(session.calls) == 4
+        for _ in range(2):
+            with pytest.raises(base.FetchError):
+                base.http_get(
+                    "https://ex.org/missing", session=session, limiter=limiter, sleep=lambda s: None
+                )
+        assert len(session.calls) == 6, "a failed request is asked again, never replayed"
+        assert not list((tmp_path / "cache").rglob("*.tmp*"))
+    finally:
+        base.set_http_cache(None)
+    base.http_get("https://ex.org/a", params={"q": 1}, session=session, limiter=limiter)
+    assert len(session.calls) == 7, "without a cache every call reaches the network"
 
 
 # -- collector: Gesetze im Internet (P3-F) ------------------------------------------------------
@@ -289,6 +462,68 @@ def test_gii_parser_on_fixture():
     assert docs[0].url == "https://www.gesetze-im-internet.de/beurkg/__1.html"
     for d in docs:
         parse_citation(d.citation_id)
+
+
+def _gii_law(*norms: str) -> bytes:
+    head = (
+        "<norm><metadaten><jurabk>BGBEG</jurabk><amtabk>BGBEG</amtabk><langue>Einführungsgesetz</langue>"
+        "<ausfertigung-datum>1896-08-18</ausfertigung-datum></metadaten></norm>"
+    )
+    return f"<dokumente>{head}{''.join(norms)}</dokumente>".encode()
+
+
+def _gii_unit(number: str, bez: str, title: str = "") -> str:
+    return (
+        f"<norm><metadaten><gliederungseinheit><gliederungskennzahl>{number}</gliederungskennzahl>"
+        f"<gliederungsbez>{bez}</gliederungsbez><gliederungstitel>{title}</gliederungstitel>"
+        "</gliederungseinheit></metadaten></norm>"
+    )
+
+
+def _gii_norm(enbez: str, text: str) -> str:
+    return (
+        f"<norm><metadaten><enbez>{enbez}</enbez><titel>T</titel></metadaten>"
+        f"<textdaten><text><Content><P>{text}</P></Content></text></textdaten></norm>"
+    )
+
+
+def test_gii_ids_are_unique_when_articles_number_their_own_paragraphs():
+    """Job 2594824 (137 gii ids named 2-23 provisions): a § under an article heading is cited and
+    linked as that article's (EGBGB Art. 229 § 6, art_229__6.html, Roman numerals lowercased in the
+    URL); a number the XML itself repeats gets the site's suffix (__8_1.html); every id is unique."""
+    from lexhybrid.data.corpus.collectors.gii import parse_gii_xml
+
+    xml = _gii_law(
+        _gii_norm("§ 1", "Erster."),
+        _gii_unit("010", "Art 229", "Übergangsvorschriften"),
+        _gii_norm("§ 6", "(1) Verjährung."),
+        _gii_unit("020", "Art 231"),
+        _gii_norm("§ 6", "(1) Anderes."),
+        _gii_unit("030", "Art II"),
+        _gii_norm("§ 1", "Patent."),
+        _gii_unit("040", "Siebter Teil Schlussvorschriften"),
+        _gii_norm("§ 8", "Inkrafttreten."),
+        _gii_norm("§ 8", "Übergang."),
+        _gii_norm("Art 5", "Ein Artikel."),
+    )
+    docs = parse_gii_xml(xml, "bgbeg", retrieved_at="2026-10-03T00:00:00+00:00")
+    got = [(d.id, d.citation_id, d.url.rsplit("/", 1)[1]) for d in docs]
+    assert got == [
+        ("gii:bgbeg:1", "BGBEG §1", "__1.html"),
+        ("gii:bgbeg:art229:6", "BGBEG Art. 229 §6", "art_229__6.html"),
+        ("gii:bgbeg:art231:6", "BGBEG Art. 231 §6", "art_231__6.html"),
+        ("gii:bgbeg:artii:1", "BGBEG Art. II §1", "art_ii__1.html"),
+        ("gii:bgbeg:8", "BGBEG §8", "__8.html"),
+        ("gii:bgbeg:8_1", "BGBEG §8", "__8_1.html"),
+        ("gii:bgbeg:art5", "BGBEG Art. 5", "art_5.html"),
+    ]
+    assert docs[1].hierarchy == ["Art 229 Übergangsvorschriften"] and docs[4].hierarchy == [
+        "Siebter Teil Schlussvorschriften"
+    ]
+    assert parse_citation("BGBEG Art. 229 §6 Abs. 1") == {
+        "kind": "statute", "code": "BGBEG", "article": "229", "paragraph": "6", "absatz": "1",
+    }  # fmt: skip
+    assert parse_citation(docs[3].citation_id)["article"] == "II"
 
 
 def test_gii_toc_and_zip():
@@ -431,9 +666,15 @@ def test_html_blocks():
 
 @pytest.mark.network
 def test_oldp_live_smoke():
+    from huggingface_hub import get_token
+
     from lexhybrid.data.corpus.collectors.oldp import OLDPCollector
 
-    docs = list(OLDPCollector(page_size=5).iter_documents(limit=2))
+    if get_token() is None:
+        pytest.skip(
+            "openlegaldata/court-decisions-germany is gated: needs an HF token that accepted its terms"
+        )
+    docs = list(OLDPCollector().iter_documents(limit=2))
     assert len(docs) == 2 and all(d.valid_from and d.text for d in docs)
 
 
@@ -578,6 +819,44 @@ def test_ris_decision_on_fixture():
     assert doc.text.startswith("Kopf\n") and "\nSpruch\n" in doc.text
     assert parse_citation(doc.citation_id) == {"kind": "decision", "court": "OGH", "docket": "7 Ob 143/26v"}
     assert docket("1Ob358/60; 4Ob639/71") == "1 Ob 358/60"
+
+
+def test_ris_stops_at_the_last_page_the_search_reports(monkeypatch):
+    """Job 2589358_4: RIS answers a page past the end with HTTP 500 ("Die Seitennummer ist höher als
+    die Anzahl der verfügbaren Seiten"), not an empty list, so the whole RIS task died after ABGB's
+    last page. The collector stops at the page count in ``Hits`` and never asks for the next page."""
+    from lexhybrid.data.corpus.collectors import ris
+    from lexhybrid.data.corpus.collectors.base import FetchError
+
+    norm_ref, norm_xml = _ris_fixture("NOR40172917")
+    dec_ref, dec_xml = _ris_fixture("JJT_20260917_OGH0002_0070OB00143_26V0000_000")
+    xml = {ris._xml_url(norm_ref): norm_xml, ris._xml_url(dec_ref): dec_xml}
+    asked = []
+
+    class _Response:
+        def __init__(self, body=None, content=b""):
+            self.body, self.content = body, content
+
+        def json(self):
+            return self.body
+
+    def fake_get(url, params=None, **kwargs):
+        if url in xml:
+            return _Response(content=xml[url])
+        kind, page = url.rsplit("/", 1)[-1], int(params["Seitennummer"])
+        asked.append((kind, page))
+        if page > 2:  # 51 hits at 50 per page: 2 pages
+            raise FetchError(f"GET {url} failed after 5 attempts (HTTP 500)")
+        hits = {"@pageNumber": str(page), "@pageSize": "50", "#text": "51"}
+        ref = norm_ref if kind == "Bundesrecht" else dec_ref
+        return _Response(
+            {"OgdSearchResult": {"OgdDocumentResults": {"Hits": hits, "OgdDocumentReference": ref}}}
+        )
+
+    monkeypatch.setattr(ris, "http_get", fake_get)
+    docs = list(ris.RISCollector(codes=("ABGB",)).iter_documents())
+    assert asked == [("Bundesrecht", 1), ("Bundesrecht", 2), ("Judikatur", 1), ("Judikatur", 2)]
+    assert [d.doc_type for d in docs] == ["statute", "statute", "decision", "decision"]
 
 
 @pytest.mark.network
@@ -1240,6 +1519,37 @@ def test_scrub_short_forms_are_replaced_only_where_tagged():
     )
 
 
+def test_scrub_skips_a_span_that_trims_to_whitespace():
+    """Job 2593479 (9 tasks, KeyError ' '): a span of punctuation tokens (`„ “`, `( )`) trims to a
+    space; it gets no placeholder and must not be replaced, while the real names still are."""
+    from lexhybrid.data.corpus.scrub_ler import Entity, scrub_document
+
+    doc = _doc(text="Herr Müller sagte „ “ und ( ) nichts; Müller ging.")
+    text = doc.text
+    entities = [
+        Entity(*_find(text, "„ “"), "PER", 0.6),
+        Entity(*_find(text, "( )"), "RR", 0.6),
+        Entity(*_find(text, "Müller"), "PER", 0.99),
+    ]
+    scrubbed, log = scrub_document(doc, entities, key=b"k" * 32)
+    assert scrubbed.text == "Herr [PER_1] sagte „ “ und ( ) nichts; [PER_1] ging."
+    assert [(r["label"], r["placeholder"]) for r in log] == [("PER", "[PER_1]")]
+
+
+def test_scrub_worker_caps_every_piece_in_characters(script):
+    """Job 2593479_35 (CUDA OOM, 32 GiB): flair's character LM allocates per character, so a DIP
+    table line of 200 long "words" or one 30,000-character run must reach the tagger in pieces of
+    at most --max-chars characters, each at its own offset into the text."""
+    worker = script("scrub_ner_worker")
+    text = "Herr Müller klagt.\n" + " ".join(["x" * 150] * 200) + "\n  " + "y" * 9000 + " Ende."
+    pieces = worker.chunks(text, max_tokens=200, max_chars=1000)
+    assert all(0 < len(p) <= 1000 and p.strip() == p for _, p in pieces)
+    assert all(text[off : off + len(p)] == p for off, p in pieces)
+    assert "".join(p for _, p in pieces).replace(" ", "") == text.replace(" ", "").replace("\n", "")
+    assert pieces[0] == (0, "Herr Müller klagt.")
+    assert worker.chunks("Herr Müller klagt.", 200) == [(0, "Herr Müller klagt.")], "short text unchanged"
+
+
 def test_scrub_worker_tags_the_model_card_example():
     """The real worker in the scrub environment (skipped until envs/scrub and the model are present)."""
     from lexhybrid.data.corpus.scrub_ler import REPO_ROOT, SCRUB_PYTHON, run_worker
@@ -1257,10 +1567,215 @@ def test_scrub_worker_tags_the_model_card_example():
         )
     doc = Document(id="t:1", source="t", jurisdiction="DE", doc_type="decision", licence="DE-UrhG-5",
                    commercial_safe=True, text="Herr W. verstieß gegen § 36 Abs. 7 IfSG.")  # fmt: skip
+    other = Document(id="t:2", source="t", jurisdiction="DE", doc_type="decision", licence="DE-UrhG-5",
+                     commercial_safe=True, text="Die Klage wird abgewiesen.")  # fmt: skip
     # the cache the skip check looked in, whatever HF_HOME / HF_HUB_CACHE say in this shell
-    entities, stats = run_worker([doc], args=("--cache-dir", str(REPO_ROOT / "data" / "hf" / "hub")))
+    cache = ("--cache-dir", str(REPO_ROOT / "data" / "hf" / "hub"))
+    entities, stats = run_worker([doc], args=cache)
     (person,) = [e for e in entities["t:1"] if e.label == "PER"]
     assert doc.text[person.start : person.end] == "W." and person.score > 0.9 and stats["docs"] == 1
+    batched, stats = run_worker(
+        [doc, other], args=(*cache, "--docs-per-batch", "2")
+    )  # P4-L: one predict call
+    assert batched["t:1"] == entities["t:1"] and batched["t:2"] == [] and stats["docs"] == 2
+
+
+def test_collectors_record_hierarchy_and_parts():
+    """P7-A/B's inputs (schema fields added 2026-09-29): statute collectors carry the act's
+    structural headings above each provision (Document.hierarchy, outermost first), decision
+    collectors the part of the decision each paragraph belongs to (Section.part); records written
+    before the fields existed still load, with the defaults."""
+    import json
+
+    from lexhybrid.data.corpus.collectors.gii import parse_gii_xml
+    from lexhybrid.data.corpus.collectors.oldp import parse_oldp_case
+    from lexhybrid.data.corpus.collectors.rii import parse_rii_xml
+    from lexhybrid.data.corpus.collectors.ris import parse_ris_decision
+
+    gii = parse_gii_xml((FIXTURES / "gii" / "beurkg_excerpt.xml").read_bytes(), "beurkg")
+    assert {tuple(d.hierarchy) for d in gii} == {("Abschnitt 1 Allgemeine Vorschriften",)}
+    fedlex = {**_fedlex("or_excerpt"), **_fedlex("zgb_excerpt")}
+    assert fedlex["OR Art. 97"].hierarchy == [
+        "Erste Abteilung: Allgemeine Bestimmungen",
+        "Zweiter Titel: Die Wirkung der Obligationen",
+        "Zweiter Abschnitt: Die Folgen der Nichterfüllung",
+    ]
+    assert fedlex["ZGB SchlT Art. 1"].hierarchy[0].startswith("Schlusstitel")
+    rii = parse_rii_xml((FIXTURES / "rii" / "jb-KARE600065578.xml").read_bytes())
+    parts = [s.part for s in rii.sections]
+    assert parts[0] == "Leitsatz" and "Tenor" in parts and parts[-1] == "Entscheidungsgründe"
+    assert parts == sorted(parts, key=["Leitsatz", "Tenor", "Tatbestand", "Entscheidungsgründe"].index)
+    assert {s.part for s in rii.sections if s.label == "Rn. 3"} == {"Tatbestand"}
+    bger = _bger("CH_BGer_004_4A-102-2026_2026-08-17")
+    assert {s.part for s in bger.sections if s.label.startswith("E. ")} == {"Erwägungen"}
+    assert {s.part for s in bger.sections if s.label.startswith("Sachverhalt")} == {"Sachverhalt"}
+    oldp = parse_oldp_case(json.loads((FIXTURES / "oldp" / "case_521941.json").read_text()))
+    assert {s.part for s in oldp.sections} >= {"Tenor"} and all(
+        s.part == s.label or (s.part is None and s.label == "Text") for s in oldp.sections
+    )
+    ris = parse_ris_decision(*_ris_fixture("JJT_20260917_OGH0002_0070OB00143_26V0000_000"))
+    assert all(s.part == s.label for s in ris.sections) and "Rechtliche Beurteilung" in {
+        s.part for s in ris.sections
+    }
+    old = json.loads(gii[0].to_json())
+    old.pop("hierarchy")
+    for s in old["sections"]:
+        s.pop("part")
+    back = Document.from_dict(old)
+    assert back.hierarchy == [] and back.sections[0].part is None and back.sha256 == gii[0].sha256
+
+
+def test_scrub_worker_tags_a_batch_of_documents_in_one_predict_call(script, monkeypatch):
+    """P4-L: `--docs-per-batch` puts the sentences of several documents into ONE predict call (short
+    documents fill the GPU's mini-batches together) and yields the per-document entities unchanged."""
+    import sys
+    import types
+
+    class Label:
+        def __init__(self, value, score):
+            self.value, self.score = value, score
+
+    class Span:
+        def __init__(self, start, end, value):
+            self.start_position, self.end_position, self._label = start, end, Label(value, 0.99)
+
+        def get_label(self, name):
+            return self._label
+
+    class Sentence:
+        def __init__(self, text, use_tokenizer=True):
+            assert use_tokenizer is False
+            self.text, self.spans = text, []
+
+        def get_spans(self, name):
+            return self.spans
+
+    class Tagger:
+        def __init__(self):
+            self.calls = []
+
+        def predict(self, sentences, mini_batch_size):
+            self.calls.append(len(sentences))
+            for s in sentences:
+                s.spans = [Span(m.start(), m.end(), "PER") for m in re.finditer(r"Müller|Schmidt", s.text)]
+
+    import re
+
+    monkeypatch.setitem(sys.modules, "flair", types.ModuleType("flair"))
+    monkeypatch.setitem(sys.modules, "flair.data", types.SimpleNamespace(Sentence=Sentence))
+    worker = script("scrub_ner_worker")
+    docs = [
+        {"id": "a", "text": "Herr Müller klagt.\nFrau Schmidt nicht."},
+        {"id": "b", "text": "Ohne Namen."},
+        {"id": "c", "text": "Müller und Schmidt; Müller zahlt."},
+    ]
+    batched = Tagger()
+    together = worker.tag(batched, docs, max_tokens=200, batch_size=32)
+    assert batched.calls == [4], "one predict call over the sentences (lines) of all three documents"
+    alone = Tagger()
+    assert together == [worker.tag(alone, [d], 200, 32)[0] for d in docs] and alone.calls == [2, 1, 1]
+    assert [e[2] for e in together[2]["entities"]] == ["PER", "PER", "PER"]
+
+
+FAKE_SCRUB_WORKER = r"""
+import json, re, sys
+argv = sys.argv[1:]
+batch = int(argv[argv.index("--docs-per-batch") + 1]) if "--docs-per-batch" in argv else 1
+die_after = int(argv[argv.index("--die-after") + 1]) if "--die-after" in argv else None
+pending, n = [], 0
+def flush():
+    for doc in pending:
+        ents = [[m.start(), m.end(), "PER", 0.99] for m in re.finditer(r"Müller", doc["text"])]
+        print(json.dumps({"id": doc["id"], "entities": ents}, ensure_ascii=False), flush=True)
+    pending.clear()
+for line in sys.stdin:
+    if not line.strip():
+        continue
+    n += 1
+    if die_after is not None and n > die_after:
+        print("worker died", file=sys.stderr); sys.exit(3)
+    pending.append(json.loads(line))
+    if len(pending) >= batch:
+        flush()
+flush()
+print("some flair log line", file=sys.stderr)
+print(json.dumps({"docs": n, "chars": 0, "seconds": 0.1, "docs_per_s": 1.0}), file=sys.stderr)
+"""
+
+
+def test_scrub_streams_parts_through_one_worker(tmp_path):
+    """P4-L: stride parts of a source, streamed through one worker process with a bounded window
+    of documents in flight; outputs named per part and renamed from *.partial on completion; a
+    worker that dies leaves only the *.partial files; a consumer that stops early does not hang."""
+    import itertools
+    import sys
+
+    from lexhybrid.data.corpus.scrub_ler import iter_part, part_name, scrub_file, stream_worker
+
+    fake = tmp_path / "fake_worker.py"
+    fake.write_text(FAKE_SCRUB_WORKER)
+    docs = [_doc(id=f"gii:bgb:{i}", text=f"Herr Müller zahlt {i} Euro.") for i in range(50)]
+    raw = tmp_path / "gii.jsonl"
+    raw.write_text("".join(d.to_json() + "\n" for d in docs))
+    assert [d.id for d in iter_part(raw, 1, 3)] == [f"gii:bgb:{i}" for i in range(1, 50, 3)]
+    with pytest.raises(ValueError):
+        next(iter_part(raw, 3, 3))
+    assert part_name("gii", 0, 1) == "gii.jsonl" and part_name("gii", 1, 4) == "gii.part-1-of-4.jsonl"
+
+    stats = {}
+    streamed = list(
+        stream_worker(iter(docs), sys.executable, ("--docs-per-batch", "4"), fake, in_flight=16, stats=stats)
+    )
+    assert [d.id for d, _ in streamed] == [d.id for d in docs] and stats["docs"] == 50
+    assert all(e[0].label == "PER" for _, e in streamed)
+    head = list(itertools.islice(stream_worker(iter(docs), sys.executable, (), fake, in_flight=4), 3))
+    assert len(head) == 3  # the generator was closed early: the worker is killed, nothing hangs
+
+    out_ids = []
+    for k in (0, 1):
+        name = part_name("gii", k, 2)
+        s = scrub_file("gii", raw, tmp_path / "scrubbed" / name, tmp_path / "manifests" / f"scrub_{name}",
+                       python=sys.executable, part=k, parts=2, worker=fake, in_flight=8)  # fmt: skip
+        assert s["docs"] == 25 and s["entities"] == 25 and s["worker"]["docs"] == 25
+        lines = (tmp_path / "scrubbed" / name).read_text().splitlines()
+        assert all("[PER_1] zahlt" in Document.from_json(ln).text for ln in lines)
+        out_ids += [Document.from_json(ln).id for ln in lines]
+    assert sorted(out_ids) == sorted(d.id for d in docs)
+    assert not list(tmp_path.rglob("*.partial"))
+
+    dead = tmp_path / "scrubbed" / "dead.jsonl"
+    with pytest.raises(RuntimeError, match="worker died"):
+        scrub_file("gii", raw, dead, tmp_path / "manifests" / "scrub_dead.jsonl", python=sys.executable,
+                   worker_args=("--die-after", "10"), worker=fake, in_flight=4)  # fmt: skip
+    assert not dead.exists() and (tmp_path / "scrubbed" / "dead.jsonl.partial").exists()
+
+
+def test_scrub_parts_keep_only_the_market_jurisdictions(tmp_path, script):
+    """decisions.market (Germany only): with jurisdictions, a Swiss row is never scrubbed, the
+    stride runs over the kept rows, and build_shards' round-robin read restores their order."""
+    import sys
+
+    from lexhybrid.data.corpus.scrub_ler import iter_part, part_name, scrub_file
+
+    jur = ["CH"] * 7 + ["DE", "CH", "DE", "DE", "EU"] * 5  # the Swiss rows first, as in multilegalpile
+    docs = [_doc(id=f"gii:x:{i}", jurisdiction=j, text=f"Herr Müller {i}.") for i, j in enumerate(jur)]
+    raw = tmp_path / "gii.jsonl"
+    raw.write_text("".join(d.to_json() + "\n" for d in docs) + "\n")
+    want = [d.id for d in docs if d.jurisdiction in ("DE", "EU")]
+    assert [d.id for d in iter_part(raw, 0, 1, ["DE", "EU"])] == want
+    assert [d.id for d in iter_part(raw, 2, 3, ["DE", "EU"])] == want[2::3]
+    assert [d.id for d in iter_part(raw, 2, 3)] == [d.id for d in docs][2::3], "no filter: lines as before"
+
+    fake = tmp_path / "fake_worker.py"
+    fake.write_text(FAKE_SCRUB_WORKER)
+    out = tmp_path / "scrubbed"
+    for k in range(3):
+        name = part_name("gii", k, 3)
+        s = scrub_file("gii", raw, out / name, tmp_path / "manifests" / f"scrub_{name}",
+                       python=sys.executable, part=k, parts=3, worker=fake, jurisdictions=["DE", "EU"])  # fmt: skip
+        assert s["jurisdictions"] == ["DE", "EU"] and s["docs"] == len(want[k::3])
+    paths = [out / part_name("gii", k, 3) for k in range(3)]
+    assert [d.id for d in script("build_shards").iter_documents(paths)] == want
 
 
 # -- deduplication (P3-S) ----------------------------------------------------------------------
@@ -1278,8 +1793,10 @@ def _oldp_docs():
 
 
 def test_dedup_catches_planted_near_duplicate():
-    """P3-S: exact-hash pre-pass, then MinHash (5-gram shingles, 128 permutations, Jaccard >= 0.8);
-    the commercial-safe copy survives whatever the input order, and the answer is deterministic."""
+    """P3-S: exact-hash pre-pass, then MinHash (5-gram shingles, 128 permutations, Jaccard >= 0.8).
+    A near duplicate inside one source is dropped; the copy in another source (here the research-only
+    Multi Legal Pile copy of an OLDP decision) is kept and linked (decision 13 as amended by the user,
+    2026-09-29: "keep both and when cited cite both"); whatever the input order, the same answer."""
     import dataclasses
     import random
 
@@ -1301,15 +1818,60 @@ def test_dedup_catches_planted_near_duplicate():
     assert 0.8 <= true_jaccard < 1.0 and minhash(base.text).jaccard(minhash(near.text)) >= 0.8
 
     kept, log = deduplicate([exact_nc, near, *docs])  # the research-only copy comes first on purpose
-    assert [d.id for d in kept] == sorted(d.id for d in docs)  # every original, and only those
+    # every original, then the research-only copy (visited last), and not the planted duplicate
+    assert [d.id for d in kept] == [*sorted(d.id for d in docs), exact_nc.id]
     by_id = {entry.id: entry for entry in log}
-    assert by_id["multilegalpile:de_caselaw_germany_openlegaldata:7"].duplicate_of == docs[0].id
-    assert by_id["multilegalpile:de_caselaw_germany_openlegaldata:7"].kind == "exact"
+    link = by_id["multilegalpile:de_caselaw_germany_openlegaldata:7"]
+    assert (link.duplicate_of, link.kind, link.dropped) == (docs[0].id, "exact", False)
     assert by_id["oldp:planted"].kind == "near" and by_id["oldp:planted"].duplicate_of == base.id
+    assert by_id["oldp:planted"].dropped is True
     assert set(by_id) == {"multilegalpile:de_caselaw_germany_openlegaldata:7", "oldp:planted"}
     shuffled = [exact_nc, near, *docs]
     random.Random(1).shuffle(shuffled)
     assert [d.id for d in deduplicate(shuffled)[0]] == [d.id for d in kept]
+
+
+def test_dedup_at_scale_makes_the_same_decisions(tmp_path):
+    """P4-L: signatures (no text, 512 bytes of MinHash) computed in worker processes from a stream,
+    then the same visiting order and decisions as `deduplicate`."""
+    import dataclasses
+
+    import numpy as np
+
+    from lexhybrid.data.corpus.dedup import deduplicate, deduplicate_stream, signature
+
+    docs = _oldp_docs() + [_bger("CH_BGer_004_4A-102-2026_2026-08-17")]
+    near = dataclasses.replace(docs[1], id="oldp:planted", text=docs[1].text.replace(" ", "  ", 2), sha256="")
+    twin = dataclasses.replace(docs[0], id="oldp:exact-copy")
+    web = dataclasses.replace(  # another source: a near copy that must stay, linked
+        _fineweb_docs()[0], id="fineweb2_de:copy", text=docs[2].text.replace(" ", "  ", 1), sha256=""
+    )
+    corpus = [twin, near, web, *docs]
+    kept, log = deduplicate(corpus)
+    sig = signature(docs[0])
+    assert len(sig.hashvalues) == 128 * 4 and np.frombuffer(sig.hashvalues, np.uint32).shape == (128,)
+    for workers in (1, 2):
+        ids, stream_log = deduplicate_stream(iter(corpus), workers=workers)
+        assert ids == [d.id for d in kept] and stream_log == log
+    assert {e.id for e in log if e.dropped} == {"oldp:exact-copy", "oldp:planted"}
+    (linked,) = [e for e in log if not e.dropped]
+    assert {linked.id, linked.duplicate_of} == {"fineweb2_de:copy", docs[2].id} and linked.kind == "near"
+    assert "fineweb2_de:copy" in {d.id for d in kept}
+
+
+def test_dedup_refuses_an_id_that_names_two_documents():
+    """Job 2594824: two gii provisions under one id reached the LSH index ("The given key already
+    exists"); the deduplication now names the repeated ids before any work."""
+    import dataclasses
+
+    from lexhybrid.data.corpus.dedup import deduplicate_stream
+
+    a = _doc(id="gii:bgbeg:6", text="§ 6 Überleitungsvorschrift zum Verjährungsrecht nach dem Gesetz.")
+    b = dataclasses.replace(
+        a, text="§ 6 Ganz andere Vorschrift über das Grundbuch im Beitrittsgebiet.", sha256=""
+    )
+    with pytest.raises(ValueError, match=r"1 document ids occur more than once: \['gii:bgbeg:6'\]"):
+        deduplicate_stream(iter([a, b, _doc(id="gii:bgbeg:7")]))
 
 
 def test_dedup_shingles():
@@ -1570,6 +2132,191 @@ def test_mixture_draws_the_configured_shares(tmp_path):
     assert len(val) == sum(len(s) for s in val.sources.values())
 
 
+def test_streaming_build_equals_the_in_memory_build_at_every_row_len(tmp_path):
+    """P4-L at scale: one pass, each document tokenised once, packed at two row lengths together --
+    the same shards and meta.json as build_source_shards at each length on its own."""
+    import json
+
+    from lexhybrid.data.datasets import build_source_shards, build_source_shards_stream, split_by_document
+    from lexhybrid.data.packing import read_rows
+
+    encode, _, eos = _char_codec()
+    docs = _oldp_docs()
+    calls = []
+
+    def counted(text):
+        calls.append(text)
+        return encode(text)
+
+    val_ids = split_by_document([d.id for d in docs], 0.001, 1, 0)
+    metas = build_source_shards_stream(
+        iter(docs), val_ids, counted, eos, (32, 64), tmp_path / "stream", 0.001, 1, 0, {"scrubbed": True}
+    )
+    assert len(calls) == len(docs), "every document is tokenised once for both row lengths"
+    for n in (32, 64):
+        ref = build_source_shards(docs, encode, eos, n, tmp_path / f"ref{n}", 0.001, 1, 0, {"scrubbed": True})
+        assert metas[n] == ref
+        stream_dir, ref_dir = tmp_path / "stream" / str(n) / "oldp", tmp_path / f"ref{n}" / str(n) / "oldp"
+        assert json.loads((stream_dir / "meta.json").read_text()) == ref
+        for split in ("train", "val"):
+            got = sorted((stream_dir / split).glob("*.parquet"))
+            want = sorted((ref_dir / split).glob("*.parquet"))
+            assert [p.name for p in got] == [p.name for p in want]
+            assert [read_rows(p) for p in got] == [read_rows(p) for p in want]
+    with pytest.raises(ValueError, match="no documents"):
+        build_source_shards_stream(iter([]), set(), encode, eos, (32,), tmp_path / "empty")
+    with pytest.raises(ValueError, match="one source"):
+        build_source_shards_stream(
+            iter(docs + _fineweb_docs()), val_ids, encode, eos, (32,), tmp_path / "mix"
+        )
+
+
+def _char_encoder():
+    return _char_codec()[0]
+
+
+def test_build_shards_streams_scrub_parts_dedups_and_packs_every_length(tmp_path, script):
+    """P4-L's pack step (scripts/build_shards.py): a whole scrubbed file and a source in scrub-array
+    parts, deduplicated together (a cross-source copy is dropped from its source before packing),
+    packed at two row lengths; the summary P4-M reads; incomplete parts and unscrubbed sources
+    are refused."""
+    import argparse
+    import dataclasses
+    import json
+
+    bs = script("build_shards")
+    scrubbed, raw, root = tmp_path / "scrubbed", tmp_path / "raw", tmp_path / "shards"
+    scrubbed.mkdir()
+    oldp, web = _oldp_docs(), _fineweb_docs()
+    copy = dataclasses.replace(web[0], id="fineweb2_de:copy-of-oldp", text=oldp[0].text, sha256="")
+    twin = dataclasses.replace(oldp[1], id="oldp:twin")  # a duplicate inside one source: dropped
+    (scrubbed / "oldp.jsonl").write_text("".join(d.to_json() + "\n" for d in [*oldp, twin]))
+    parts = [[d for i, d in enumerate([*web, copy]) if i % 2 == k] for k in (0, 1)]
+    for k, docs in enumerate(parts):
+        (scrubbed / f"fineweb2_de.part-{k}-of-2.jsonl").write_text("".join(d.to_json() + "\n" for d in docs))
+    args = argparse.Namespace(
+        sources=["oldp", "fineweb2_de", "gii"], scrubbed=scrubbed, raw=raw, allow_unscrubbed=False,
+        workers=1, row_len=[32, 64], root=root, val_fraction=0.001, min_val_docs=1, seed=0,
+    )  # fmt: skip
+    part_files = [scrubbed / f"fineweb2_de.part-{k}-of-2.jsonl" for k in (0, 1)]
+    assert [d.id for d in bs.iter_documents(part_files)] == [d.id for d in [*web, copy]], "collection order"
+    summary = bs.build(args, encoder_factory=_char_encoder, eos_id=0)
+    assert (summary["duplicates_dropped"], summary["copies_linked"]) == (1, 1)
+    assert summary["documents"] == len(oldp) + len(web) + 2
+    for n in (32, 64):
+        entries = [json.loads(ln) for ln in (root / str(n) / "dedup.jsonl").read_text().splitlines()]
+        (drop,) = [e for e in entries if e["dropped"]]
+        (entry,) = [e for e in entries if not e["dropped"]]
+        assert (drop["id"], drop["duplicate_of"]) == ("oldp:twin", oldp[1].id)
+        assert {entry["id"], entry["duplicate_of"]} == {copy.id, oldp[0].id} and entry["kind"] == "exact"
+        shipped = set()
+        for source in ("oldp", "fineweb2_de"):
+            meta = json.loads((root / str(n) / source / "meta.json").read_text())
+            assert meta["row_len"] == n and meta["scrubbed"] is True
+            shipped |= set(meta["train"]["document_ids"] + meta["val"]["document_ids"])
+            got = summary["sources"][source][str(n)]
+            assert (
+                got["train"]["documents"] + got["val"]["documents"]
+                == len(meta["train"]["document_ids"] + meta["val"]["document_ids"])
+                and "document_ids" not in got["train"]
+            )
+        assert {entry["id"], entry["duplicate_of"]} <= shipped, "a copy in another source is packed too"
+        assert shipped == {d.id for d in [*oldp, *web, copy]}, "the within-source twin is not"
+    assert json.loads((root / "build_summary.json").read_text()) == json.loads(json.dumps(summary))
+    assert "gii" not in summary["sources"]  # no files: skipped
+    (raw / "gii").mkdir(parents=True)
+    (raw / "gii" / "gii.jsonl").write_text("{}\n")
+    with pytest.raises(SystemExit, match="not scrubbed"):
+        bs.build(args, encoder_factory=_char_encoder, eos_id=0)
+    (scrubbed / "fineweb2_de.part-1-of-2.jsonl").rename(scrubbed / "fineweb2_de.part-1-of-3.jsonl")
+    with pytest.raises(SystemExit, match="incomplete or mixed scrub parts"):
+        bs.source_files("fineweb2_de", scrubbed, raw, False)
+    with pytest.raises(SystemExit, match="oldp: .*cannot give a validation split"):
+        bs.build(
+            argparse.Namespace(**{**vars(args), "sources": ["oldp"], "min_val_docs": 10_000}),
+            _char_encoder,
+            0,
+        )
+
+
+def test_mixture_cuts_stored_rows_for_a_shorter_row_len(tmp_path):
+    """The P5 screen trains on 2,048-token rows and P4-L packs 4,096 and 8,192: a row length with
+    no shards of its own is served from the smallest packed multiple, each stored row cut into
+    consecutive sub-rows that are exactly the stored row's pieces (here 32 from 64)."""
+    import torch
+
+    from lexhybrid.data.datasets import PackedMixture, SourceShards, shard_directory
+
+    _build(tmp_path, _oldp_docs(), row_len=64)
+    _build(tmp_path, _oldp_docs(), row_len=128)
+    assert shard_directory(tmp_path, 64, "oldp") == (tmp_path / "64" / "oldp", 1)
+    assert shard_directory(tmp_path, 32, "oldp") == (tmp_path / "64" / "oldp", 2)  # smallest multiple
+    with pytest.raises(FileNotFoundError, match="multiple"):
+        shard_directory(tmp_path, 48, "oldp")
+    stored, cut = (
+        SourceShards(tmp_path / "64" / "oldp", "train"),
+        SourceShards(tmp_path / "64" / "oldp", "train", 2),
+    )
+    assert len(cut) == 2 * len(stored)
+    for k in range(len(stored)):
+        whole, a, b = stored.row(k), cut.row(2 * k), cut.row(2 * k + 1)
+        assert a["input_ids"] + b["input_ids"] == whole["input_ids"]
+        assert a["doc_ids"] + b["doc_ids"] == whole["doc_ids"]
+        assert a["length"] + b["length"] == whole["length"] and a["documents"] == whole["documents"]
+    last = cut.row(len(cut) - 1)
+    assert 0 <= last["length"] <= 32 and last["length"] == max(0, stored.row(len(stored) - 1)["length"] - 32)
+    with pytest.raises(IndexError):
+        cut.row(len(cut))
+    with pytest.raises(ValueError, match="cut"):
+        SourceShards(tmp_path / "64" / "oldp", "train", 3)
+    mix = PackedMixture(tmp_path, 32, "train", {"oldp": 1.0}, "commercial_safe", num_samples=50)
+    item = mix[0]
+    assert item["input_ids"].shape == (32,) and item["doc_ids"].shape == (32,)
+    val = PackedMixture(tmp_path, 32, "val", {"oldp": 1.0}, "commercial_safe")
+    val_cut = val.sources["oldp"]
+    assert len(val) == len(val_cut) == 2 * len(SourceShards(tmp_path / "64" / "oldp", "val"))
+    tail = val_cut.row(len(val_cut) - 1)["length"]  # val reads every sub-row once, in order
+    assert torch.all(val[len(val) - 1]["labels"][tail:] == -100)
+
+
+def test_corpus_counts_per_source_jurisdiction_and_arm(tmp_path, script, capsys):
+    """P4-L verdict (scripts/corpus_counts.py): documents and characters from the manifests, tokens
+    estimated per jurisdiction from a stride sample; rows outside the market are reported but not
+    totalled; the research total includes the commercial-safe one; a missing manifest fails."""
+    import json
+
+    from lexhybrid.data.corpus.manifest import write_manifest
+
+    cc = script("corpus_counts")
+    gii = [_doc(id=f"gii:bgb:{i}", text="a b c d " * (i + 1)) for i in range(10)]
+    mlp = [
+        _doc(id=f"multilegalpile:x:{i}", source="multilegalpile", jurisdiction=j, licence="CC-BY-NC-SA-4.0",
+             commercial_safe=False, research_only=True, text="w " * 50)
+        for i, j in enumerate(["CH"] * 4 + ["DE"] * 6)
+    ]  # fmt: skip
+    for name, docs in (("gii", gii), ("multilegalpile", mlp)):
+        (tmp_path / "raw" / name).mkdir(parents=True)
+        (tmp_path / "raw" / name / f"{name}.jsonl").write_text("".join(d.to_json() + "\n" for d in docs))
+        write_manifest(docs, tmp_path / "manifests" / f"{name}.jsonl")
+    argv = ["--manifests", str(tmp_path / "manifests"), "--raw", str(tmp_path / "raw"), "--sample", "5"]
+    words = lambda: str.split  # noqa: E731 -- one "token" per whitespace word
+    assert cc.main(argv + ["--sources", "gii", "multilegalpile"], encoder_factory=words) == 0
+    summary = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    rows = {(r["source"], r["jurisdiction"]): r for r in summary["rows"]}
+    assert rows["gii", "DE"]["documents"] == 10 and rows["gii", "DE"]["chars"] == sum(
+        len(d.text) for d in gii
+    )
+    assert rows["gii", "DE"]["sample_documents"] == 5 and rows["gii", "DE"]["tokens_per_char"] == 0.5
+    ch, de = rows["multilegalpile", "CH"], rows["multilegalpile", "DE"]
+    assert not ch["included"] and de["included"] and not de["commercial_safe"]
+    assert (ch["documents"], de["documents"], de["tokens_per_char"]) == (4, 6, 0.5)
+    t = summary["totals"]
+    assert t["commercial_safe"]["documents"] == 10 and t["research"]["documents"] == 16
+    assert t["research"]["est_tokens"] == t["commercial_safe"]["est_tokens"] + de["est_tokens"]
+    assert cc.main(argv + ["--sources", "gii", "bger"], encoder_factory=words) == 1
+    assert "no manifest for: bger" in capsys.readouterr().out
+
+
 # -- probes: MQAR and statute recall (P3-W) ----------------------------------------------------
 
 
@@ -1651,6 +2398,18 @@ def test_statute_recall_items_need_the_context():
     assert char_f1(half, item.target) > 0.5 > char_f1(unrelated, item.target)  # trigrams, not letters
 
 
+def test_statute_recall_max_items_stops_early_with_the_same_items():
+    """P5-G: run_probes needs 100 items from gii; building every statute's item first is quadratic.
+    max_items stops early and returns exactly the first items of the full build."""
+    from lexhybrid.data.probes.statute_recall import build_items
+
+    encode = lambda t: list(t)  # noqa: E731
+    full = build_items(_statute_docs(), encode, context_tokens=3000)
+    assert len(full) > 2
+    for n in (1, 2, len(full), len(full) + 5):
+        assert build_items(_statute_docs(), encode, context_tokens=3000, max_items=n) == full[:n]
+
+
 def test_evaluate_probes_runs_on_a_random_model(script):
     """`scripts/evaluate_probes.py` end to end on a tiny random model with a toy tokenizer."""
     from lexhybrid import HybridConfig, HybridLanguageModel
@@ -1707,6 +2466,27 @@ def test_multihop_items_need_two_passages():
         assert a.text in item.context and b.text in item.context
         assert item.answer not in item.context.replace(b.text, "")  # without B the title is gone
         assert item.context.count("\n\n") == 3  # A, B and two distractors
+
+
+def test_multihop_builds_over_gii_codes_that_are_not_one_token():
+    """Job 2663318 (P5-G): every probe task crashed in build_items on gii's '1-DM-GoldmünzG §4', and
+    12.7% of gii's provisions carry such codes (SGB 5, 13. BImSchV). The same BGB items come out
+    when the act is called 'SGB 5', and a corpus holding those codes builds."""
+    import dataclasses
+
+    from lexhybrid.data.probes.multihop import build_items
+    from lexhybrid.data.schema import Document
+
+    path = FIXTURES.parent / "probes" / "bgb_multihop.jsonl"
+    bgb = [Document.from_json(line) for line in path.read_text().splitlines()]
+    sgb = [dataclasses.replace(d, citation_id=d.citation_id.replace("BGB ", "SGB 5 ")) for d in bgb]
+    odd = [dataclasses.replace(bgb[0], id=f"gii:x{k}", citation_id=c)
+           for k, c in enumerate(["1-DM-GoldmünzG §4", "13. BImSchV §3", "V zu § 180 Abs. 2 AO §5"])]  # fmt: skip
+    items = build_items([*sgb, *odd], n_items=10)  # the extra documents change the seeded order only
+    assert {(i.source_citation, i.target_citation) for i in items} == {
+        ("SGB 5 §168", "SGB 5 §167"),
+        ("SGB 5 §843", "SGB 5 §760"),
+    }
 
 
 # -- SFT format (P3-Y) -------------------------------------------------------------------------
@@ -1801,3 +2581,103 @@ def test_scrub_worker_reads_the_jobs_model_cache(script, monkeypatch):
     monkeypatch.delenv("HF_HUB_CACHE")
     monkeypatch.delenv("HF_HOME")
     assert worker.default_cache_dir().endswith("data/hf/hub")
+
+
+def test_evaluate_val_ppl_reads_the_val_split_at_the_screen_row_len(tmp_path, script, monkeypatch, capsys):
+    """P5-F: evaluate_val_ppl.py reads the packed validation rows through the dataset yaml (here oldp
+    packed at 64 and served cut to 32, like the screen's 2,048 from 4,096), scores every row once and
+    prints the VALPPL line with late_doc and late_row counts."""
+    import json
+    import math
+
+    import torch
+
+    from lexhybrid import HybridConfig, HybridLanguageModel
+    from lexhybrid.data.datasets import PackedMixture
+
+    _build(tmp_path / "shards", _oldp_docs(), row_len=64)
+    yaml = tmp_path / "mix.yaml"
+    yaml.write_text(
+        f"name: packed\nshards_root: {tmp_path / 'shards'}\nrow_len: 64\narm: commercial_safe\n"
+        "groups: {legal: 1.0}\nsources: {oldp: {group: legal, weight: 1.0}}\ntrain_samples: 10\nseed: 0\n"
+    )
+    torch.manual_seed(0)
+    cfg = HybridConfig(vocab_size=70000, dim=32, num_layers=2, layer_pattern=["mamba3", "mlstm"], mamba3_d_state=16,
+                       mamba3_head_dim=16, head_dim=16, tfla_impl="exact", mlstm_chunk_size=8, dropout=0.0)  # fmt: skip
+    ev = script("evaluate_val_ppl")
+    monkeypatch.setattr(ev, "load_model", lambda name, ckpt, device: HybridLanguageModel(cfg).eval())
+    out = tmp_path / "r.json"
+    args = [
+        "--checkpoint",
+        "x.ckpt",
+        "--model-config",
+        "tiny",
+        "--row-len",
+        "32",
+        "--dataset-yaml",
+        str(yaml),
+    ]
+    assert ev.main([*args, "--label", "t", "--batch-size", "3", "--num-workers", "0", "--out", str(out)]) == 0
+    line = capsys.readouterr().out.strip().splitlines()[-1]
+    result = json.loads(out.read_text())
+    n_rows = len(PackedMixture(tmp_path / "shards", 32, "val", {"oldp": 1.0}, "commercial_safe"))
+    assert line.startswith("VALPPL t tokens=") and result["rows"] == n_rows and result["late_from"] == 24
+    assert 0 < result["late_doc_tokens"] <= result["late_row_tokens"] < result["tokens"]
+    assert all(math.isfinite(result[k]) for k in ("ppl", "late_doc_ppl", "late_row_ppl"))
+
+
+def test_p6_source_weights_cap_every_source_at_four_passes():
+    """decisions.p6_source_weights: at P6's 5 B tokens no source is read more than 4 times in either
+    arm, and gii, the statutes the model must cite, sits at the cap in the commercial-safe arm (the
+    old 1 / 1 / 1 / 0.5 weights gave it 29 passes). Training tokens: pack job 2599735
+    (analysis/corpus_manifest.md)."""
+    from omegaconf import OmegaConf
+
+    from lexhybrid.data.datasets import effective_weights, source_specs
+    from tests.conftest import REPO_ROOT
+
+    d = OmegaConf.load(REPO_ROOT / "configs" / "dataset" / "mixture_pretrain.yaml")
+    tokens = {"gii": 34_500_954, "rii": 456_813_003, "oldp": 3_054_572_288, "dip": 679_127_415,
+              "fineweb2_de": 1_867_641_429, "multilegalpile": 1_381_671_475}  # fmt: skip
+    specs = source_specs(OmegaConf.to_container(d.sources))
+    groups = OmegaConf.to_container(d.groups)
+    for arm in ("commercial_safe", "research"):
+        passes = {s: w * 5e9 / tokens[s] for s, w in effective_weights(groups, specs, arm).items()}
+        assert max(passes.values()) <= 4.005, (arm, passes)
+    safe = {s: w * 5e9 / tokens[s] for s, w in effective_weights(groups, specs, "commercial_safe").items()}
+    assert abs(safe["gii"] - 4.0) < 0.005 and "multilegalpile" not in safe
+
+
+def test_gold_nll_is_the_teacher_forced_ce_of_the_answer_and_both_probes_report_it():
+    """decisions.p6_probe_scores: the answer's per-token NLL after the prompt equals the CE of a full
+    forward pass over the target positions; statute recall and multi-hop return it beside exact match."""
+    import math
+
+    import torch
+
+    from lexhybrid import HybridConfig, HybridLanguageModel
+    from lexhybrid.data.probes import multihop, statute_recall
+    from lexhybrid.data.probes.likelihood import gold_nll
+
+    torch.manual_seed(0)
+    model = HybridLanguageModel(HybridConfig(vocab_size=70000, dim=32, num_layers=2, layer_pattern=["mamba3", "attention"],
+                                             mamba3_d_state=16, mamba3_head_dim=16, head_dim=16, dropout=0.0)).eval()  # fmt: skip
+    prompt, target = [5, 9, 12, 7, 3], [8, 1, 4]
+    with torch.no_grad():
+        logits = model(torch.tensor([prompt + target]), return_dict=True).logits[0, len(prompt) - 1 : -1]
+    want = torch.nn.functional.cross_entropy(logits.float(), torch.tensor(target)).item()
+    assert math.isclose(gold_nll(model, prompt, target), want, rel_tol=1e-4)
+    with pytest.raises(ValueError):
+        gold_nll(model, prompt, [])
+    encode, decode, _ = _char_codec()
+    items = statute_recall.build_items(_statute_docs(), encode, context_tokens=3000, max_items=2)
+    sr = statute_recall.score(model, items, encode, decode)
+    assert sr["items"] == 2 and math.isfinite(sr["gold_nll"]) and sr["gold_nll"] > 0
+    path = FIXTURES.parent / "probes" / "bgb_multihop.jsonl"
+    from lexhybrid.data.schema import Document
+
+    hops = multihop.build_items([Document.from_json(ln) for ln in path.read_text().splitlines()], n_items=1)
+    mh = multihop.score(model, hops, encode, decode, max_new_tokens=4)
+    assert (
+        mh["items"] == 1 and math.isfinite(mh["gold_nll"]) and set(mh) == {"exact_match", "gold_nll", "items"}
+    )

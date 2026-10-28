@@ -20,7 +20,10 @@ from lexhybrid.models.hybrid_lm import HybridLanguageModel
 
 def model_state_from_checkpoint(ckpt_path: str) -> dict:
     """The ``model.``-prefixed keys of a Lightning checkpoint (or a bare state dict), prefix removed."""
-    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    return _model_state(torch.load(ckpt_path, map_location="cpu", weights_only=False))
+
+
+def _model_state(ckpt) -> dict:
     sd = ckpt["state_dict"] if isinstance(ckpt, dict) and "state_dict" in ckpt else ckpt
     prefixed = {k[len("model.") :]: v for k, v in sd.items() if k.startswith("model.")}
     return prefixed or dict(sd)
@@ -29,8 +32,11 @@ def model_state_from_checkpoint(ckpt_path: str) -> dict:
 def verify(ckpt_path: str, model_yaml: str) -> bool:
     config = load_model_config(model_yaml)
     model = HybridLanguageModel(config)
-    state = model_state_from_checkpoint(ckpt_path)
+    ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+    state = _model_state(ckpt)
     missing, unexpected = model.load_state_dict(state, strict=False)
+    if isinstance(ckpt, dict) and "global_step" in ckpt:
+        print(f"  global_step: {ckpt['global_step']}")
     print("  " + model.architecture_fingerprint())
     print(f"  checkpoint keys: {len(state)}   model keys: {len(model.state_dict())}")
     print(f"  MISSING   (in model, not in checkpoint): {len(missing)}  {list(missing)[:8]}")

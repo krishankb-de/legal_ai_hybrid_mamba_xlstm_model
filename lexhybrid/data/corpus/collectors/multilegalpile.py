@@ -22,7 +22,7 @@ import itertools
 import lzma
 from collections.abc import Iterator
 
-from lexhybrid.data.corpus.collectors.base import cli, licence_flags, utc_now
+from lexhybrid.data.corpus.collectors.base import licence_flags, main, utc_now
 from lexhybrid.data.schema import Document, Section
 
 REPO = "joelniklaus/Multi_Legal_Pile"
@@ -103,4 +103,4 @@ class MultiLegalPileCollector:
 
 
 if __name__ == "__main__":
-    raise SystemExit(cli(MultiLegalPileCollector()))
+    main(MultiLegalPileCollector())

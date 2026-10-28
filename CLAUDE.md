@@ -12,6 +12,8 @@ It prints the current phase id, `blocked_on`, `next_action`, open cluster jobs, 
 awk -v h="### $(python3 -c "import json;print(json.load(open('legal_build_state.json'))['current_phase'])") —" 'index($0,h)==1{f=1} f&&/^(### |## )/&&index($0,h)!=1{exit} f' LEGAL_BUILD_PLAN.md
 ```
 
+**Then read `Docs/HANDOFF.md`**: what this branch is trying to achieve, the decisions taken, what is done, the next steps in order and the checks to run while processing. `resume` wins where they disagree. Before a session ends with a change to the goal, a decision, what is done or the next step, update its dated sections so the next session starts from it.
+
 ## What this project is
 
 A DACH legal, citation-faithful, retrieval-gated language model: a corrected Mamba-3 + mLSTM + sparse-attention decoder (`lexhybrid`) that cites by pointer into retrieved passages and is gated by a verifier. Plan of record: `LEGAL_BUILD_PLAN.md` (phases P0–P11). State: `legal_build_state.json`. Port spec: `Docs/REFERENCE_PORT_MAP.md`. Blueprint: `Docs/Hybrid Mamba–xLSTM Codebase Review and DACH Legal AI Blueprint.md` (do not re-read it wholesale; the port map cites the sections that matter). Results go under `analysis/` using `Docs/analysis_TEMPLATE.md`.
@@ -24,7 +26,7 @@ A DACH legal, citation-faithful, retrieval-gated language model: a corrected Mam
 - **(d) Git belongs to the user.** The repository exists (remote `origin` → `github.com/krishankb-de/legal_ai_hybrid_mamba_xlstm_model`), and the user decides every commit and push. Run no `git` command unless the user asks for that specific command in this session; never push on your own. Wrappers and `run_metadata` use `.sync_stamp` and read `.git/HEAD` as a file, never `git rev-parse`.
 - **(e) The cluster login node executes nothing scripted.** Allowed there, and only as `ssh $CLUSTER_HOST "cd $CLUSTER_REPO && <cmd>"` from the Mac: `sbatch`, `squeue --me`, `sacct`, `scancel`, `cat`, `tail`, `grep`, `ls`, `du`, `df`, `mkdir`. Never `python`, never `bash script.sh`, never `source .venv/bin/activate`, never a heredoc. Anything scripted is a `scripts/slurm/*.sh` with an `#SBATCH` header. `ARM` is resolved inside the job. `#SBATCH --gpus=1` in a file is not overridden by an env var: a 4-GPU run uses its own wrapper and `sbatch --gpus=4`. Never `--gres`.
 - **(f) Sync without git.** `bash scripts/sync_to_cluster.sh` (rsync with `.rsync-exclude`; writes `.sync_stamp`). Pull only `logs/` and `analysis/` with `bash scripts/sync_from_cluster.sh <subdir>` into `cluster/<subdir>/`; never `--delete` on pull; never pull `outputs/`.
-- **(g) A submission ends the session.** After `sbatch`: `python3 scripts/plan_state.py job add <id> --phase Pn --box Pn-K --arm <arm> --log logs/<name>_<id>.log`, then `next-action "sacct -j <id>; if COMPLETED do Pn-L"`, then stop. Never `sleep`, never poll. Next session: `ssh $CLUSTER_HOST "sacct -j <id> --format=JobID,State,Elapsed,MaxRSS,ExitCode -P"`. `COMPLETED` → pull the log → verdict box. `PENDING`/`RUNNING` → `job update <id> --status RUNNING`, stop. `FAILED`/`TIMEOUT`/`OUT_OF_MEMORY`/`REQUEUED` → pull the log tail into evidence; an infrastructure error (path, import, OOM) → fix the cause, add the test that would have caught it, resubmit once; a measurement → it is a result (rule i).
+- **(g) Submit everything that is ready.** Any number of jobs per session. Chain dependents with `sbatch --dependency=afterok:<id>[:<id>] --kill-on-invalid-dep=yes --parsable`, and gate a measurement on the correctness job it relies on (e.g. profile after `gpu_tests`), so a failure cancels it instead of producing numbers. Do not chain across a verdict that needs a human look (e.g. corpus counts before scrub/pack). After each `sbatch`: `python3 scripts/plan_state.py job add <id> --phase Pn --box Pn-K --arm <arm> --log logs/<name>_<id>.log`; then one `next-action` listing every open job. Never `sleep`, never poll. Next session: `ssh $CLUSTER_HOST "sacct -j <id> --format=JobID,State,Elapsed,MaxRSS,ExitCode -P"`. `COMPLETED` → pull the log → verdict box. `PENDING`/`RUNNING` → `job update <id> --status RUNNING`, stop. `FAILED`/`TIMEOUT`/`OUT_OF_MEMORY`/`REQUEUED` → pull the log tail into evidence; an infrastructure error (path, import, OOM) → fix the cause, add the test that would have caught it, resubmit once; a measurement → it is a result (rule i).
 - **(h) RESULTS block.** Before ticking a verdict box, append under the phase's last checkbox:
   ```
   **RESULTS — measured <YYYY-MM-DD>, jobs <id>[, <id>].** <node>, <N>×H100, bf16, <rows/steps>.
@@ -34,7 +36,7 @@ A DACH legal, citation-faithful, retrieval-gated language model: a corrected Mam
   ```
   then `tick Pn-L --evidence job=<id> log=<path> <metric>=<value>` and `verdict Pn "<one line>"`.
 - **(i) A failed gate is a result.** Write `*Gate:* FAIL`, `verdict Pn 'FAIL: …'`, `block Pn-Z 'gate failed; user decision'`, stop. Never change the bar, the seed, the arm, the config or the tolerance to make it pass. Never resubmit a measurement to get a different number.
-- **(j) Session budget.** Stop after any `sbatch`, any `USER ACTION —` box, any `Pn-Z` gate, or about six ticks. `resume` restores everything. A `USER ACTION` box is ticked only with `--user-confirmed "<the user's exact words>"` after the user acted; until then `block Pn-X "<what>"` and stop.
+- **(j) Session budget.** Stop when nothing is left to do but wait on the queue, at any `USER ACTION —` box, at any `Pn-Z` gate, or after about six ticks of verdicts or code (ticking submission boxes for one batch counts as one). `resume` restores everything. A `USER ACTION` box is ticked only with `--user-confirmed "<the user's exact words>"` after the user acted; until then `block Pn-X "<what>"` and stop.
 - **(k) Honesty.** Never write a number without a job id and a log path. Never describe a one-seed difference as a win. "Tooling is not a tick — the gate is the measurement."
 - **(l) CI.** `.github/workflows/ci.yml` runs on every push the user makes (you never push). It runs `validate.sh --ci` on Linux plus lint, hygiene and packaging jobs (plan §8.4). If the user reports a red run, or asks you to look (`gh run list`, `gh run view <id> --log-failed`), fixing it is the next box: reproduce with `bash scripts/validate.sh --ci` where you can, fix it, add a local test when the failure was reproducible locally, and note the run id. Checks the Mac cannot run are listed in plan §8.3.
 - **(m) Environment.** Build or repair the venv only with `uv sync --locked`; change dependencies only by editing `pyproject.toml` and running `uv lock` in a box of its own. `scripts/check_env.py` must pass (Python 3.11, torch 2.11.0, every package equal to `uv.lock`).
@@ -64,3 +66,13 @@ Claude runs on the Mac; the cluster is reached only through the `ssh` one-liners
 ## Environment
 
 Local: `.venv` from `uv sync --locked` (Python 3.11 from `.python-version`, torch 2.11.0 CPU/MPS wheel). CI: the same command on Linux (torch 2.11.0+cu128, CPU execution). Cluster: `.venv` built by `scripts/slurm/setup_env.sh` with the same command (torch 2.11.0+cu128), `outputs/` on `$SCRATCH_ROOT`, `HF_HUB_OFFLINE=1` in training jobs, `SAVE_TOP_K=0` on arms. `Reference/` exists only until P1-Z.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).

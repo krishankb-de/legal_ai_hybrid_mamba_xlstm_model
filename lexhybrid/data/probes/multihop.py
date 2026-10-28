@@ -76,11 +76,16 @@ def same_act_references(doc: Document) -> set[str]:
 def build_items(
     documents: Sequence[Document], n_items: int = 200, distractors: int = 2, seed: int = 0
 ) -> list[MultihopItem]:
-    # The ZGB's final title (``ZGB SchlT Art. 1``) numbers its articles afresh; it is left out so that
-    # an article number always names one provision of an act.
+    # The ZGB's final title (``ZGB SchlT Art. 1``) numbers its articles afresh, and so does an article
+    # that holds its own paragraphs (``BGBEG Art. 229 §6``); both are left out so that a number always
+    # names one provision of an act.
+    def numbered_once(citation_id: str) -> bool:
+        c = parse_citation(citation_id)
+        return "part" not in c and not ("article" in c and "paragraph" in c)
+
     docs = [
         d for d in documents
-        if d.source in SOURCES and d.citation_id and title(d) and "part" not in parse_citation(d.citation_id)
+        if d.source in SOURCES and d.citation_id and title(d) and numbered_once(d.citation_id)
     ]  # fmt: skip
     by_act: dict[str, dict[str, Document]] = {}
     for d in docs:
@@ -123,14 +128,23 @@ def build_items(
 def score(
     model, items: Sequence[MultihopItem], encode, decode, device: str = "cpu", max_new_tokens: int = 32
 ) -> dict:
-    """Exact match of the first line of a greedy continuation against the title."""
+    """Exact match of the first line of a greedy continuation against the title, and the title's
+    teacher-forced per-token NLL after the question (``gold_nll``, decisions.p6_probe_scores)."""
+    from lexhybrid.data.probes.likelihood import gold_nll
     from lexhybrid.decoding.generate import greedy, greedy_cached
 
     run = greedy_cached if model.supports_cached_decode() else greedy
-    hits = 0
+    hits, nll = 0, []
     for item in items:
-        prompt = torch.tensor([encode(item.context + item.question)], device=device)
+        prompt_ids = encode(item.context + item.question)
+        prompt = torch.tensor([prompt_ids], device=device)
         out = run(model, prompt, max_new_tokens=max_new_tokens)
         first_line = decode(out[0, prompt.shape[1] :].tolist()).strip().split("\n", 1)[0]
         hits += " ".join(first_line.split()) == item.answer
-    return {"exact_match": hits / len(items) if items else float("nan"), "items": len(items)}
+        nll.append(gold_nll(model, prompt_ids, encode(item.answer), device=device))
+    k = len(items)
+    return {
+        "exact_match": hits / k if k else float("nan"),
+        "gold_nll": sum(nll) / k if k else float("nan"),
+        "items": k,
+    }

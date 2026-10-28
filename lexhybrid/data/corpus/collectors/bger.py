@@ -35,7 +35,14 @@ import re
 from collections.abc import Iterator
 from html.parser import HTMLParser
 
-from lexhybrid.data.corpus.collectors.base import cli, http_get, http_post, licence_flags, utc_now
+from lexhybrid.data.corpus.collectors.base import (
+    SkipFailedDocuments,
+    http_get,
+    http_post,
+    licence_flags,
+    main,
+    utc_now,
+)
 from lexhybrid.data.schema import Document, Section
 
 SEARCH = "https://entscheidsuche.ch/_searchV2.php"
@@ -148,7 +155,7 @@ def parse_bger(html: str, meta: dict, retrieved_at: str | None = None) -> Docume
     blocks = paras(html)
     marked = any(bold for bold, _ in blocks)  # numbers are bold (since ~2007), else plain text
     part, label, last_e, last_item = "Kopf", "Kopf", None, 0
-    units: list[tuple[str, str]] = []  # (section label, text), in order; consecutive labels merge
+    units: list[tuple[str, str, str]] = []  # (section label, text, part), in order; consecutive labels merge
     lines: list[str] = []
     for bold, text in blocks:
         if part == "Kopf" and not units and text in _COURT_LINES:
@@ -183,12 +190,12 @@ def parse_bger(html: str, meta: dict, retrieved_at: str | None = None) -> Docume
                 label, body = f"Dispositiv Ziff. {last_item}", text[m.end() :].strip()
         if body:
             if units and units[-1][0] == label and part != "Kopf":
-                units[-1] = (label, units[-1][1] + "\n" + body)
+                units[-1] = (label, units[-1][1] + "\n" + body, part)
             else:
-                units.append((label, body))
-    if not any(lbl.startswith(("E. ", "Erwägungen", "Dispositiv")) for lbl, _ in units):
+                units.append((label, body, part))
+    if not any(lbl.startswith(("E. ", "Erwägungen", "Dispositiv")) for lbl, _, _ in units):
         return None  # no reasons and no operative part: not a decision text
-    sections = [Section(label=lbl, text=t) for lbl, t in units]
+    sections = [Section(label=lbl, text=t, part=p) for lbl, t, p in units]
     reference = (meta.get("reference") or [""])[0]
     return Document(
         id=f"bger:{meta['id']}",
@@ -238,7 +245,7 @@ class BGerCollector:
         self.page_size = page_size
 
     def iter_documents(self, limit: int | None = None) -> Iterator[Document]:
-        n, after = 0, None
+        n, after, skip = 0, None, SkipFailedDocuments(self.name)
         blocked = blocked_ids(http_get(BLOCKLIST).json())
         while True:
             hits = http_post(SEARCH, json=search_body(self.page_size, after)).json()["hits"]["hits"]
@@ -249,7 +256,9 @@ class BGerCollector:
                 url = (meta.get("attachment") or {}).get("content_url")
                 if not url or not meta.get("reference") or meta.get("id") in blocked:
                     continue
-                response = http_get(url)
+                response = skip(http_get, url)
+                if response is None:
+                    continue
                 response.encoding = "utf-8"
                 doc = parse_bger(response.text, meta)
                 if doc is None:
@@ -262,4 +271,4 @@ class BGerCollector:
 
 
 if __name__ == "__main__":
-    raise SystemExit(cli(BGerCollector()))
+    main(BGerCollector())
