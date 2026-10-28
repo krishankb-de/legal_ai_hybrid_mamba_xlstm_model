@@ -128,3 +128,31 @@ class StepStatsCallback(Callback):
         )
         print(line, flush=True)
         return line
+
+
+class StopAtStepCallback(Callback):
+    """End training after optimizer step ``stop_at_step`` while the LR schedule keeps the horizon
+    ``trainer.max_steps`` (P6 stage A: 90% of the budget, WSD over the combined A+B horizon). The
+    step must be a checkpoint step, so ``last.ckpt`` is that step (``ModelCheckpoint`` runs after
+    this callback on the same batch); ``scripts/train_pretrain.py`` checks it before training."""
+
+    def __init__(self, stop_at_step: int):
+        self.stop_at_step = int(stop_at_step)
+
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+        if int(trainer.global_step) >= self.stop_at_step:
+            trainer.should_stop = True
+
+
+class FinalCheckpointCallback(Callback):
+    """Write ``<checkpoint_dir>/last.ckpt`` when training ends normally. ``ModelCheckpoint`` saves only
+    every ``every_n_train_steps``, so a run whose last step is not a multiple of it would end with
+    ``last.ckpt`` short of its final steps. P6 stage B ends at step 18,037 with checkpoints every 1,000,
+    so the last 37 steps would be missing. Every rank calls this; ``trainer.save_checkpoint`` writes
+    once."""
+
+    def __init__(self, checkpoint_dir: str, filename: str = "last.ckpt"):
+        self.path = Path(checkpoint_dir) / filename
+
+    def on_train_end(self, trainer, pl_module):
+        trainer.save_checkpoint(str(self.path))

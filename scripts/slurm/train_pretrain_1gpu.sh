@@ -23,9 +23,11 @@
 # Levers (environment; unset ones leave the yaml's value):
 #   MODEL_CONFIG SEED DATASET_CONFIG TRAINER_CFG DISTILL_CFG(=none: CE only) EXPERIMENT NUM_GPUS
 #   SAVE_TOP_K CKPT_EVERY MAX_STEPS ACCUM VAL_EVERY BATCH_SIZE ROW_LEN COMPILE LR WARMUP GRAD_CLIP
-#   GRAD_CKPT, and EXTRA_OVERRIDES (Hydra arguments, word-split, applied last: the last value wins).
+#   GRAD_CKPT STOP_AT (trainer.stop_at_step) TRAIN_SAMPLES (dataset.train_samples), and EXTRA_OVERRIDES (Hydra arguments, word-split, applied last: the last value wins).
 #   ARM_EXPECT / ARM_FORBID ("|"-separated): tokens the ARCH line must / must not show (FL1).
 # A requeued run resumes from $OUT/checkpoints/last.ckpt (defect 12: the reference restarted at 0).
+# INIT_FROM: a checkpoint to start from while the run has no last.ckpt of its own (P6 stage B starts
+# from stage A's); once it has one, a requeue resumes from that.
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
 
@@ -95,6 +97,8 @@ opt model.learning_rate "${LR:-}"
 opt model.warmup_steps "${WARMUP:-}"
 opt model.gradient_clip_val "${GRAD_CLIP:-}"
 opt model.use_gradient_checkpointing "${GRAD_CKPT:-}"
+opt trainer.stop_at_step "${STOP_AT:-}"
+opt dataset.train_samples "${TRAIN_SAMPLES:-}"
 read -r -a EXTRA <<< "${EXTRA_OVERRIDES:-}"   # one Hydra argument per word, applied last
 ARGS+=("${EXTRA[@]+"${EXTRA[@]}"}")
 
@@ -119,6 +123,10 @@ echo "ARCH CHECK OK (${#EXPECT[@]} expected, ${#FORBID[@]} forbidden tokens)"
 if [[ -f "$CKPT" ]]; then
   echo "resuming from $CKPT"
   ARGS+=("+resume_from_checkpoint=${CKPT}")
+elif [[ -n "${INIT_FROM:-}" ]]; then
+  [[ -f "$INIT_FROM" ]] || { echo "FATAL: INIT_FROM=$INIT_FROM does not exist"; exit 1; }
+  echo "starting from $INIT_FROM (no last.ckpt of its own yet)"
+  ARGS+=("+resume_from_checkpoint=${INIT_FROM}")
 fi
 echo "command: .venv/bin/python scripts/train_pretrain.py ${ARGS[*]}"
 .venv/bin/python scripts/train_pretrain.py "${ARGS[@]}"

@@ -128,14 +128,23 @@ def build_items(
 def score(
     model, items: Sequence[MultihopItem], encode, decode, device: str = "cpu", max_new_tokens: int = 32
 ) -> dict:
-    """Exact match of the first line of a greedy continuation against the title."""
+    """Exact match of the first line of a greedy continuation against the title, and the title's
+    teacher-forced per-token NLL after the question (``gold_nll``, decisions.p6_probe_scores)."""
+    from lexhybrid.data.probes.likelihood import gold_nll
     from lexhybrid.decoding.generate import greedy, greedy_cached
 
     run = greedy_cached if model.supports_cached_decode() else greedy
-    hits = 0
+    hits, nll = 0, []
     for item in items:
-        prompt = torch.tensor([encode(item.context + item.question)], device=device)
+        prompt_ids = encode(item.context + item.question)
+        prompt = torch.tensor([prompt_ids], device=device)
         out = run(model, prompt, max_new_tokens=max_new_tokens)
         first_line = decode(out[0, prompt.shape[1] :].tolist()).strip().split("\n", 1)[0]
         hits += " ".join(first_line.split()) == item.answer
-    return {"exact_match": hits / len(items) if items else float("nan"), "items": len(items)}
+        nll.append(gold_nll(model, prompt_ids, encode(item.answer), device=device))
+    k = len(items)
+    return {
+        "exact_match": hits / k if k else float("nan"),
+        "gold_nll": sum(nll) / k if k else float("nan"),
+        "items": k,
+    }

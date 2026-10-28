@@ -59,7 +59,7 @@ def test_every_planned_wrapper_exists():
         "setup_env.sh", "fetch_hf.sh", "preflight.sh", "gpu_tests.sh", "multigpu_tests.sh",
         "build_corpus_array.sh", "probe_ckpt_size.sh", "profile.sh", "equivalence.sh",
         "kd_memory_probe.sh", "watch.sh", "screen_array.sh", "train_pretrain_1gpu.sh",
-        "train_pretrain_4gpu.sh", "scrub_array.sh", "pack_corpus.sh",
+        "train_pretrain_4gpu.sh", "scrub_array.sh", "pack_corpus.sh", "eval_probes.sh",
     }  # fmt: skip
     assert planned <= {p.name for p in WRAPPERS}, sorted(planned - {p.name for p in WRAPPERS})
 
@@ -100,7 +100,9 @@ MULTI_GPU_WRAPPERS = [p for p in WRAPPERS if int(directives(p).get("gpus", "0") 
 
 
 def test_the_array_and_multi_gpu_wrappers_are_found():
-    assert {p.name for p in ARRAY_WRAPPERS} == {"screen_array.sh", "build_corpus_array.sh", "scrub_array.sh"}
+    assert {p.name for p in ARRAY_WRAPPERS} == {
+        "screen_array.sh", "build_corpus_array.sh", "scrub_array.sh", "eval_probes.sh",
+    }  # fmt: skip
     assert {p.name for p in MULTI_GPU_WRAPPERS} == {
         "multigpu_tests.sh", "train_pretrain_4gpu.sh", "kd_memory_probe.sh",
     }  # fmt: skip
@@ -291,8 +293,10 @@ case "$1" in
     fi
     if [[ " $* " != *" +arch_only=true "* ]]; then exit "${FAKE_TRAIN_EXIT:-0}"; fi
     exit 0 ;;
-  scripts/corpus_counts.py)
+  scripts/corpus_counts.py | scripts/screen_metrics.py | scripts/inspect_checkpoint.py | scripts/evaluate_val_ppl.py | scripts/evaluate_probes.py)
     record "$@"; exit 0 ;;
+  scripts/verify_handoff.py)  # fails a checkpoint path containing "fail"
+    record "$@"; [[ "$2" != *fail* ]]; exit $? ;;
   scripts/performance_profile.py | scripts/check_operator_equivalence.py | scripts/check_env.py)
     record "INDUCTOR=${TORCHINDUCTOR_CACHE_DIR:-}" "$@"; exit "${FAKE_TOOL_EXIT:-0}" ;;
   scripts/build_shards.py)
@@ -495,10 +499,14 @@ def test_screen_array_task_runs_its_arm(sandbox):
     """The array index picks the arm; screen_arms.py resolves it ON THE NODE; the arm's lever must
     show in the ARCH line (here it does not: S3 needs d_state 64 and the fake model has 128)."""
     arms = "S1-s42 S3-s43"
+    attempt1 = sandbox.scratch / "outputs" / "screen_S1_s42" / "checkpoints" / "last.ckpt"
+    attempt1.parent.mkdir(parents=True)
+    attempt1.write_bytes(b"x")  # screen attempt 1's step-12,000 checkpoint must not be resumed
     res, calls = sandbox("screen_array.sh", ARMS=arms, SLURM_ARRAY_TASK_ID=0, EXPERIMENT="stray")
     assert res.returncode == 0, res.stdout + res.stderr
     (train,) = _train_calls(calls)[1]
-    assert {"model=hybrid_legal_base", "seed=42", "experiment_name=screen_S1_s42"} <= set(train)
+    assert {"model=hybrid_legal_base", "seed=42", "experiment_name=screen2_S1_s42"} <= set(train)
+    assert not any(a.startswith("+resume_from_checkpoint") for a in train)
     assert {"trainer.max_steps=12000", "dataset.row_len=2048", "callbacks.checkpoint.save_top_k=0"} <= set(
         train
     )
@@ -537,6 +545,7 @@ def _compose(overrides):
         ("train_pretrain_1gpu.sh", {"DISTILL_CFG": "none", "MAX_STEPS": 5, "ROW_LEN": 2048}),
         ("train_pretrain_4gpu.sh", {"FAKE_GPUS": 4}),
         ("screen_array.sh", {"ARMS": "S1-s42", "SLURM_ARRAY_TASK_ID": 0}),
+        ("diag_spike.sh", {}),
         ("probe_ckpt_size.sh", {"SLURM_JOB_ID": 77, "FAKE_WRITE_CKPT": 1}),
         ("kd_memory_probe.sh", {"FAKE_GPUS": 4, "SLURM_JOB_ID": 91}),
     ],
@@ -761,3 +770,212 @@ def test_corpus_counts_reads_the_manifests_on_scratch(sandbox):
     assert call[call.index("--manifests") + 1] == str(sandbox.scratch / "data" / "manifests")
     i = call.index("--jurisdictions")
     assert call[i + 1 : i + 3] == ["DE", "EU"] and call[call.index("--sample") + 1] == "2000"
+
+
+def test_screen_metrics_reads_the_runs_on_scratch(sandbox):
+    res, calls = sandbox("screen_metrics.sh")
+    assert res.returncode == 0 and "SCREEN METRICS DONE" in res.stdout, res.stdout + res.stderr
+    (call,) = calls
+    assert call[0] == "scripts/screen_metrics.py"
+    assert call[call.index("--outputs") + 1] == str(sandbox.scratch / "outputs")
+    assert call[call.index("--prefix") + 1] == "screen_" and call[call.index("--window") + 1] == "250"
+
+
+def test_diag_spike_reruns_the_arm_observed_in_its_own_directory(sandbox):
+    """decisions.p5_divergence: S1-s42 with the screen settings, seed and schedule unchanged
+    (max_steps 12,000), the diagnostics on, every 250-step checkpoint kept, a stop at 7,000, and its
+    own experiment, so the screen run's last.ckpt is neither resumed nor overwritten."""
+    screen_ckpt = sandbox.scratch / "outputs" / "screen_S1_s42" / "checkpoints" / "last.ckpt"
+    screen_ckpt.parent.mkdir(parents=True)
+    screen_ckpt.write_bytes(b"x")
+    res, calls = sandbox("diag_spike.sh", EXPERIMENT="stray")
+    assert res.returncode == 0 and "ARCH CHECK OK" in res.stdout, res.stdout + res.stderr
+    (train,) = _train_calls(calls)[1]
+    assert {
+        "model=hybrid_legal_base", "seed=42", "experiment_name=diag_S1_s42", "trainer.max_steps=12000",
+        "dataset.row_len=2048", "model.learning_rate=0.0004", "callbacks.checkpoint.every_n_train_steps=250",
+        "callbacks.checkpoint.save_top_k=-1", "callbacks.checkpoint.monitor=null", "trainer.log_every_n_steps=1",
+        "callbacks.diagnostics.enabled=true", "callbacks.diagnostics.every_n_steps=10",
+        "callbacks.diagnostics.stop_at_step=7000", "model.adam_beta2=0.999",
+    } <= set(train)  # fmt: skip
+    assert f"output_dir={sandbox.scratch}/outputs/diag_S1_s42" in train
+    assert not any(a.startswith("+resume_from_checkpoint") for a in train)
+    cfg = _compose(train[train.index("scripts/train_pretrain.py") + 1 :])
+    assert cfg.callbacks.checkpoint.monitor is None and cfg.callbacks.diagnostics.stop_at_step == 7000
+    assert cfg.model.adam_beta2 == 0.999  # attempt 1's recipe, which it observes; the yamls say 0.95
+
+
+def test_screen_metrics_passes_the_dump_through(sandbox):
+    res, calls = sandbox("screen_metrics.sh", PREFIX="diag_", DUMP="^diag/", STEPS="3000-4000")
+    assert res.returncode == 0, res.stdout + res.stderr
+    (call,) = calls
+    assert call[call.index("--prefix") + 1] == "diag_" and call[call.index("--dump") + 1] == "^diag/"
+    assert call[call.index("--steps") + 1] == "3000-4000"
+
+
+def test_inspect_ckpt_compares_collapsed_and_healthy_runs(sandbox):
+    """decisions.p5_divergence: by default the two collapsed screen runs and a healthy run of each
+    config, every one inspected with its own model config."""
+    res, calls = sandbox("inspect_ckpt.sh")
+    assert res.returncode == 0 and "INSPECT CKPT DONE" in res.stdout, res.stdout + res.stderr
+    got = {
+        (c[c.index("--label") + 1], c[c.index("--model-config") + 1], c[c.index("--checkpoint") + 1])
+        for c in calls
+    }
+    out = sandbox.scratch / "outputs"
+    assert got == {
+        (run, cfg, f"{out}/{run}/checkpoints/last.ckpt")
+        for run, cfg in [
+            ("screen_S1_s42", "hybrid_legal_base"), ("screen_S1_s43", "hybrid_legal_base"),
+            ("screen_S3_s43", "hybrid_legal_ds64"), ("screen_S3_s42", "hybrid_legal_ds64"),
+        ]
+    }  # fmt: skip
+
+
+def test_eval_probes_task_scores_its_arms_attempt_2_checkpoint(sandbox):
+    """P5-G (+ P5-F's late-25% PPL): the array index picks the arm; screen_arms.py resolves its config
+    and screen2_ experiment on the node; the val-PPL and probe scripts run on that last.ckpt, the
+    probes over every scrubbed gii part, both writing JSON under logs/eval_<array job>/."""
+    out = sandbox.scratch / "outputs"
+    for run in ("screen2_S1_s42", "screen2_S4_s43"):
+        (out / run / "checkpoints").mkdir(parents=True)
+        (out / run / "checkpoints" / "last.ckpt").write_bytes(b"x")
+    scrubbed = sandbox.scratch / "data" / "scrubbed"
+    scrubbed.mkdir(parents=True)
+    parts = [scrubbed / f"gii.part-{k}-of-2.jsonl" for k in range(2)]
+    for f in [*parts, scrubbed / "rii.part-0-of-1.jsonl"]:
+        f.write_text("{}\n")
+    env = {"SLURM_ARRAY_JOB_ID": 77}
+    res, calls = sandbox("eval_probes.sh", SLURM_ARRAY_TASK_ID=0, **env)
+    assert res.returncode == 0 and "EVAL PROBES DONE screen2_S1_s42" in res.stdout, res.stdout + res.stderr
+    val, probes = (
+        next(c for c in calls if c[0] == s)
+        for s in ("scripts/evaluate_val_ppl.py", "scripts/evaluate_probes.py")
+    )
+    ckpt = str(out / "screen2_S1_s42" / "checkpoints" / "last.ckpt")
+    assert (
+        val[val.index("--checkpoint") + 1] == ckpt
+        and val[val.index("--model-config") + 1] == "hybrid_legal_base"
+    )
+    assert (
+        val[val.index("--row-len") + 1] == "2048"
+        and val[val.index("--out") + 1] == "logs/eval_77/screen2_S1_s42.valppl.json"
+    )
+    assert (
+        probes[probes.index("--checkpoint") + 1] == ckpt and probes[probes.index("--context") + 1] == "2048"
+    )
+    i = probes.index("--statutes")
+    assert probes[i + 1 : i + 3] == [str(p) for p in parts] and probes[i + 3] == "--out"
+    res, calls = sandbox("eval_probes.sh", SLURM_ARRAY_TASK_ID=9, **env)
+    assert res.returncode == 0 and "hybrid_legal_mtp" in next(
+        c for c in calls if c[0] == "scripts/evaluate_probes.py"
+    )
+    res, _ = sandbox("eval_probes.sh", SLURM_ARRAY_TASK_ID=1, **env)  # S1-s43 has no checkpoint
+    assert res.returncode == 1 and "FATAL: no checkpoint" in res.stdout
+    res, _ = sandbox("eval_probes.sh", SLURM_ARRAY_TASK_ID=12, **env)
+    assert res.returncode == 1 and "only 12 arms" in res.stdout
+    res, calls = sandbox("eval_probes.sh", SLURM_ARRAY_TASK_ID=0, VALPPL=0, **env)  # probes only
+    assert res.returncode == 0 and [c[0] for c in calls if c[0].startswith("scripts/evaluate")] == [
+        "scripts/evaluate_probes.py"
+    ]
+
+
+def test_train_wrapper_starts_a_stage_from_init_from_until_it_has_its_own_checkpoint(sandbox):
+    """P6 stage B: INIT_FROM (stage A's last.ckpt) while the stage has none of its own; after that a
+    requeue resumes from its own; a missing INIT_FROM stops the job. STOP_AT and TRAIN_SAMPLES reach
+    the Hydra arguments."""
+    stage_a = sandbox.scratch / "outputs" / "p6_A" / "checkpoints" / "last.ckpt"
+    stage_a.parent.mkdir(parents=True)
+    stage_a.write_bytes(b"a")
+    env = dict(EXPERIMENT="p6_B", INIT_FROM=stage_a, STOP_AT=17000, TRAIN_SAMPLES=66368)
+    res, calls = sandbox("train_pretrain_1gpu.sh", **env)
+    assert res.returncode == 0 and f"starting from {stage_a}" in res.stdout, res.stdout + res.stderr
+    (train,) = _train_calls(calls)[1]
+    assert f"+resume_from_checkpoint={stage_a}" in train
+    assert {"trainer.stop_at_step=17000", "dataset.train_samples=66368"} <= set(train)
+    own = sandbox.scratch / "outputs" / "p6_B" / "checkpoints" / "last.ckpt"
+    own.parent.mkdir(parents=True)
+    own.write_bytes(b"b")
+    res, calls = sandbox("train_pretrain_1gpu.sh", **env)
+    assert f"+resume_from_checkpoint={own}" in _train_calls(calls)[1][0]
+    res, _ = sandbox("train_pretrain_1gpu.sh", EXPERIMENT="p6_C", INIT_FROM=sandbox.scratch / "nope.ckpt")
+    assert res.returncode == 1 and "FATAL: INIT_FROM" in res.stdout
+
+
+def test_cleanup_deletes_only_the_approved_list_and_checks_it_all_first(sandbox):
+    """The login node runs no rm: approved deletions go through cleanup.sh. Only superseded runs,
+    caches, raw text and the scrub env may go; P6 outputs, shards, the scrubbed corpus, manifests and
+    the HF cache never; one refused entry stops the job before anything is removed."""
+    s, repo = sandbox.scratch, sandbox.repo
+    keep = [
+        s / "outputs" / "p6_hybrid_s42_A",
+        s / "data" / "shards",
+        s / "data" / "scrubbed",
+        s / ".hf",
+        repo / ".venv",
+    ]
+    gone = [s / "outputs" / "screen_S1_s42", s / "outputs" / "screen2_S0_s43", s / "outputs" / "diag_screen2_S1_s42",
+            s / ".torchinductor", s / "data" / "raw", repo / "envs" / "scrub" / ".venv"]  # fmt: skip
+    for d in keep + gone:
+        (d / "x").mkdir(parents=True, exist_ok=True)
+    for bad in (
+        "outputs/p6_hybrid_s42_A",
+        "data/shards",
+        "data/scrubbed",
+        ".hf",
+        "../x",
+        "/etc",
+        "repo:.venv",
+        "outputs/screen_",
+    ):
+        res, _ = sandbox("cleanup.sh", DELETE=f"outputs/screen_S1_s42 {bad}")
+        assert res.returncode == 1 and "nothing deleted" in res.stdout, (bad, res.stdout + res.stderr)
+        assert all(d.exists() for d in keep + gone), bad
+    listed = "outputs/screen_S1_s42 outputs/screen2_S0_s43/ outputs/diag_screen2_S1_s42 .torchinductor data/raw repo:envs/scrub/.venv outputs/screen_S9_s42"
+    res, _ = sandbox("cleanup.sh", DELETE=listed)
+    assert res.returncode == 0 and "CLEANUP DONE" in res.stdout, res.stdout + res.stderr
+    assert not any(d.exists() for d in gone) and all(d.exists() for d in keep)
+    assert "already gone:" in res.stdout and res.stdout.count("delete: ") == len(gone)
+    res, _ = sandbox("cleanup.sh")
+    assert res.returncode == 1 and "DELETE is empty" in res.stdout
+
+
+def test_eval_probes_scores_named_runs_at_another_length(sandbox):
+    """P6-G/K/M: RUNS names P6 runs and their configs (not screen arms); ROW_LEN 4,096 for stage A;
+    PROBES=0 runs the val-PPL step only."""
+    ckpt = sandbox.scratch / "outputs" / "p6_hybrid_s42_A" / "checkpoints" / "last.ckpt"
+    ckpt.parent.mkdir(parents=True)
+    ckpt.write_bytes(b"x")
+    (sandbox.scratch / "data" / "scrubbed").mkdir(parents=True)
+    (sandbox.scratch / "data" / "scrubbed" / "gii.part-0-of-1.jsonl").write_text("{}\n")
+    runs = "p6_hybrid_s42_A:hybrid_legal_base p6_transformer_s42_A:transformer_legal_base"
+    res, calls = sandbox("eval_probes.sh", RUNS=runs, ROW_LEN=4096, PROBES=0, SLURM_ARRAY_JOB_ID=9)
+    assert res.returncode == 0 and "EVAL PROBES DONE p6_hybrid_s42_A" in res.stdout, res.stdout + res.stderr
+    (val,) = [c for c in calls if c[0].startswith("scripts/evaluate")]
+    assert val[0] == "scripts/evaluate_val_ppl.py" and val[val.index("--checkpoint") + 1] == str(ckpt)
+    assert (
+        val[val.index("--model-config") + 1] == "hybrid_legal_base"
+        and val[val.index("--row-len") + 1] == "4096"
+    )
+    res, _ = sandbox("eval_probes.sh", RUNS=runs, SLURM_ARRAY_TASK_ID=1, SLURM_ARRAY_JOB_ID=9)
+    assert res.returncode == 1 and "FATAL: no checkpoint" in res.stdout  # the Transformer has none yet
+    res, _ = sandbox("eval_probes.sh", RUNS=runs, SLURM_ARRAY_TASK_ID=2)
+    assert res.returncode == 1 and "only 2 runs" in res.stdout
+
+
+def test_verify_handoff_checks_every_run_and_fails_if_one_does(sandbox):
+    """P6-L: each run's last.ckpt against configs/model/<cfg>.yaml, a PASS/FAIL line per run, exit 1
+    when any run fails (here the fake verifier fails a path containing 'fail')."""
+    runs = "p6_hybrid_s42_B:hybrid_legal_base p6_transformer_s42_B:transformer_legal_base"
+    res, calls = sandbox("verify_handoff.sh", RUNS=runs)
+    assert res.returncode == 0 and "VERIFY HANDOFF DONE" in res.stdout, res.stdout + res.stderr
+    assert "HANDOFF p6_hybrid_s42_B PASS" in res.stdout and "HANDOFF p6_transformer_s42_B PASS" in res.stdout
+    out = sandbox.scratch / "outputs"
+    assert [c[1:] for c in calls] == [
+        [f"{out}/p6_hybrid_s42_B/checkpoints/last.ckpt", "configs/model/hybrid_legal_base.yaml"],
+        [f"{out}/p6_transformer_s42_B/checkpoints/last.ckpt", "configs/model/transformer_legal_base.yaml"],
+    ]
+    res, _ = sandbox("verify_handoff.sh", RUNS=runs + " p6_fail_B:hybrid_legal_base")
+    assert (
+        res.returncode == 1 and "HANDOFF p6_fail_B FAIL" in res.stdout and "VERIFY HANDOFF DONE" in res.stdout
+    )

@@ -88,6 +88,19 @@ def test_document_rejects_invalid_records(bad, match):
             {"kind": "statute", "code": "OR", "article": "40a", "absatz": "2bis"},
         ),
         ("ZGB Art. 334bis", {"kind": "statute", "code": "ZGB", "article": "334bis"}),
+        # gii's official abbreviations (job 2663318: 12.7% of its provisions failed the one-token code)
+        ("SGB 5 §20", {"kind": "statute", "code": "SGB 5", "paragraph": "20"}),
+        ("13. BImSchV §3", {"kind": "statute", "code": "13. BImSchV", "paragraph": "3"}),
+        ("1-DM-GoldmünzG §4", {"kind": "statute", "code": "1-DM-GoldmünzG", "paragraph": "4"}),
+        ("eIDKG §8", {"kind": "statute", "code": "eIDKG", "paragraph": "8"}),
+        ("V zu § 180 Abs. 2 AO §5", {"kind": "statute", "code": "V zu § 180 Abs. 2 AO", "paragraph": "5"}),
+        (
+            "SGB 10/Kap1/2 Art. II §40",
+            {"kind": "statute", "code": "SGB 10/Kap1/2", "article": "II", "paragraph": "40"},
+        ),
+        ("EEG 2023 §19 Abs. 1", {"kind": "statute", "code": "EEG 2023", "paragraph": "19", "absatz": "1"}),
+        # was read as a decision of a court "DBAbkG" (the court pattern takes any word ending in G)
+        ("DBAbkG ARM Art. 3", {"kind": "statute", "code": "DBAbkG ARM", "article": "3"}),
         ("BT-Drs. 21/8109", {"kind": "parliament", "series": "BT-Drs.", "number": "21/8109"}),
         (
             "BR-Drs. 506/26 S. 12",
@@ -100,8 +113,9 @@ def test_citation_grammar(citation, parts):
 
 
 def test_citation_grammar_rejects_prose():
-    with pytest.raises(ValueError):
-        parse_citation("see the tenancy rules")
+    for text in ("see the tenancy rules", "BGB 573", "§573 BGB", " BGB §573", "BGB §"):
+        with pytest.raises(ValueError):
+            parse_citation(text)
 
 
 # -- licences (P3-B) ---------------------------------------------------------------------------
@@ -2384,6 +2398,18 @@ def test_statute_recall_items_need_the_context():
     assert char_f1(half, item.target) > 0.5 > char_f1(unrelated, item.target)  # trigrams, not letters
 
 
+def test_statute_recall_max_items_stops_early_with_the_same_items():
+    """P5-G: run_probes needs 100 items from gii; building every statute's item first is quadratic.
+    max_items stops early and returns exactly the first items of the full build."""
+    from lexhybrid.data.probes.statute_recall import build_items
+
+    encode = lambda t: list(t)  # noqa: E731
+    full = build_items(_statute_docs(), encode, context_tokens=3000)
+    assert len(full) > 2
+    for n in (1, 2, len(full), len(full) + 5):
+        assert build_items(_statute_docs(), encode, context_tokens=3000, max_items=n) == full[:n]
+
+
 def test_evaluate_probes_runs_on_a_random_model(script):
     """`scripts/evaluate_probes.py` end to end on a tiny random model with a toy tokenizer."""
     from lexhybrid import HybridConfig, HybridLanguageModel
@@ -2440,6 +2466,27 @@ def test_multihop_items_need_two_passages():
         assert a.text in item.context and b.text in item.context
         assert item.answer not in item.context.replace(b.text, "")  # without B the title is gone
         assert item.context.count("\n\n") == 3  # A, B and two distractors
+
+
+def test_multihop_builds_over_gii_codes_that_are_not_one_token():
+    """Job 2663318 (P5-G): every probe task crashed in build_items on gii's '1-DM-GoldmünzG §4', and
+    12.7% of gii's provisions carry such codes (SGB 5, 13. BImSchV). The same BGB items come out
+    when the act is called 'SGB 5', and a corpus holding those codes builds."""
+    import dataclasses
+
+    from lexhybrid.data.probes.multihop import build_items
+    from lexhybrid.data.schema import Document
+
+    path = FIXTURES.parent / "probes" / "bgb_multihop.jsonl"
+    bgb = [Document.from_json(line) for line in path.read_text().splitlines()]
+    sgb = [dataclasses.replace(d, citation_id=d.citation_id.replace("BGB ", "SGB 5 ")) for d in bgb]
+    odd = [dataclasses.replace(bgb[0], id=f"gii:x{k}", citation_id=c)
+           for k, c in enumerate(["1-DM-GoldmünzG §4", "13. BImSchV §3", "V zu § 180 Abs. 2 AO §5"])]  # fmt: skip
+    items = build_items([*sgb, *odd], n_items=10)  # the extra documents change the seeded order only
+    assert {(i.source_citation, i.target_citation) for i in items} == {
+        ("SGB 5 §168", "SGB 5 §167"),
+        ("SGB 5 §843", "SGB 5 §760"),
+    }
 
 
 # -- SFT format (P3-Y) -------------------------------------------------------------------------
@@ -2534,3 +2581,103 @@ def test_scrub_worker_reads_the_jobs_model_cache(script, monkeypatch):
     monkeypatch.delenv("HF_HUB_CACHE")
     monkeypatch.delenv("HF_HOME")
     assert worker.default_cache_dir().endswith("data/hf/hub")
+
+
+def test_evaluate_val_ppl_reads_the_val_split_at_the_screen_row_len(tmp_path, script, monkeypatch, capsys):
+    """P5-F: evaluate_val_ppl.py reads the packed validation rows through the dataset yaml (here oldp
+    packed at 64 and served cut to 32, like the screen's 2,048 from 4,096), scores every row once and
+    prints the VALPPL line with late_doc and late_row counts."""
+    import json
+    import math
+
+    import torch
+
+    from lexhybrid import HybridConfig, HybridLanguageModel
+    from lexhybrid.data.datasets import PackedMixture
+
+    _build(tmp_path / "shards", _oldp_docs(), row_len=64)
+    yaml = tmp_path / "mix.yaml"
+    yaml.write_text(
+        f"name: packed\nshards_root: {tmp_path / 'shards'}\nrow_len: 64\narm: commercial_safe\n"
+        "groups: {legal: 1.0}\nsources: {oldp: {group: legal, weight: 1.0}}\ntrain_samples: 10\nseed: 0\n"
+    )
+    torch.manual_seed(0)
+    cfg = HybridConfig(vocab_size=70000, dim=32, num_layers=2, layer_pattern=["mamba3", "mlstm"], mamba3_d_state=16,
+                       mamba3_head_dim=16, head_dim=16, tfla_impl="exact", mlstm_chunk_size=8, dropout=0.0)  # fmt: skip
+    ev = script("evaluate_val_ppl")
+    monkeypatch.setattr(ev, "load_model", lambda name, ckpt, device: HybridLanguageModel(cfg).eval())
+    out = tmp_path / "r.json"
+    args = [
+        "--checkpoint",
+        "x.ckpt",
+        "--model-config",
+        "tiny",
+        "--row-len",
+        "32",
+        "--dataset-yaml",
+        str(yaml),
+    ]
+    assert ev.main([*args, "--label", "t", "--batch-size", "3", "--num-workers", "0", "--out", str(out)]) == 0
+    line = capsys.readouterr().out.strip().splitlines()[-1]
+    result = json.loads(out.read_text())
+    n_rows = len(PackedMixture(tmp_path / "shards", 32, "val", {"oldp": 1.0}, "commercial_safe"))
+    assert line.startswith("VALPPL t tokens=") and result["rows"] == n_rows and result["late_from"] == 24
+    assert 0 < result["late_doc_tokens"] <= result["late_row_tokens"] < result["tokens"]
+    assert all(math.isfinite(result[k]) for k in ("ppl", "late_doc_ppl", "late_row_ppl"))
+
+
+def test_p6_source_weights_cap_every_source_at_four_passes():
+    """decisions.p6_source_weights: at P6's 5 B tokens no source is read more than 4 times in either
+    arm, and gii, the statutes the model must cite, sits at the cap in the commercial-safe arm (the
+    old 1 / 1 / 1 / 0.5 weights gave it 29 passes). Training tokens: pack job 2599735
+    (analysis/corpus_manifest.md)."""
+    from omegaconf import OmegaConf
+
+    from lexhybrid.data.datasets import effective_weights, source_specs
+    from tests.conftest import REPO_ROOT
+
+    d = OmegaConf.load(REPO_ROOT / "configs" / "dataset" / "mixture_pretrain.yaml")
+    tokens = {"gii": 34_500_954, "rii": 456_813_003, "oldp": 3_054_572_288, "dip": 679_127_415,
+              "fineweb2_de": 1_867_641_429, "multilegalpile": 1_381_671_475}  # fmt: skip
+    specs = source_specs(OmegaConf.to_container(d.sources))
+    groups = OmegaConf.to_container(d.groups)
+    for arm in ("commercial_safe", "research"):
+        passes = {s: w * 5e9 / tokens[s] for s, w in effective_weights(groups, specs, arm).items()}
+        assert max(passes.values()) <= 4.005, (arm, passes)
+    safe = {s: w * 5e9 / tokens[s] for s, w in effective_weights(groups, specs, "commercial_safe").items()}
+    assert abs(safe["gii"] - 4.0) < 0.005 and "multilegalpile" not in safe
+
+
+def test_gold_nll_is_the_teacher_forced_ce_of_the_answer_and_both_probes_report_it():
+    """decisions.p6_probe_scores: the answer's per-token NLL after the prompt equals the CE of a full
+    forward pass over the target positions; statute recall and multi-hop return it beside exact match."""
+    import math
+
+    import torch
+
+    from lexhybrid import HybridConfig, HybridLanguageModel
+    from lexhybrid.data.probes import multihop, statute_recall
+    from lexhybrid.data.probes.likelihood import gold_nll
+
+    torch.manual_seed(0)
+    model = HybridLanguageModel(HybridConfig(vocab_size=70000, dim=32, num_layers=2, layer_pattern=["mamba3", "attention"],
+                                             mamba3_d_state=16, mamba3_head_dim=16, head_dim=16, dropout=0.0)).eval()  # fmt: skip
+    prompt, target = [5, 9, 12, 7, 3], [8, 1, 4]
+    with torch.no_grad():
+        logits = model(torch.tensor([prompt + target]), return_dict=True).logits[0, len(prompt) - 1 : -1]
+    want = torch.nn.functional.cross_entropy(logits.float(), torch.tensor(target)).item()
+    assert math.isclose(gold_nll(model, prompt, target), want, rel_tol=1e-4)
+    with pytest.raises(ValueError):
+        gold_nll(model, prompt, [])
+    encode, decode, _ = _char_codec()
+    items = statute_recall.build_items(_statute_docs(), encode, context_tokens=3000, max_items=2)
+    sr = statute_recall.score(model, items, encode, decode)
+    assert sr["items"] == 2 and math.isfinite(sr["gold_nll"]) and sr["gold_nll"] > 0
+    path = FIXTURES.parent / "probes" / "bgb_multihop.jsonl"
+    from lexhybrid.data.schema import Document
+
+    hops = multihop.build_items([Document.from_json(ln) for ln in path.read_text().splitlines()], n_items=1)
+    mh = multihop.score(model, hops, encode, decode, max_new_tokens=4)
+    assert (
+        mh["items"] == 1 and math.isfinite(mh["gold_nll"]) and set(mh) == {"exact_match", "gold_nll", "items"}
+    )

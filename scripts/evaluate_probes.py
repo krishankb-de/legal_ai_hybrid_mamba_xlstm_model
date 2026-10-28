@@ -27,7 +27,7 @@ from lexhybrid.data.schema import Document
 def run_probes(model, encode, decode, statutes, context: int, mqar_items: int, recall_items: int,
                device: str = "cpu", mqar_cfg: mqar.MQARConfig | None = None, multihop_items: int = 200) -> dict:  # fmt: skip
     cfg = mqar_cfg or mqar.MQARConfig(context_length=context)
-    items = statute_recall.build_items(statutes, encode, context_tokens=context)[:recall_items]
+    items = statute_recall.build_items(statutes, encode, context_tokens=context, max_items=recall_items)
     hops = [
         h
         for h in multihop.build_items(statutes, n_items=multihop_items)

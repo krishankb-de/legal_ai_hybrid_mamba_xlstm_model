@@ -318,6 +318,8 @@ Cross-source copies kept and linked: 241,242 (8.36%). Scrub: 15,960,418 entities
 
 Purpose: choose the backbone configuration by measurement, one lever per arm. Runs: aisc, 1 H100 per arm, 12,000 steps, 2,048-token rows, micro-batch 8 × accum 2 (32,768 tokens/step), warmup 500, LR 4e-4, clip 1.0, WSD, `SAVE_TOP_K=0`, `VAL_EVERY` 4,000, seeds 42 and 43, teacher per `decisions.teacher`, commercial-safe shards.
 
+**Attempt 2 (2026-10-11, `decisions.p5_divergence`, `decisions.p5_fix`).** In attempt 1 (jobs 2626202, 2629409) S1-s42 and S3-s43 collapsed after one gradient spike, which made the bar degenerate (1,667.6 PPL). Attempt 2 changes one thing for every arm, AdamW β2 0.95 instead of 0.999 (`adam_beta2` in each model yaml). S6 now runs without the teacher, which changes only its cost columns. Runs are named `screen2_<arm>_s<seed>`. The prediction, arms, levers, bar rule and decision rule are unchanged. Both seeds share the data schedule (`dataset.seed: 0`), so the seed SD measures initialisation variance. Attempt 1's numbers stay on record in `analysis/screen_results.md`.
+
 | Arm | Config | Lever vs S1 | Parameter-matched? |
 |---|---|---|---|
 | S1 | `hybrid_legal_base` | control | — |
@@ -333,13 +335,42 @@ Decision rule, written before the numbers: the **simplest** arm (S1 unless a lev
 - [x] **P5-A** Write the prediction above and the bar rule into `pre_registered.P5` (`plan_state.py evidence P5 prediction=... bar_rule=...`) before any submission; `analysis/screen_results.md` created from the template with the prediction and an empty table.
 - [x] **P5-B** `scripts/slurm/screen_array.sh` (port map §11 array header; `ARMS` env list; `ARM` resolved on the compute node by `screen_arms.py env`; `unset EXPERIMENT`; `SAVE_TOP_K=0`; greps the ARCH line at step 0 against the arm's `expect` tokens and exits non-zero on mismatch) and `scripts/slurm/train_pretrain_1gpu.sh` it delegates to. `tests/test_slurm_wrappers.py` extended.
 - [x] **P5-C** Submit S1 seeds 42 and 43 with `sbatch --array=0-1` (`ARMS="S1-s42 S1-s43"`); record both job ids; end the session.
-- [ ] **P5-D** Verdict on the sbatch S1 jobs: val PPL per seed, two-seed SD, `bar_value = max(2×SD, 0.10)` written into this section and `pre_registered.P5.bar_value`; if the floor binds, say so.
-- [ ] **P5-E** Submit S0, S2, S3, S4, S6 × seeds 42/43 with `sbatch --array=0-9` and S5 × 2 seeds separately with its own walltime (`sbatch --array=0-1 --time=24:00:00`); record job ids; end the session.
-- [ ] **P5-F** Verdict on the sbatch arm jobs: per-arm, per-seed val PPL and late-25% PPL, s/step, peak GB into `analysis/screen_results.md`; requeued/failed arms noted with the `sacct` state.
-- [ ] **P5-G** `scripts/slurm/eval_probes.sh` (1 GPU; `evaluate_probes.py` on every arm's `last.ckpt`: MQAR, statute-recall, multi-hop at 2,048) submitted with `sbatch`.
-- [ ] **P5-H** Verdict on the sbatch probe job: probe columns filled; seed SD per column.
-- [ ] **P5-I** Apply the decision rule verbatim; write RESULTS (prediction → outcome per arm), the chosen config into `decisions.backbone`, and the verdict; unexpected results are recorded, not re-run.
-- [ ] **P5-Z** Gate: winner named by the rule with two seeds per arm; `analysis/screen_results.md` complete with every job id; `python3 scripts/plan_state.py next`.
+- [x] **P5-D** Verdict on the sbatch S1 jobs: val PPL per seed, two-seed SD, `bar_value = max(2×SD, 0.10)` written into this section and `pre_registered.P5.bar_value`; if the floor binds, say so.
+- [x] **P5-E** Submit S0, S2, S3, S4, S6 × seeds 42/43 with `sbatch --array=0-9` and S5 × 2 seeds separately with its own walltime (`sbatch --array=0-1 --time=24:00:00`); record job ids; end the session.
+- [x] **P5-F** Verdict on the sbatch arm jobs: per-arm, per-seed val PPL and late-25% PPL, s/step, peak GB into `analysis/screen_results.md`; requeued/failed arms noted with the `sacct` state.
+- [x] **P5-G** `scripts/slurm/eval_probes.sh` (1 GPU; `evaluate_probes.py` on every arm's `last.ckpt`: MQAR, statute-recall, multi-hop at 2,048) submitted with `sbatch`.
+- [x] **P5-H** Verdict on the sbatch probe job: probe columns filled; seed SD per column.
+- [x] **P5-I** Apply the decision rule verbatim; write RESULTS (prediction → outcome per arm), the chosen config into `decisions.backbone`, and the verdict; unexpected results are recorded, not re-run.
+- [x] **P5-Z** Gate: winner named by the rule with two seeds per arm; `analysis/screen_results.md` complete with every job id; `python3 scripts/plan_state.py next`.
+
+**RESULTS — measured 2026-10-13, jobs 2637454 (S1, screen attempt 2), 2662834 (reader).** gx07, 1×H100 per seed, bf16, 12,000 steps of 2,048-token rows (micro-batch 8 × accum 2), AdamW β2 0.95 (`decisions.p5_fix`). val PPL = exp(`val/loss`) at step 11,999 (`cluster/logs/screen_metrics_2662834.log`); s/step and peak GB from `STEPSTATS … final=1` (`cluster/logs/screen_2637454_{0,1}.log`).
+| arm | seed | val PPL | late-25% PPL | MQAR | statute-recall | multi-hop | s/step | peak GB |
+|---|---|---|---|---|---|---|---|---|
+| S1 | 42 | 5.3634 | — | — | — | — | 2.8101 | 41.46 |
+| S1 | 43 | 5.3530 | — | — | — | — | 2.8276 | 41.46 |
+**P5-D bar:** two-seed SD of S1 val PPL = 0.0074, so 2 × SD = 0.0147 < 0.10: **the floor binds, bar = 0.10 PPL** (`pre_registered.P5.bar_value`).
+*Prediction:* tested at P5-I, not by this box. *Gate:* none at P5-D (the bar is set by the rule as written).
+
+**RESULTS — measured 2026-10-12 to 2026-10-17, jobs 2637454, 2637455, 2637456 (+ 2662840, 2662841), 2662834, 2662842, 2663318, 2697615, 2663319.** gx07–gx12, 1×H100 per run, bf16, 12,000 steps of 2,048-token rows (micro-batch 8 × accum 2), screen attempt 2 (AdamW β2 0.95, `decisions.p5_fix`). val PPL = exp(`val/loss`) at step 11,999; late-25% PPL per `decisions.late25_ppl`; statute-recall = exact match (char-F1 beside it) and multi-hop = exact match, per `decisions.p5_rule_scores`. Assembled by `scripts/screen_table.py`; full tables in `analysis/screen_results.md` §3.
+| arm | seed | val PPL | late-25% PPL | MQAR | statute-recall | multi-hop | s/step | peak GB |
+|---|---|---|---|---|---|---|---|---|
+| S1 | 42 | 5.3634 | 5.0056 | 0.124 | 0.000 (F1 0.166) | 0.000 | 2.8101 | 41.46 |
+| S1 | 43 | 5.3530 | 4.9972 | 0.149 | 0.000 (F1 0.169) | 0.000 | 2.8276 | 41.46 |
+| S0 | 42 | 6.0241 | 5.8771 | 0.004 | 0.000 (F1 0.146) | 0.000 | 2.9254 | 41.50 |
+| S0 | 43 | 6.0431 | 5.8925 | 0.011 | 0.000 (F1 0.157) | 0.000 | 2.9354 | 41.50 |
+| S2 | 42 | 5.3611 | 5.0059 | 0.113 | 0.000 (F1 0.145) | 0.000 | 2.6857 | 41.42 |
+| S2 | 43 | 5.3257 | 4.9619 | 0.112 | 0.000 (F1 0.170) | 0.000 | 2.6898 | 41.42 |
+| S3 | 42 | 5.2920 | 4.9460 | 0.105 | 0.000 (F1 0.196) | 0.000 | 2.7437 | 41.45 |
+| S3 | 43 | 5.3094 | 4.9533 | 0.085 | 0.000 (F1 0.183) | 0.000 | 2.7607 | 41.45 |
+| S4 | 42 | 5.3585 | 5.0003 | 0.092 | 0.000 (F1 0.193) | 0.000 | 3.0599 | 41.67 |
+| S4 | 43 | 5.3571 | 5.0027 | 0.098 | 0.000 (F1 0.171) | 0.000 | 3.0688 | 41.67 |
+| S5 | 42 | 6.6649 | 6.6346 | 0.000 | 0.000 (F1 0.151) | 0.000 | 9.3058 | 41.50 |
+| S5 | 43 | 6.6138 | 6.5769 | 0.000 | 0.000 (F1 0.132) | 0.000 | 9.1475 | 41.50 |
+| S6 | 42 | 5.4175 | 5.1165 | 0.196 | 0.000 (F1 0.153) | 0.000 | 1.1956 | 12.50 |
+| S6 | 43 | 5.3966 | 5.0957 | 0.189 | 0.000 (F1 0.184) | 0.000 | 1.2141 | 12.50 |
+**Rule (bar 0.10 PPL):** no arm beats S1's two-seed mean val PPL (5.3582) by more than the bar. S3 −0.0575, S2 −0.0148, S4 −0.0004, S6 +0.0488, S0 +0.6754, S5 +1.2812. Statute-recall and multi-hop exact match are 0.000 in every run, a floor, so no arm loses recall. **S1 advances** (`decisions.backbone`).
+*Prediction:* S1 (attn-2) beats S0 (attn-0) on statute-recall and multi-hop by more than the bar and ties on val PPL; S2 (attn-4) ties S1 on everything and is not adopted (simplest-arm rule); S3 (d_state 64) is within the bar on PPL and worse on late-position PPL; S4 (MTP) is within the bar; S5 (legacy recipe) is worse on val PPL by more than 1.0; S6 (α=0, no KD) is worse on val PPL by more than the bar. → *Outcome:* PARTIAL — S2, S4 and S5 confirmed; S1-vs-S0 refuted (recall at the floor, S0 worse on PPL by 0.675, not a tie); S3 partial (within the bar, but better on late-25% PPL by 0.052, not worse); S6 refuted (worse by 0.049, inside the bar).
+*Gate:* PASS — decision by the pre-registered rule as written: no arm's two-seed mean val PPL is below S1's by more than 0.10 (the largest gap is S3's 0.0575), so the simplest arm, S1, advances; the results block carries every job id.
 
 **Gate:** decision by the pre-registered rule; results block with job ids.
 
@@ -350,20 +381,41 @@ Decision rule, written before the numbers: the **simplest** arm (S1 unless a lev
 Purpose: the backbone the whole system stands on. Runs: aisc, 4×H100 DDP. Recipe: `decisions.backbone` config; teacher per `decisions.teacher`; α=0.5, T=2; WSD, warmup 2,000, LR 4e-4, clip 1.0, bf16-mixed, gradient checkpointing, micro-batch 8 × accum 2 × 4 GPUs at 4,096 rows (≈ 262K tokens/step); `SAVE_TOP_K=1` + `last.ckpt`, `every_n_train_steps 1000`; `val_every_opt_steps 1000` (interval = 1000 × accum); requeue resumes from `last.ckpt`; `outputs/` on scratch. Stage A: 90% of the token budget at 4,096 rows. Stage B: the last 10% at 8,192 rows (micro-batch 4 × accum 4), resumed from stage A's `last.ckpt` with the WSD decay re-anchored to the combined horizon. **After P6-E, set `current_phase` to P7 and work P7 locally while the jobs run; job-bound boxes P6-G..M may be ticked from P7.**
 
 - [x] **P6-A** `scripts/slurm/train_pretrain_4gpu.sh` (port map §11 header with `--gpus=4`, `--mem=256G`, `--cpus-per-task=32`, `--time=3-00:00:00`, `--requeue`, `--open-mode=append`; `CKPT=$OUT/checkpoints/last.ckpt` passed as `+resume_from_checkpoint=` when present; `NUM_GPUS` check against `torch.cuda.device_count()`; `du -sh $SCRATCH_ROOT/outputs` printed first) and `scripts/train_pretrain.py` (Hydra entry: `PretrainLightningModule`, `DDPStrategy(...)`, the `val_check_interval` product, `write_run_metadata`, ARCH print). `tests/test_slurm_wrappers.py::test_pretrain_wrapper_resumes_from_last` (static check of the wrapper text).
-- [ ] **P6-B** USER ACTION — decide whether a `research_only` arm (commercial-safe + NC shards) also trains (doubles P6 compute). Record the answer in `decisions.nc_arm`.
-- [ ] **P6-C** Submit hybrid seed 42, stage A, with `sbatch --gpus=4 scripts/slurm/train_pretrain_4gpu.sh`; record the job id; artifact `P6.hybrid.s42.stageA_dir`.
-- [ ] **P6-D** Submit hybrid seed 43, stage A, with `sbatch --gpus=4`; record; artifact.
-- [ ] **P6-E** Submit `transformer_legal_base` seed 42, stage A, with `sbatch --gpus=4`; record; artifact; then `python3 scripts/plan_state.py phase P7` and end the session.
-- [ ] **P6-F** If `decisions.nc_arm` is yes: submit the research arm with `sbatch --gpus=4`; else tick with `--evidence job=skipped reason=decisions.nc_arm=no`.
-- [ ] **P6-G** Verdict on the sbatch hybrid s42 stage-A job: final val PPL, late-25% PPL, tokens seen, wall, preemptions (`sacct`), ARCH line; RESULTS row.
-- [ ] **P6-H** Verdict on the sbatch hybrid s43 stage-A job: same.
-- [ ] **P6-I** Verdict on the sbatch Transformer stage-A job: same.
-- [ ] **P6-J** Submit stage B for the three runs with `sbatch --gpus=4 --dependency=afterok:<A-job>` where still needed (or directly when A finished); record three job ids.
+- [x] **P6-B** USER ACTION — decide whether a `research_only` arm (commercial-safe + NC shards) also trains (doubles P6 compute). Record the answer in `decisions.nc_arm`.
+- [x] **P6-C** Submit hybrid seed 42, stage A, with `sbatch --gpus=4 scripts/slurm/train_pretrain_4gpu.sh`; record the job id; artifact `P6.hybrid.s42.stageA_dir`.
+- [x] **P6-D** Submit hybrid seed 43, stage A, with `sbatch --gpus=4`; record; artifact.
+- [x] **P6-E** Submit `transformer_legal_base` seed 42, stage A, with `sbatch --gpus=4`; record; artifact; then `python3 scripts/plan_state.py phase P7` and end the session.
+- [x] **P6-F** If `decisions.nc_arm` is yes: submit the research arm with `sbatch --gpus=4`; else tick with `--evidence job=skipped reason=decisions.nc_arm=no`.
+- [x] **P6-G** Verdict on the sbatch hybrid s42 stage-A job: final val PPL, late-25% PPL, tokens seen, wall, preemptions (`sacct`), ARCH line; RESULTS row.
+- [x] **P6-H** Verdict on the sbatch hybrid s43 stage-A job: same.
+- [x] **P6-I** Verdict on the sbatch Transformer stage-A job: same.
+- [x] **P6-J** Submit stage B for the three runs with `sbatch --gpus=4 --dependency=afterok:<A-job>` where still needed (or directly when A finished); record three job ids.
 - [ ] **P6-K** Verdict on the sbatch stage-B jobs: val PPL at 8,192 rows, late-25% PPL before/after stage B; artifacts `P6.<arm>.<seed>.last_ckpt`.
 - [ ] **P6-L** `scripts/slurm/verify_handoff.sh` (CPU job; `verify_handoff.py` on each `last.ckpt` against its yaml; PASS = 0 missing / 0 unexpected) submitted with `sbatch` ×3 and verdict recorded in the same box (evidence carries the three job ids and PASS lines).
 - [ ] **P6-M** `scripts/slurm/eval_probes.sh` at 8,192 (MQAR, statute-recall, multi-hop) on the three stage-B checkpoints submitted with `sbatch`; verdict in the same box.
 - [ ] **P6-N** `analysis/backbone_results.md` from the template: seed table (2 hybrid seeds with SD, 1 Transformer — **descriptive only, no claim**), probes, prediction → outcome, job ids, handoff PASS lines.
 - [ ] **P6-Z** Gate: three stage-B checkpoints with handoff PASS; `analysis/backbone_results.md` complete; `python3 scripts/plan_state.py next` (if `current_phase` is already P7, tick this box with `--force` and record it).
+
+**RESULTS (P6-G) — measured 2026-10-21 to 2026-10-22, job 2724164 (reader 2764156, late-25% 2764157).** gx11, 4×H100 DDP, bf16-mixed, stage A: 17,000 steps × 262,144 tokens = **4,456,448,000 tokens** (89.1% of 5 B) at 4,096-token rows. The recipe is `decisions.backbone` with AdamW β2 0.95: Qwen3-8B-Base teacher (α 0.5, T 2), WSD over the A+B horizon of 18,037 steps, mixture `decisions.p6_source_weights`, commercial-safe.
+| arm | seed | val PPL | late-25% PPL | MQAR | statute-recall | multi-hop | s/step | peak GB |
+|---|---|---|---|---|---|---|---|---|
+| hybrid (`hybrid_legal_base`) stage A | 42 | 3.9775 | 3.7814 | — | — | — | 6.4406 | 43.18 |
+| hybrid (`hybrid_legal_base`) stage A | 43 | 3.9724 | 3.7727 | — | — | — | 6.4041 | 43.18 |
+| Transformer (`transformer_legal_base`) stage A | 42 | 4.0236 | 3.8240 | — | — | — | 4.6218 | 43.58 |
+| research-arm hybrid stage A (descriptive; `decisions.nc_arm`) | 42 | 4.0365 | 3.8441 | — | — | — | 6.5021 | 43.18 |
+- **val PPL** = exp(`val/loss`) at step 16,999 over the commercial-safe validation rows at 4,096 tokens (74,998,272 tokens). The evaluator's overall PPL agrees, at 3.97747.
+- **late-25% PPL** counts predicted tokens with at least 3,072 tokens of their own document before them (14,186,980 tokens; `decisions.late25_ppl` at 0.75 × 4,096). The row-position variant is 3.7720.
+- **Run:** wall 1-07:20:27, 0 preemptions (`restart: 0`, `sacct` one run), `TRAIN DONE`.
+- **ARCH** `layers=[attentionx2, mamba3x7, mlstmx3] | norm_topology=hybrid | scan_impl=exact | tfla_impl=exact | … | mlstm(chunk_size=128, forget_bias=3.0, fallback=error) | attn(rope_theta=500000, impl=auto, kv_cache=True) | params=220,753,720`.
+- **Curve:** val PPL 18.66 (step 999), 5.43 (3,999), 4.46 (9,999), 4.23 (14,999), 3.98 (16,999). The drop steepens once the WSD decay begins at step 15,512.
+
+**P6-H / P6-I (added 2026-10-27).**
+- **Jobs:** hybrid s43 2724165 (gx07, wall 1-07:12:44); Transformer 2724166 (gx09, 22:42:33); research arm 2724167 (gx12, 1-07:54:48). Each has 0 preemptions (`restart: 0`), `TRAIN DONE`, step 17,000 and 4,456,448,000 tokens.
+- **Numbers:** val PPL is the reader's at step 16,999 (job 2792759) for s43 and the Transformer. The research arm's 4.0365 is the evaluator's figure on the commercial-safe validation rows (job 2792760); its training-time val, 4.0215, is on the research validation set. late-25% PPL comes from job 2792760 (s43, Transformer, research) and 2764157 (s42). The evaluator's overall PPL matches the reader's within 0.0001.
+- **ARCH:** the Transformer is `layers=[attentionx15] | norm_topology=pre_rms | … | params=222,878,976`; the hybrids as above.
+- **Reading:** the two hybrid seeds agree within 0.005 PPL. The single Transformer seed is 0.049 higher, which is descriptive and not a claim.
+
+*Prediction:* tested at P6-N from the stage-B checkpoints, not by these boxes. *Gate:* none at P6-G/H/I.
 
 **Gate:** three verified backbones; results block; no claim from one seed.
 
@@ -378,12 +430,12 @@ Purpose: the system around the decoder, built from the P3 schema, while P6 train
 - [x] **P7-C1** Dependencies for P7 in a box of their own (CLAUDE.md rule m): `bm25s[stem]` (decision 14; the `stem` extra pulls `PyStemmer`, the Snowball German stemmer) in `pyproject.toml`; `uv lock`, `uv sync --locked`, `scripts/check_env.py` green (its key imports gain `bm25s` and `Stemmer`); the lock diff in the note. The cluster `.venv` differs from the lock until `setup_env.sh` runs again, so that job goes first when the cluster is back (every GPU job runs `check_env.py`). Verify: `uv lock --check` exits 0; `bash scripts/validate.sh` exits 0.
 - [x] **P7-C** `lexhybrid/retrieval/bm25.py` (`bm25s`, German stemming/stopwords, index build + query) and `scripts/build_index.py --kind bm25`. Test: `tests/test_retrieval.py::test_bm25_finds_planted_passage`.
 - [ ] **P7-D** `lexhybrid/retrieval/dense.py` (`BAAI/bge-m3` embeddings, FAISS or numpy index) and `scripts/slurm/build_dense_index.sh` (1 GPU) submitted with `sbatch`; verdict in the same box (index size, docs/s).
-- [ ] **P7-E** `lexhybrid/retrieval/fusion.py` (reciprocal rank fusion) and `rerank.py` (`BAAI/bge-reranker-v2-m3`, top 50 → 3–8 chunks ≤ 4K tokens). Test: `tests/test_retrieval.py::test_rrf_and_rerank_orderings`.
-- [ ] **P7-F** `lexhybrid/retrieval/filters.py` (jurisdiction DE/AT/CH/EU; valid-on date; doc_type) and `index.py` (manifest of index versions; nightly re-sync stub `scripts/resync_index.py` that only records what would change). Test: `tests/test_retrieval.py::test_valid_on_filter`.
-- [ ] **P7-G** `lexhybrid/renderer/render.py`: `<|q|><|cK|><|sJ|>` → the exact sentence text in quotes with its `citation_id` label; `<|cite|><|cK|>` → `(BGB §573 Abs. 2 Nr. 1)`; appends "Hinweis: Dies ist eine rechtliche Information, keine Rechtsberatung."; refuses pointers outside the retrieved set. Tests: `tests/test_renderer.py::test_quote_is_verbatim`, `::test_notice_always_appended`.
-- [ ] **P7-H** `lexhybrid/verifier/pointers.py` (every pointer resolves) and `quotes.py` (rendered quote equals source after NFC + whitespace normalisation). Test: `tests/test_verifier.py::test_pointer_and_quote_checks_adversarial` (synthetic suite incl. off-by-one sentence, altered Unicode, missing chunk).
+- [x] **P7-E** `lexhybrid/retrieval/fusion.py` (reciprocal rank fusion) and `rerank.py` (`BAAI/bge-reranker-v2-m3`, top 50 → 3–8 chunks ≤ 4K tokens). Test: `tests/test_retrieval.py::test_rrf_and_rerank_orderings`.
+- [x] **P7-F** `lexhybrid/retrieval/filters.py` (jurisdiction DE/AT/CH/EU; valid-on date; doc_type) and `index.py` (manifest of index versions; nightly re-sync stub `scripts/resync_index.py` that only records what would change). Test: `tests/test_retrieval.py::test_valid_on_filter`.
+- [x] **P7-G** `lexhybrid/renderer/render.py`: `<|q|><|cK|><|sJ|>` → the exact sentence text in quotes with its `citation_id` label; `<|cite|><|cK|>` → `(BGB §573 Abs. 2 Nr. 1)`; appends "Hinweis: Dies ist eine rechtliche Information, keine Rechtsberatung."; refuses pointers outside the retrieved set. Tests: `tests/test_renderer.py::test_quote_is_verbatim`, `::test_notice_always_appended`.
+- [x] **P7-H** `lexhybrid/verifier/pointers.py` (every pointer resolves) and `quotes.py` (rendered quote equals source after NFC + whitespace normalisation). Test: `tests/test_verifier.py::test_pointer_and_quote_checks_adversarial` (synthetic suite incl. off-by-one sentence, altered Unicode, missing chunk).
 - [ ] **P7-I** `lexhybrid/verifier/nli.py`: pre-register the entailment threshold (0.5 on the entailment probability) in `pre_registered.P7` **before** running `scripts/calibrate_nli.py` on a 100-pair hand-built set (`data/manifests/nli_calibration.jsonl`); report precision/recall at the pre-registered and at the best threshold; the pre-registered one ships unless precision < 0.85.
-- [ ] **P7-J** `lexhybrid/verifier/verifier.py`: sentence-level pipeline (pointer → quote → NLI → party-identity rule: reject any answer containing a PER placeholder or a name matched by the LER model; "who was the party" → refusal); failing sentences removed; a failing main claim → "Die bereitgestellten Quellen beantworten diese Frage nicht."; verifier log = citation-precision metric. Tests: `tests/test_verifier.py::test_party_identity_refusal`, `::test_no_scrub_log_entity_in_index_chunks`.
+- [x] **P7-J** `lexhybrid/verifier/verifier.py`: sentence-level pipeline (pointer → quote → NLI → party-identity rule: reject any answer containing a PER placeholder or a name matched by the LER model; "who was the party" → refusal); failing sentences removed; a failing main claim → "Die bereitgestellten Quellen beantworten diese Frage nicht."; verifier log = citation-precision metric. Tests: `tests/test_verifier.py::test_party_identity_refusal`, `::test_no_scrub_log_entity_in_index_chunks`.
 - [ ] **P7-K** `scripts/slurm/eval_retrieval.sh` (nDCG@10, R@5/10/20, MRR per jurisdiction on GerLeRB and GerDaLIR; BM25 / dense / fused / reranked arms) submitted with `sbatch`; verdict in the same box → `analysis/retrieval_results.md` (prediction → outcome).
 - [ ] **P7-L** `scripts/answer.py`: end-to-end CLI (question → retrieve → build the P3-Y prompt → decode with pointer FSM and best-of-n → render → verify → print) runnable on CPU with a tiny checkpoint. Test: `tests/test_pipeline.py::test_answer_cli_end_to_end_tiny`.
 - [ ] **P7-Z** Gate: verifier synthetic suite 100%; renderer notice test green; `analysis/retrieval_results.md` written with job ids; `bash scripts/validate.sh` exit 0; `python3 scripts/plan_state.py phase P8` once P6-Z is also ticked.

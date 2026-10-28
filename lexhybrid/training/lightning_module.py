@@ -8,6 +8,7 @@ pretraining module (KD, NaN guard that skips the step, the ``val_check_interval`
 
 import pytorch_lightning as pl
 import torch
+import torch.distributed as dist
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import ConstantLR, CosineAnnealingLR, LinearLR, SequentialLR
 
@@ -30,6 +31,9 @@ class HybridLightningModule(pl.LightningModule):
         gradient_clip_val: max global grad norm, clipped manually before each optimizer step.
         compile_model: wrap the model in ``torch.compile``.
         beta2_schedule, beta2_start, beta2_end: anneal AdamW beta2 across the WSD decay phase.
+        adam_beta2: AdamW's beta2 (beta1 stays 0.9). The legal configs set 0.95 (decisions.p5_fix):
+            at 0.999 the second moment lags ~700 steps, and one KD-amplified gradient spike gave
+            the update that collapsed screen runs S1-s42 and S3-s43.
     """
 
     def __init__(
@@ -46,6 +50,7 @@ class HybridLightningModule(pl.LightningModule):
         beta2_schedule: bool = False,
         beta2_start: float = 0.999,
         beta2_end: float = 0.974,
+        adam_beta2: float = 0.999,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["model"])
@@ -61,6 +66,11 @@ class HybridLightningModule(pl.LightningModule):
         self.beta2_schedule = bool(beta2_schedule)
         self.beta2_start = float(beta2_start)
         self.beta2_end = float(beta2_end)
+        self.adam_beta2 = float(adam_beta2)
+        if self.beta2_schedule and self.adam_beta2 != self.beta2_start:
+            raise ValueError(
+                f"beta2_schedule anneals from beta2_start={self.beta2_start}, but adam_beta2={self.adam_beta2}"
+            )
         # Populated by _build_wsd_scheduler when scheduler_name == "wsd".
         self._wsd_decay_start: int | None = None
         self._wsd_decay_steps: int | None = None
@@ -84,8 +94,30 @@ class HybridLightningModule(pl.LightningModule):
     def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
         loss = self._shared_step(batch)
         self.log("val/loss", loss, prog_bar=True, on_step=False, on_epoch=True)
-        self.log("val/perplexity", compute_perplexity(loss), prog_bar=True, on_step=False, on_epoch=True)
+        labels = batch.get("labels", batch["input_ids"])
+        self._accumulate_val(loss, int((labels[..., 1:] != -100).sum()))
         return loss
+
+    def on_validation_epoch_start(self) -> None:
+        self._val_sums = torch.zeros(2, dtype=torch.float64, device=self.device)  # CE x tokens, tokens
+
+    def _accumulate_val(self, ce: torch.Tensor, n: int) -> None:
+        """Token-weighted sums for the epoch's ``val/perplexity``. Logged per batch with
+        ``on_epoch=True`` it was the mean of per-batch exp(CE), which Jensen's inequality inflates
+        (screen attempt 1: 31.69 logged against exp(mean CE) = 8.19, job 2636358)."""
+        self._val_sums += torch.stack(
+            [
+                ce.detach().double() * n,
+                torch.tensor(float(n), dtype=torch.float64, device=self._val_sums.device),
+            ]
+        )
+
+    def on_validation_epoch_end(self) -> None:
+        sums = self._val_sums.clone()
+        if dist.is_available() and dist.is_initialized():
+            dist.all_reduce(sums)
+        if sums[1] > 0:
+            self.log("val/perplexity", compute_perplexity(sums[0] / sums[1]).float(), prog_bar=True)
 
     def test_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
         loss = self._shared_step(batch)
@@ -94,11 +126,17 @@ class HybridLightningModule(pl.LightningModule):
         return loss
 
     def configure_optimizers(self):
+        betas = (0.9, self.adam_beta2)
         optimizer = configure_optimizer(
             self.model,
             optimizer_name=self.optimizer_name,
             learning_rate=self.learning_rate,
             weight_decay=self.weight_decay,
+            betas=betas,
+        )
+        print(
+            f"OPTIM {self.optimizer_name} lr={self.learning_rate} betas={betas} weight_decay={self.weight_decay}",
+            flush=True,
         )
         if self.scheduler_name == "wsd":
             # WSD owns its warmup; it is not wrapped in the warmup SequentialLR below.

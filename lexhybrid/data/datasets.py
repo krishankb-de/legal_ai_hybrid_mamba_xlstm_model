@@ -27,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import torch
-from torch.utils.data import Dataset
+from torch.utils.data import Dataset, Sampler
 
 from lexhybrid.data.packing import Packer, ShardWriter
 from lexhybrid.data.schema import Document
@@ -324,6 +324,73 @@ def source_specs(cfg_sources: dict) -> list[SourceSpec]:
         SourceSpec(name, s["group"], float(s.get("weight", 1.0)), s.get("arm", "commercial_safe"))
         for name, s in cfg_sources.items()
     ]
+
+
+def _rank_world() -> tuple[int, int]:
+    import torch.distributed as dist
+
+    if dist.is_available() and dist.is_initialized():
+        return dist.get_rank(), dist.get_world_size()
+    return 0, 1
+
+
+class ScheduleSampler(Sampler[int]):
+    """A training mixture's rows for one rank, from where the run stands (``decisions.resume_data``).
+
+    Sample ``i`` of the schedule is always the same row. Under DDP, rank ``r`` of ``w`` reads samples
+    ``r, r + w, r + 2w, ...``, the order ``DistributedSampler(shuffle=False)`` gives, but every rank
+    reads exactly ``n // w`` of them, so no rank ever has a batch more than another. Lightning cannot
+    resume a plain loader: on a restart it began again at row 0, so screen run S5's continuation
+    re-read rows it had trained on. Here ``__iter__`` skips the micro-batches Lightning counts as
+    done in the epoch it is starting (``fit_loop.epoch_loop.batch_progress.current.ready``, restored
+    from the checkpoint before iteration). That is exactly what Lightning expects a resumable loader
+    to skip, so the two never disagree.
+    - **A requeue** reads on where it stopped.
+    - **A stage that resumes onto a new, shorter schedule** (P6 stage B) has already used up its first
+      epoch by that count, so it starts the new schedule at row 0.
+
+    ``__len__`` stays the rank's whole share. Rank and world are read when needed, after the process
+    group exists.
+    """
+
+    def __init__(self, n: int, batch_size: int):
+        self.n, self.batch_size = int(n), int(batch_size)
+        self.trainer = None
+
+    def bind(self, trainer) -> "ScheduleSampler":
+        self.trainer = trainer
+        return self
+
+    def skip_batches(self) -> int:
+        if self.trainer is None:
+            return 0
+        return int(self.trainer.fit_loop.epoch_loop.batch_progress.current.ready)
+
+    def __len__(self) -> int:
+        return self.n // _rank_world()[1]
+
+    def __iter__(self):
+        rank, world = _rank_world()
+        per_rank = self.n // world
+        first = min(self.skip_batches() * self.batch_size, per_rank)
+        return iter(range(rank + first * world, per_rank * world, world))
+
+
+class ShardSampler(Sampler[int]):
+    """Every row of an evaluation set across the ranks, each rank the same count (padded from the
+    start, as ``DistributedSampler`` pads): under DDP a rank with one batch fewer would hang the
+    others' collectives. Rank and world are read when needed."""
+
+    def __init__(self, n: int):
+        self.n = int(n)
+
+    def __len__(self) -> int:
+        return -(-self.n // _rank_world()[1])
+
+    def __iter__(self):
+        rank, world = _rank_world()
+        total = len(self) * world
+        return iter([i % self.n for i in range(rank, total, world)])
 
 
 def mixture_from_config(d, split: str) -> PackedMixture:

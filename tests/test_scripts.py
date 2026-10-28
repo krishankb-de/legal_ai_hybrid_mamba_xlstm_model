@@ -1,6 +1,7 @@
 """The ported command-line scripts run end to end on CPU with tiny models (plan P1-R..T)."""
 
 import json
+import math
 
 import pytest
 import torch
@@ -307,7 +308,7 @@ def test_screen_arm_env_is_what_the_wrapper_evals(script):
 
     arms = script("screen_arms")
     env = dict(line.removeprefix("export ").split("=", 1) for line in arms.env_lines("S6-s43"))
-    assert env["SEED"] == "43" and env["EXPERIMENT"] == "screen_S6_s43" and env["SAVE_TOP_K"] == "0"
+    assert env["SEED"] == "43" and env["EXPERIMENT"] == "screen2_S6_s43" and env["SAVE_TOP_K"] == "0"
     overrides = shlex.split(shlex.split(env["EXTRA_OVERRIDES"])[0])
     assert "distill.alpha=0.0" in overrides and "trainer.max_steps=12000" in overrides
     assert "callbacks.checkpoint.save_top_k=0" in overrides
@@ -358,3 +359,162 @@ def test_fertility_reads_every_collector_fixture_offline(script):
     texts = mf.fixture_texts()
     assert set(texts) == set(mf.LEGAL)
     assert all(texts[s] and all(t.strip() for t in texts[s]) for s in mf.LEGAL)
+
+
+def _tb_run(root, exp, version, scalars):
+    """Write ``{tag: [(step, value), ...]}`` as TensorBoard events where TensorBoardLogger puts them."""
+    from torch.utils.tensorboard import SummaryWriter
+
+    writer = SummaryWriter(log_dir=str(root / exp / "logs" / exp / f"version_{version}"))
+    for tag, points in scalars.items():
+        for step, value in points:
+            writer.add_scalar(tag, value, step)
+    writer.close()
+
+
+def test_screen_metrics_reads_val_and_curves_from_the_latest_version(tmp_path, script, capsys):
+    """P5-D/F: val PPL is only in TensorBoard; the reader takes the run's highest version (the
+    earlier one is a failed attempt), reports exp(val/loss) as the PPL (the logged val/perplexity is a
+    batch-mean of exp(CE), job 2636358) and averages the training curve per window."""
+    sm = script("screen_metrics")
+    _tb_run(tmp_path, "screen_S1_s42", 0, {"train/loss": [(25, 99.0)]})
+    _tb_run(
+        tmp_path,
+        "screen_S1_s42",
+        1,
+        {
+            "train/loss": [(25, 4.0), (50, 2.0), (125, 9.0)],
+            "train/grad_norm": [(25, 1.0), (50, 3.0), (125, 0.5)],
+            "train/nan_skips": [(25, 0.0), (125, 2.0)],
+            "val/loss": [(100, 2.0), (200, 1.5)],
+            "val/perplexity": [(100, 9.5), (200, math.exp(1.5))],  # a batch-mean of exp(CE)
+        },
+    )
+    _tb_run(tmp_path, "screen_S0_s42", 0, {"val/loss": [(100, 3.0)]})
+    (tmp_path / "screen_S2_s42").mkdir()
+    (tmp_path / "other_run").mkdir()
+    assert sm.main(["--outputs", str(tmp_path), "--window", "100"]) == 0
+    lines = capsys.readouterr().out.splitlines()
+    s1 = [ln for ln in lines if " screen_S1_s42 " in ln]
+    assert s1[0] == "RUN screen_S1_s42 version=1 last_step=200"
+    assert "VAL screen_S1_s42 step=100 val_loss=2.0000 val_ppl=7.3891 logged_ppl=9.5000" in s1
+    assert "VAL screen_S1_s42 step=200 val_loss=1.5000 val_ppl=4.4817 logged_ppl=4.4817" in s1
+    assert (
+        "CURVE screen_S1_s42 steps=0-99 loss=3.0000 grad_norm=2.0000 grad_norm_max=3.0000 nan_skips=0.0000"
+        in s1
+    )
+    assert (
+        "CURVE screen_S1_s42 steps=100-199 loss=9.0000 grad_norm=0.5000 grad_norm_max=0.5000 nan_skips=2.0000"
+        in s1
+    )
+    assert "VAL screen_S0_s42 step=100 val_loss=3.0000 val_ppl=20.0855" in lines  # nothing logged
+    assert "RUN screen_S2_s42 version=none (no events file)" in lines
+    assert not any("other_run" in ln for ln in lines)
+
+
+def test_screen_metrics_fails_without_runs(tmp_path, script):
+    assert script("screen_metrics").main(["--outputs", str(tmp_path)]) == 1
+
+
+def test_screen_metrics_dumps_matching_tags_in_a_step_range(tmp_path, script, capsys):
+    """Spike diagnosis: --dump prints every value of the matching tags, limited to --steps."""
+    _tb_run(
+        tmp_path,
+        "diag_S1_s42",
+        0,
+        {"diag/grad/L1_attention": [(1, 0.5), (5, 9.0), (9, 0.4)], "train/loss": [(5, 3.0)]},
+    )
+    sm = script("screen_metrics")
+    assert (
+        sm.main(["--outputs", str(tmp_path), "--prefix", "diag_", "--dump", "^diag/", "--steps", "2-9"]) == 0
+    )
+    dumped = [ln for ln in capsys.readouterr().out.splitlines() if ln.startswith("SCALAR")]
+    assert dumped == [
+        "SCALAR diag_S1_s42 diag/grad/L1_attention step=5 value=9.0000",
+        "SCALAR diag_S1_s42 diag/grad/L1_attention step=9 value=0.4000",
+    ]
+
+
+def _screen_outputs(tmp_path, runs):
+    """Fake job outputs for screen_table.py: a reader log, training logs, eval JSON.
+    runs = {(arm, seed): (val_loss, late_doc, statute_em, multihop_em, [(s_per_step, n), ...])}."""
+    import json
+    import math
+
+    val = tmp_path / "metrics.log"
+    val.write_text("".join(f"VAL screen2_{a}_s{s} step=11999 val_loss={v[0]:.4f} val_ppl={math.exp(v[0]):.4f}\n" for (a, s), v in runs.items())
+                   + "VAL screen_S1_s42 step=11999 val_loss=9.0 val_ppl=0\n")  # fmt: skip
+    (tmp_path / "eval").mkdir()
+    train = []
+    for (a, s), (_, late, em, mh, legs) in runs.items():
+        name = f"screen2_{a}_s{s}"
+        (tmp_path / "eval" / f"{name}.valppl.json").write_text(json.dumps(
+            {"ppl": 1.0, "late_doc_ppl": late, "late_row_ppl": late + 1, "late_doc_tokens": 10, "late_row_tokens": 20}))  # fmt: skip
+        (tmp_path / "eval" / f"{name}.probes.json").write_text(json.dumps(
+            {"mqar": {"accuracy": 0.5}, "statute_recall": {"exact_match": em, "char_f1": em + 0.2, "items": 100},
+             "multihop": {"exact_match": mh, "items": 200}}))  # fmt: skip
+        for k, (sps, n) in enumerate(legs):
+            log = tmp_path / f"train_{name}_{k}.log"
+            log.write_text(f"experiment: {name}  model: x\nSTEPSTATS rank=0 step=500 s_per_step=99 n=1 peak_alloc_gb=1.00 "
+                           f"peak_reserved_gb=1 final=0\nSTEPSTATS rank=0 step=12000 s_per_step={sps} n={n} "
+                           f"peak_alloc_gb={40 + k}.00 peak_reserved_gb=1 final={0 if len(legs) > 1 and k == 0 else 1}\n")  # fmt: skip
+            train.append(str(log))
+    return ["--val-logs", str(val), "--train-logs", *train, "--eval-dirs", str(tmp_path / "eval")]
+
+
+def test_screen_table_applies_the_pre_registered_rule(tmp_path, script, capsys):
+    """P5-F/H/I: columns come from the job outputs (val PPL = exp(val_loss) at step 11,999; a
+    continuation's s/step is step-weighted), and the rule is applied as written: S1 advances unless
+    an arm beats its mean val PPL by more than the bar without losing statute-recall or multi-hop by
+    more than the bar; a PPL win that loses recall is recorded, not adopted."""
+    import math
+
+    st = script("screen_table")
+    runs = {
+        ("S1", 42): (1.70, 9.0, 0.30, 0.40, [(2.8, 100)]),
+        ("S1", 43): (1.70, 9.2, 0.32, 0.40, [(2.8, 100)]),
+        ("S2", 42): (1.65, 9.0, 0.30, 0.40, [(2.7, 100)]),  # PPL lower by 0.267 and recall kept: adopt
+        ("S2", 43): (1.65, 9.0, 0.30, 0.40, [(2.7, 100)]),
+        ("S3", 42): (1.65, 9.0, 0.10, 0.40, [(2.7, 100)]),  # wins PPL, loses statute-recall by 0.21
+        ("S3", 43): (1.65, 9.0, 0.10, 0.40, [(2.7, 100)]),
+        ("S4", 42): (1.69, 9.0, 0.30, 0.40, [(3.0, 100)]),  # PPL lower by ~0.05 < bar
+        ("S4", 43): (1.69, 9.0, 0.30, 0.40, [(3.0, 100)]),
+        ("S5", 42): (
+            2.0,
+            9.0,
+            0.30,
+            0.40,
+            [(9.0, 8000), (10.0, 4000)],
+        ),  # two legs, the first killed (no final=1)
+    }
+    assert st.main(["--bar", "0.10", *_screen_outputs(tmp_path, runs)]) == 0
+    out = capsys.readouterr().out
+    s1 = next(ln for ln in out.splitlines() if ln.startswith("| S1 | 42 |")).split(" | ")
+    assert s1[2] == f"{math.exp(1.70):.4f}" and s1[3] == "9.0000" and s1[6] == "0.300" and s1[-2] == "2.8000"
+    s5 = next(ln for ln in out.splitlines() if ln.startswith("| S5 | 42 |")).split(" | ")
+    assert s5[-2] == f"{(9.0 * 8000 + 10.0 * 4000) / 12000:.4f}" and s5[-1] == "41.00 |"
+    assert "| S1 | 5.4739 ± 0.0000 | 9.1000 ± 0.1414 |" in out  # two-seed mean ± sample SD
+    rule = [ln for ln in out.splitlines() if ln.startswith("RULE")]
+    assert (
+        "S2: val PPL S1-S2 = +0.2669" in rule[0]
+    )  # 5.4739 - 5.2070 and rule[0].endswith("candidate: adopt")
+    assert (
+        rule[1].startswith("RULE S3:")
+        and "statute-recall loss +0.2100" in rule[1]
+        and rule[1].endswith("not adopted")
+    )
+    assert rule[2].endswith("does not beat S1 by more than the bar")
+    assert rule[3] == "RULE S5: incomplete (val_ppl, statute_em, multihop_em missing), not decided"
+    assert rule[4] == "RULE winner: S2"
+    assert "screen_S1_s42" not in out  # attempt 1 is not read under the screen2_ prefix
+
+
+def test_screen_table_never_decides_without_the_control(tmp_path, script, capsys):
+    st = script("screen_table")
+    assert (
+        st.main(["--bar", "0.10", *_screen_outputs(tmp_path, {("S2", 42): (1.6, 9.0, 0.3, 0.4, [(2.7, 1)])})])
+        == 0
+    )
+    assert (
+        "RULE incomplete: S1 lacks two seeds of val_ppl, statute_em, multihop_em" in capsys.readouterr().out
+    )

@@ -1,12 +1,12 @@
 {
-  "current_phase": "P5",
-  "last_updated": "2026-10-09T18:41:28+02:00",
-  "status": "P5 in progress (3/10: A B C). S1 retry 2626202 queued behind gpu_tests 2626201 (TFLA per-block fix, decisions.tfla_overflow). P4 closed: teacher Qwen3-8B-Base + grad ckpt; market Germany only; eurlex out of training; corpus 6.09B cs tokens; P6 budget 5B. Ahead of phase: P6-A, P7-A, P7-B, P7-C1, P7-C (P7 chunks/BM25 to rebuild: gii ids changed 2026-10-03). For P6: decide within-legal source weights (gii 20% of rows -> ~29 passes at 5B).",
+  "current_phase": "P7",
+  "last_updated": "2026-10-27T21:13:43+01:00",
+  "status": "P7 current, 9/14 (A, B, C1, C, E, F, G, H, J). P6 10/15: all training done (4 stage-A + 4 stage-B runs); K, L, M need the cluster (user holds until the queue frees), then N, Z. P7 left: D (dense index, GPU), I (NLI calibration: hand-built 100-pair set + model run; threshold 0.5 pre-registered), K (retrieval eval, GPU), L (answer CLI; reconcile the pointer FSM with sft_format's Cite), Z. P5 closed (S1 + beta2 0.95). Before P8: see notes on P6 probe floor (gold_nll added).",
   "plan_of_record": "LEGAL_BUILD_PLAN.md",
   "helper": "python3 scripts/plan_state.py <cmd> (stdlib only; the ONLY writer of LEGAL_BUILD_PLAN.md checkboxes and legal_build_state.json)",
   "scope": "Build lexhybrid: port the reference backbone/kernels/decode/tests (P1), fix 18 recorded defects and add legal decoder deltas (P2), data pipeline (P3), cluster + corpus + profiling (P4), pre-registered screen (P5), full backbone (P6), retrieval/renderer/verifier (P7), post-training (P8), evaluation (P9), release (P10); P11 optional. Local only, no git until the user writes 'git go'. Reference/ deleted at P1-Z by the user.",
   "blocked_on": null,
-  "next_action": "Open: 2626201 (gpu_tests), 2626202 (S1-s42 = _0, S1-s43 = _1; afterok 2626201). sacct -j 2626201,2626202 -X. gpu_tests FAILED -> pull log, fix, S1 is auto-cancelled; resubmit both. S1 RUNNING -> tail logs (it/s; no TFLAFallbackError); stop. S1 COMPLETED -> pull logs/screen_2626202_{0,1}.log -> P5-D: val PPL per seed, two-seed SD, bar_value = max(2xSD, 0.10) into P5 section + pre_registered.P5.bar_value -> P5-E. Uncommitted: the TFLA fix (user decides commit).",
+  "next_action": "Cluster (when the user frees it): P6-L verify_handoff s43_B + research_B; P6-K eval @8192 s43_B + research_B; P6-M probes @8192 on the three stage-B ckpts (commands in the 2026-10-27 next-action history / HANDOFF section 5); P7-D build_dense_index.sh (to write: bge-m3, 1 GPU); P7-K eval_retrieval.sh (GerLeRB, GerDaLIR). Local: P7-L scripts/answer.py end-to-end CPU with a tiny checkpoint (retrieve -> P3-Y prompt -> pointer FSM + best_of_n(scorer=verifier) -> render -> verify); first reconcile PointerFSM with sft_format.Cite (allow <|cite|><|cK|> to end without a sentence, or change Cite) and add the test; P7-I: build data/manifests/nli_calibration.jsonl (100 hand-built pairs; user review) + scripts/calibrate_nli.py (needs the mDeBERTa model: cluster or HF download).",
   "decisions": {
     "01_init_road": "From scratch first: Qwen3 tokenizer + logit-KL from an open Qwen3-*-Base teacher. Qwen3 conversion = P11, optional, on user instruction only. (user 2026-09-27)",
     "02_corpus": "Open-licensed sources PLUS a research-exception arm; every document carries licence + commercial_safe; research_only never enters a shippable arm. (user 2026-09-27)",
@@ -36,7 +36,18 @@
     "market": "Germany only (user 2026-10-02: 'lets keep the process only for the german market'): training corpus = gii rii oldp eurlex dip fineweb2_de + multilegalpile DE rows (research arm); ris, fedlex, bger and multilegalpile CH rows out; eurlex kept (EU law applies in DE). Scrub go-ahead given, pilot first.",
     "eurlex_training": "out of the training pack (user 2026-10-03, after pack 2599610: 565 docs, ~0.3M tokens cannot give the plan's >=2,000-doc validation split); stays collected and scrubbed for retrieval/citation (P7)",
     "p6_token_budget": "5,000,000,000 = min(5B, 6,092,655,089 commercial-safe train tokens; pack 2599735, analysis/corpus_manifest.md); legal 4.23B, fineweb2_de 1.87B cover the 70/30 mix",
-    "tfla_overflow": "kernel fix keeping chunk 128: when one factorisation per 128-chunk would overflow fp32, re-centre per row block inside the chunk (exact; ARCH unchanged) (user 2026-10-09: 'yes proceed with this and fix it')"
+    "tfla_overflow": "kernel fix keeping chunk 128: when one factorisation per 128-chunk would overflow fp32, re-centre per row block inside the chunk (exact; ARCH unchanged) (user 2026-10-09: 'yes proceed with this and fix it')",
+    "p5e_submit_before_p5d": "2026-10-09 user: 'submit P5-E's 12 runs now, if the s1 fails then we can cancel the p5-e job and re run it'. Submitted without afterok on S1 2626202; if S1 fails on an infrastructure error, scancel 2629409 2629410, fix, resubmit S1 and P5-E.",
+    "p5_divergence": "2026-10-11 user chose 'Diagnose, then re-run (Recommended)': S1-s42 and S3-s43 diverged (PPL ~1185; bar 1667.6 degenerate). Cancel S5 2629410; re-run S1-s42 once with checkpoints every 250 steps and per-layer grad/gate diagnostics to find the spike's cause; then one stability fix applied to every arm and the whole screen re-run (~150 GPU-h). Results of 2626202/2629409 stay on record as the first screen attempt.",
+    "p5_fix": "2026-10-11 user chose 'AdamW β2 0.95 (Recommended)' and S6 'Yes, skip it (Recommended)': screen attempt 2 = adam_beta2 0.95 in every legal model yaml (S0-S6 incl. S5, transformer_legal_base), S6 builds no teacher when distill.alpha=0; runs in outputs/screen2_<arm>_s<seed> (scripts/screen_arms.py ATTEMPT=2). Evidence: spikes batch-triggered and KD-amplified (2637413), collapse in <=25 steps after one pre-clip grad norm of 93/542 (2637389/90), lower stack starved of gradient afterwards (2637405). Diag 2636405 keeps attempt 1's recipe (model.adam_beta2=0.999).",
+    "late25_ppl": "2026-10-13 user asked me to choose the recommended option: late-25% PPL = PPL of predicted tokens with at least 1,536 (= 0.75 x 2,048) tokens of their own document before them in the row (late_doc; packed rows restart position and state at every document, so in-document context is what the model uses). The row-position variant (positions 1,536-2,047, late_row) is reported beside it, with token counts. Tool: scripts/evaluate_val_ppl.py (same val rows and CE as training's val/loss).",
+    "p5_rule_scores": "2026-10-13, before any probe result: P5 rule uses statute-recall exact match (char-F1 beside) and multi-hop exact match; 'lose by more than the bar' = S1 mean minus arm mean > 0.10 on the 0-1 scale; computed by scripts/screen_table.py.",
+    "backbone": "2026-10-20, P5-I by the pre-registered rule (bar 0.10 PPL): S1 = hybrid_legal_base (attentionx2, mamba3x7, mlstmx3; mlstm chunk 128 exact; norm_topology hybrid) with AdamW beta2 0.95 (decisions.p5_fix). Two-seed mean val PPL 5.3582 (jobs 2637454; reader 2662834); no lever beat it by more than the bar.",
+    "nc_arm": "2026-10-20 user: 'Yes, add the research arm' -> P6-F submits one more 4xH100 hybrid run on commercial-safe + NC (research arm, multilegalpile German rows; 7.47B available tokens).",
+    "p6_source_weights": "2026-10-20, user asked for the recommended option: square-root (temperature 0.5) sampling within the legal group, each source capped at 4 passes at P6's 3.5B legal tokens (Muennighoff et al. 2023: up to ~4 epochs of repetition cost little). configs/dataset/mixture_pretrain.yaml weights gii 138.0, rii 699.7, oldp 1809.2, dip 853.1, multilegalpile 1216.8 (research). Commercial-safe passes: gii 4.00, rii 1.53, oldp 0.59, dip 1.26, fineweb2_de 0.80; research arm: gii 2.97, rii 1.14, oldp 0.44, dip 0.93, multilegalpile 0.65. Old 1/1/1/0.5 gave gii 29 passes. Test: test_p6_source_weights_cap_every_source_at_four_passes.",
+    "resume_data": "2026-10-20: the training loader resumes the data schedule: ScheduleSampler (lexhybrid/data/datasets.py) skips the micro-batches Lightning restored as done in the current epoch; ranks read r, r+w, ... (n//w each); ShardSampler for validation (equal counts); Trainer use_distributed_sampler=False for packed data. trainer.stop_at_step ends P6 stage A at a checkpoint step inside the max_steps horizon; train_pretrain_1gpu.sh INIT_FROM starts stage B from stage A's last.ckpt. Tests: resume == unbroken run (bit-identical weights), stage B starts its schedule at row 0 and reads on across a requeue, 2-rank CPU DDP split + resume. Found because screen S5's continuation re-read its first rows.",
+    "p7_rebuild": "2026-10-20, user asked for the recommended option: rebuild the P7 retrieval chunks and BM25 index at the start of P7 (which the plan opens after P6-E, worked locally while P6 trains): untick the affected P7 boxes (P7-B, P7-C1, P7-C and whatever reads gii ids or parse_citation) and rebuild from the current scrub/pack (gii ids changed 2026-10-03) with the 2026-10-15 statute grammar (11,423 more gii citations parse; 111 decision->statute). Nothing in P6 reads them.",
+    "p6_probe_scores": "2026-10-20, user asked for the recommended option, BEFORE any P6 result: P6's pre-registered probe prediction stays as written (statute-recall at 8K >= its 2K value, exact match). Added as secondary, continuous scores so the floor (EM 0.000 in all 14 P5 runs) cannot hide a difference: statute-recall char-F1 (already computed) and the gold answer's per-token NLL given the prompt (teacher-forced; statute recall's Absatz 2 and multi-hop's title), reported at 2K and 8K for every P6 checkpoint. The NLL scorer is to be added to evaluate_probes.py before P6-M."
   },
   "pre_registered": {
     "rules": {
@@ -63,7 +74,17 @@
     "P5": {
       "prediction": "S1 (attn-2) beats S0 (attn-0) on statute-recall and multi-hop by more than the bar and ties on val PPL; S2 (attn-4) ties S1 on everything and is not adopted (simplest-arm rule); S3 (d_state 64) is within the bar on PPL and worse on late-position PPL; S4 (MTP) is within the bar; S5 (legacy recipe) is worse on val PPL by more than 1.0; S6 (alpha=0, no KD) is worse on val PPL by more than the bar.",
       "written": "2026-09-29T14:44:28+02:00",
-      "bar_rule": "bar = max(2 x the two-seed SD of S1 val PPL, 0.10 PPL), set in P5-D from S1 alone. Decision: the simplest arm (S1 unless a lever is needed) advances unless another arm beats it on the two-seed mean val PPL by more than the bar AND does not lose statute-recall or multi-hop by more than the bar; a lever that wins PPL but loses recall is recorded and not adopted. Every arm scored on val PPL, late-25% PPL, MQAR, statute-recall, multi-hop, s/step, peak GB."
+      "bar_rule": "bar = max(2 x the two-seed SD of S1 val PPL, 0.10 PPL), set in P5-D from S1 alone. Decision: the simplest arm (S1 unless a lever is needed) advances unless another arm beats it on the two-seed mean val PPL by more than the bar AND does not lose statute-recall or multi-hop by more than the bar; a lever that wins PPL but loses recall is recorded and not adopted. Every arm scored on val PPL, late-25% PPL, MQAR, statute-recall, multi-hop, s/step, peak GB.",
+      "bar_value": "0.10",
+      "bar_value_source": "P5-D 2026-10-13, screen attempt 2 (decisions.p5_fix): S1 val PPL exp(val_loss) s42 5.3634, s43 5.3530 (job 2637454; reader 2662834); SD 0.0074, 2xSD 0.0147 < 0.10: floor binds"
+    },
+    "P6": {
+      "secondary_probe_scores": "written 2026-10-20 before any P6 submission (decisions.p6_probe_scores): statute-recall char-F1 and gold-answer per-token NLL (statute recall, multi-hop) at 2K and 8K, reported beside the exact-match prediction; descriptive, not a gate.",
+      "written": "2026-10-20T17:06:49+02:00"
+    },
+    "P7": {
+      "nli_threshold": "0.5 on the entailment probability (plan P7-I as written), registered 2026-10-27 before scripts/calibrate_nli.py exists or runs; the pre-registered threshold ships unless its precision on the 100-pair calibration set is < 0.85",
+      "written": "2026-10-27T20:33:47+01:00"
     }
   },
   "phase_order": [
@@ -732,7 +753,7 @@
     },
     "P5": {
       "title": "Pre-registered screen",
-      "status": "in_progress",
+      "status": "complete",
       "checkboxes": {
         "P5-A": {
           "done": true,
@@ -747,43 +768,75 @@
           "desc": "Submit S1 seeds 42 and 43 with `sbatch --array=0-1` (`ARMS=\"S1-s42 S1-s43\"`); record both job ids; end the session."
         },
         "P5-D": {
-          "done": false,
+          "done": true,
           "desc": "Verdict on the sbatch S1 jobs: val PPL per seed, two-seed SD, `bar_value = max(2×SD, 0.10)` written into this section and `pre_registered.P5.bar_value`; if the floor binds, say so."
         },
         "P5-E": {
-          "done": false,
+          "done": true,
           "desc": "Submit S0, S2, S3, S4, S6 × seeds 42/43 with `sbatch --array=0-9` and S5 × 2 seeds separately with its own walltime (`sbatch --array=0-1 --time=24:00:00`); record job ids; end the session."
         },
         "P5-F": {
-          "done": false,
+          "done": true,
           "desc": "Verdict on the sbatch arm jobs: per-arm, per-seed val PPL and late-25% PPL, s/step, peak GB into `analysis/screen_results.md`; requeued/failed arms noted with the `sacct` state."
         },
         "P5-G": {
-          "done": false,
+          "done": true,
           "desc": "`scripts/slurm/eval_probes.sh` (1 GPU; `evaluate_probes.py` on every arm's `last.ckpt`: MQAR, statute-recall, multi-hop at 2,048) submitted with `sbatch`."
         },
         "P5-H": {
-          "done": false,
+          "done": true,
           "desc": "Verdict on the sbatch probe job: probe columns filled; seed SD per column."
         },
         "P5-I": {
-          "done": false,
+          "done": true,
           "desc": "Apply the decision rule verbatim; write RESULTS (prediction → outcome per arm), the chosen config into `decisions.backbone`, and the verdict; unexpected results are recorded, not re-run."
         },
         "P5-Z": {
-          "done": false,
+          "done": true,
           "desc": "Gate: winner named by the rule with two seeds per arm; `analysis/screen_results.md` complete with every job id; `python3 scripts/plan_state.py next`."
         }
       },
       "evidence": {
         "prereg": "pre_registered.P5.prediction + bar_rule, 2026-09-29T14:44",
         "results_file": "analysis/screen_results.md",
-        "validate": "exit 0, 1011 passed, 2026-10-03",
-        "job": "2599890",
+        "validate": "exit 0 (--full), 1091 passed, 2026-10-20",
+        "job": "2663318",
         "tasks": "0=S1-s42 1=S1-s43",
-        "time": "16:00:00"
+        "time": "16:00:00",
+        "bar_value": "0.10",
+        "bar_s1_ppl_s42": "5.3634",
+        "bar_s1_ppl_s43": "5.3530",
+        "bar_sd": "0.0074",
+        "bar_floor_binds": "true",
+        "bar_jobs": "2637454,2662834",
+        "log": "cluster/logs/eval_2697615",
+        "s42": "5.3634",
+        "s43": "5.3530",
+        "sd": "0.0074",
+        "bar": "0.10",
+        "floor_binds": "yes",
+        "attempt": "2",
+        "arms": "S1,S0,S2,S3,S4,S6 x s42/s43 (--array=0-11)",
+        "job_s5": "2663319",
+        "s5": "afterok 2662840:2662841, --time=08:00:00",
+        "wrapper": "scripts/slurm/eval_probes.sh",
+        "adds": "evaluate_val_ppl.py late-25% PPL; statute_recall max_items early stop",
+        "jobs": "2697615,2663319",
+        "val_ppl_means": "S1 5.3582 S0 6.0336 S2 5.3434 S3 5.3007 S4 5.3578 S5 6.6394 S6 5.4070",
+        "late25_means": "S1 5.0014 S0 5.8848 S2 4.9839 S3 4.9496 S4 5.0015 S5 6.6057 S6 5.1061",
+        "sacct": "all COMPLETED; S5 first legs TIMEOUT (24 h) then continuations COMPLETED; attempt-1 arrays superseded",
+        "mqar_means": "S1 0.137+-0.018 S0 0.007 S2 0.113 S3 0.095 S4 0.095 S5 0.000 S6 0.193",
+        "statute_em": "0.000 all 14 (floor); char_f1 0.132-0.196",
+        "multihop_em": "0.000 all 14 (139 items, floor)",
+        "rule": "S1 advances: no arm beats S1 mean val PPL 5.3582 by >0.10 (S3 -0.0575, S2 -0.0148, S4 -0.0004); recall clause vacuous (EM 0.000 everywhere)",
+        "predictions": "PARTIAL: S2, S4, S5 confirmed; S1>S0 refuted; S3 partial; S6 refuted",
+        "results": "LEGAL_BUILD_PLAN.md P5 RESULTS block; analysis/screen_results.md",
+        "winner": "S1 hybrid_legal_base + AdamW beta2 0.95 (decisions.backbone)",
+        "seeds": "2 per arm (14 runs, attempt 2)",
+        "analysis": "analysis/screen_results.md complete with job ids (section 8)",
+        "user": "proceed with the next steps (2026-10-20)"
       },
-      "verdict": null
+      "verdict": "S1 hybrid_legal_base (beta2 0.95) advances by the rule: no arm beats its val PPL 5.3582 by >0.10 (S3 -0.058, S2 -0.015); statute-recall and multi-hop EM 0.000 everywhere (floor); predictions PARTIAL (3 confirmed, 2 refuted, 1 partial)."
     },
     "P6": {
       "title": "Full backbone pretraining",
@@ -794,39 +847,39 @@
           "desc": "`scripts/slurm/train_pretrain_4gpu.sh` (port map §11 header with `--gpus=4`, `--mem=256G`, `--cpus-per-task=32`, `--time=3-00:00:00`, `--requeue`, `--open-mode=append`; `CKPT=$OUT/checkpoints/last.ckpt` passed as `+re..."
         },
         "P6-B": {
-          "done": false,
+          "done": true,
           "desc": "USER ACTION — decide whether a `research_only` arm (commercial-safe + NC shards) also trains (doubles P6 compute). Record the answer in `decisions.nc_arm`."
         },
         "P6-C": {
-          "done": false,
+          "done": true,
           "desc": "Submit hybrid seed 42, stage A, with `sbatch --gpus=4 scripts/slurm/train_pretrain_4gpu.sh`; record the job id; artifact `P6.hybrid.s42.stageA_dir`."
         },
         "P6-D": {
-          "done": false,
+          "done": true,
           "desc": "Submit hybrid seed 43, stage A, with `sbatch --gpus=4`; record; artifact."
         },
         "P6-E": {
-          "done": false,
+          "done": true,
           "desc": "Submit `transformer_legal_base` seed 42, stage A, with `sbatch --gpus=4`; record; artifact; then `python3 scripts/plan_state.py phase P7` and end the session."
         },
         "P6-F": {
-          "done": false,
+          "done": true,
           "desc": "If `decisions.nc_arm` is yes: submit the research arm with `sbatch --gpus=4`; else tick with `--evidence job=skipped reason=decisions.nc_arm=no`."
         },
         "P6-G": {
-          "done": false,
+          "done": true,
           "desc": "Verdict on the sbatch hybrid s42 stage-A job: final val PPL, late-25% PPL, tokens seen, wall, preemptions (`sacct`), ARCH line; RESULTS row."
         },
         "P6-H": {
-          "done": false,
+          "done": true,
           "desc": "Verdict on the sbatch hybrid s43 stage-A job: same."
         },
         "P6-I": {
-          "done": false,
+          "done": true,
           "desc": "Verdict on the sbatch Transformer stage-A job: same."
         },
         "P6-J": {
-          "done": false,
+          "done": true,
           "desc": "Submit stage B for the three runs with `sbatch --gpus=4 --dependency=afterok:<A-job>` where still needed (or directly when A finished); record three job ids."
         },
         "P6-K": {
@@ -851,7 +904,23 @@
         }
       },
       "evidence": {
-        "validate": "exit 0, 935 passed, 2026-09-29"
+        "validate": "exit 0, 1101 passed, 2026-10-23",
+        "decisions.nc_arm": "yes",
+        "P6-B_user_confirmed": "Yes, add the research arm",
+        "job": "2724166",
+        "spec": "INIT_FROM=<A>/checkpoints/last.ckpt EXPERIMENT=<run>_B ROW_LEN=8192 BATCH_SIZE=4 ACCUM=4 MAX_STEPS=18037 TRAIN_SAMPLES=67000; 1,037 steps x 524,288 tokens; WSD horizon unchanged (18,037); FinalCheckpointCallback writes last.ckpt at 18,037",
+        "artifact": "P6.research_hybrid.s42.stageA_dir",
+        "decision": "decisions.nc_arm=yes",
+        "jobs": "2764152 (s42, direct), 2764153 (s43, afterok 2724165), 2764154 (transformer, afterok 2724166), 2764155 (research, afterok 2724167)",
+        "log": "cluster/logs/train_4gpu_2724166.log",
+        "val_ppl": "4.0236@16999",
+        "late25": "3.8240@4096",
+        "tokens": "4456448000",
+        "wall": "22:42:33",
+        "preemptions": "0",
+        "arch": "attentionx15 pre_rms 222,878,976",
+        "reader": "2792759",
+        "eval": "2792760"
       },
       "verdict": null
     },
@@ -880,19 +949,19 @@
           "desc": "`lexhybrid/retrieval/dense.py` (`BAAI/bge-m3` embeddings, FAISS or numpy index) and `scripts/slurm/build_dense_index.sh` (1 GPU) submitted with `sbatch`; verdict in the same box (index size, docs/s)."
         },
         "P7-E": {
-          "done": false,
+          "done": true,
           "desc": "`lexhybrid/retrieval/fusion.py` (reciprocal rank fusion) and `rerank.py` (`BAAI/bge-reranker-v2-m3`, top 50 → 3–8 chunks ≤ 4K tokens). Test: `tests/test_retrieval.py::test_rrf_and_rerank_orderings`."
         },
         "P7-F": {
-          "done": false,
+          "done": true,
           "desc": "`lexhybrid/retrieval/filters.py` (jurisdiction DE/AT/CH/EU; valid-on date; doc_type) and `index.py` (manifest of index versions; nightly re-sync stub `scripts/resync_index.py` that only records what would change). Tes..."
         },
         "P7-G": {
-          "done": false,
+          "done": true,
           "desc": "`lexhybrid/renderer/render.py`: `<|q|><|cK|><|sJ|>` → the exact sentence text in quotes with its `citation_id` label; `<|cite|><|cK|>` → `(BGB §573 Abs. 2 Nr. 1)`; appends \"Hinweis: Dies ist eine rechtliche Informatio..."
         },
         "P7-H": {
-          "done": false,
+          "done": true,
           "desc": "`lexhybrid/verifier/pointers.py` (every pointer resolves) and `quotes.py` (rendered quote equals source after NFC + whitespace normalisation). Test: `tests/test_verifier.py::test_pointer_and_quote_checks_adversarial` ..."
         },
         "P7-I": {
@@ -900,7 +969,7 @@
           "desc": "`lexhybrid/verifier/nli.py`: pre-register the entailment threshold (0.5 on the entailment probability) in `pre_registered.P7` before running `scripts/calibrate_nli.py` on a 100-pair hand-built set (`data/manifests/nli..."
         },
         "P7-J": {
-          "done": false,
+          "done": true,
           "desc": "`lexhybrid/verifier/verifier.py`: sentence-level pipeline (pointer → quote → NLI → party-identity rule: reject any answer containing a PER placeholder or a name matched by the LER model; \"who was the party\" → refusal)..."
         },
         "P7-K": {
@@ -917,8 +986,12 @@
         }
       },
       "evidence": {
-        "validate": "exit 0, 964 passed, 2026-09-30",
-        "lock_diff": "added bm25s 0.3.11, pystemmer 3.1.0; nothing else changed (104 packages)"
+        "validate": "exit 0, 1171 passed, 2026-10-27",
+        "lock_diff": "added bm25s 0.3.11, pystemmer 3.1.0; nothing else changed (104 packages)",
+        "files": "lexhybrid/verifier/verifier.py, nli.py (ENTAILMENT_THRESHOLD 0.5 = pre_registered.P7.nli_threshold; MDebertaNLI lazy), leak.py",
+        "test": "tests/test_verifier.py::test_pointer_and_quote_checks_adversarial",
+        "tests": "tests/test_verifier.py::test_party_identity_refusal, ::test_no_scrub_log_entity_in_index_chunks + removal/main-claim/citation-precision tests (fake NLI)",
+        "review": "approve_after_fixes (2 fixed: NLI truncation cut the claim, empty-hypothesis citation)"
       },
       "verdict": null
     },
@@ -1402,21 +1475,393 @@
       "box": "P5-C",
       "arm": "gpu_tests_tfla_blockwise",
       "submitted": "2026-10-09T08:23:08+02:00",
-      "status": "SUBMITTED",
+      "status": "COMPLETED",
       "log": "logs/gpu_tests_2626201.log",
-      "last_checked": null
+      "last_checked": "2026-10-09T18:59:21+02:00",
+      "note": "12 passed incl. test_tfla_wide_chunk_factorises_per_block_on_gpu[fp32,bf16-autocast]; GPU TESTS PASSED; log cluster/logs/gpu_tests_2626201.log"
     },
     "2626202": {
       "phase": "P5",
       "box": "P5-C",
       "arm": "S1-s42,S1-s43 (retry)",
       "submitted": "2026-10-09T08:23:08+02:00",
-      "status": "SUBMITTED",
+      "status": "COMPLETED",
       "log": "logs/screen_2626202_%a.log",
-      "last_checked": null
+      "last_checked": "2026-10-11T11:43:04+02:00",
+      "note": "both tasks COMPLETED 0:0 (10:44:04, 10:25:54); TRAIN DONE; s42 diverged at steps 3500-3749"
+    },
+    "2629409": {
+      "phase": "P5",
+      "box": "P5-E",
+      "arm": "S0-s42,S0-s43,S2-s42,S2-s43,S3-s42,S3-s43,S4-s42,S4-s43,S6-s42,S6-s43",
+      "submitted": "2026-10-09T19:10:52+02:00",
+      "status": "COMPLETED",
+      "log": "logs/screen_2629409_%a.log",
+      "last_checked": "2026-10-11T11:51:32+02:00",
+      "note": "all 10 tasks COMPLETED 0:0 by 2026-10-11; S3-s43 (_5) diverged at steps 6250-6499"
+    },
+    "2629410": {
+      "phase": "P5",
+      "box": "P5-E",
+      "arm": "S5-s42,S5-s43",
+      "submitted": "2026-10-09T19:10:52+02:00",
+      "status": "CANCELLED",
+      "log": "logs/screen_2629410_%a.log",
+      "last_checked": "2026-10-11T11:51:32+02:00",
+      "note": "S5 had started (7 min) when cancelled 2026-10-11; no result"
+    },
+    "2636358": {
+      "phase": "P5",
+      "box": "P5-D",
+      "arm": "screen_* (TB reader)",
+      "submitted": "2026-10-11T11:40:00+02:00",
+      "status": "COMPLETED",
+      "log": "logs/screen_metrics_2636358.log",
+      "last_checked": "2026-10-11T11:43:04+02:00",
+      "note": "SCREEN METRICS DONE; VAL/CURVE rows for 12 runs (S4 partial); log cluster/logs/screen_metrics_2636358.log"
+    },
+    "2636379": {
+      "phase": "P5",
+      "box": "P5-D",
+      "arm": "screen_* (TB reader, exp(val_loss); S4 final)",
+      "submitted": "2026-10-11T11:52:33+02:00",
+      "status": "COMPLETED",
+      "log": "logs/screen_metrics_2636379.log",
+      "last_checked": "2026-10-11T11:53:02+02:00",
+      "note": "S4 final: s42 val_loss 1.6998 (PPL 5.473), s43 1.7036 (5.494); S5 dirs at step 24 (cancelled)"
+    },
+    "2636405": {
+      "phase": "P5",
+      "box": "P5-D",
+      "arm": "S1-s42 diag (decisions.p5_divergence)",
+      "submitted": "2026-10-11T12:01:34+02:00",
+      "status": "COMPLETED",
+      "log": "logs/diag_spike_2636405.log",
+      "last_checked": "2026-10-13T15:59:24+02:00",
+      "note": "CORRECTION: ran with beta2 0.95, not 0.999 (OPTIM line; experiment diag_screen2_S1_s42): sbatch had snapshotted the old diag_spike.sh at submission, while screen_arms.py and the yamls were read at run time. Survived to step 7000 (val 2.0158 @3999, 1.8803 @6999); 108 DIAG SPIKE steps, largest 69.7 @2948 (L4_mlstm 47.0, L0_mamba3 30.9, L2 23.3, L3_attention 22.0), all recovered."
+    },
+    "2636406": {
+      "phase": "P5",
+      "box": "P5-D",
+      "arm": "diag_* reader (WINDOW=50; afterok 2636405)",
+      "submitted": "2026-10-11T12:01:34+02:00",
+      "status": "COMPLETED",
+      "log": "logs/screen_metrics_2636406.log",
+      "last_checked": "2026-10-13T15:59:24+02:00",
+      "note": "diag curves + VAL; logged_ppl == exp(val_loss) on GPU"
+    },
+    "2637389": {
+      "phase": "P5",
+      "box": "P5-D",
+      "arm": "S1-s42 attempt-1 train/* 3000-3900",
+      "submitted": "2026-10-11T16:35:04+02:00",
+      "status": "COMPLETED",
+      "log": "logs/screen_metrics_2637389.log",
+      "last_checked": "2026-10-11T16:39:31+02:00",
+      "note": "S1-s42 train/* at 25-step resolution: grad norm 0.33-0.40 (one 2.52 at 3474) until 3624, 93.33 at 3649 with loss already 9.32 (ce 7.44, kl 2.80); never recovers"
+    },
+    "2637390": {
+      "phase": "P5",
+      "box": "P5-D",
+      "arm": "S3-s43 attempt-1 train/* 5800-6700",
+      "submitted": "2026-10-11T16:35:04+02:00",
+      "status": "COMPLETED",
+      "log": "logs/screen_metrics_2637390.log",
+      "last_checked": "2026-10-11T16:39:31+02:00",
+      "note": "S3-s43: grad norm 0.29-0.41 until 6349; 541.58 at 6374 (loss still 2.23); loss 9.76 (ce 7.42) at 6399; never recovers"
+    },
+    "2637405": {
+      "phase": "P5",
+      "box": "P5-D",
+      "arm": "inspect last.ckpt S1-s42/s43, S3-s43/s42",
+      "submitted": "2026-10-11T16:39:01+02:00",
+      "status": "COMPLETED",
+      "log": "logs/inspect_ckpt_2637405.log",
+      "last_checked": "2026-10-11T16:41:32+02:00",
+      "note": "collapsed S1-s42/S3-s43 vs healthy S1-s43/S3-s42 last.ckpt: AdamW update rms (m/(sqrt v+eps)) per block collapsed 1e-8..0.09 rising bottom->top (S1: L0-L3 ~1e-8, L4 5e-6, L6 6e-4, L8 0.03, L11 0.09; S3: L0-L8 1e-4..1e-3, L9 0.008, L10 0.035, L11 0.089) vs healthy 0.14-0.22 everywhere: lower stack gets ~no gradient after the collapse; weights 0.6-0.85x healthy norm (weight decay with no gradient); norm weights, mLSTM gate biases (i -10, f +3, at init in all runs), A_log, dt_bias unremarkable."
+    },
+    "2637413": {
+      "phase": "P5",
+      "box": "P5-D",
+      "arm": "attempt-1 grad_norm/kl/ce all runs, all steps",
+      "submitted": "2026-10-11T16:41:32+02:00",
+      "status": "COMPLETED",
+      "log": "logs/screen_metrics_2637413.log",
+      "last_checked": "2026-10-11T16:42:39+02:00",
+      "note": "spikes align across arms of the same seed on logged steps (s42 2949: S1 58.2, S2 8.2, S6 2.9; s43 3474: 6 arms); S6 (no KD) max 3.9, KD arms up to 10-75; fatal steps (S1-s42 3649, S3-s43 6374) not shared. Data schedule seed fixed at 0 (mixture_pretrain.yaml), so s42/s43 differ only in init."
+    },
+    "2637454": {
+      "phase": "P5",
+      "box": "P5-C",
+      "arm": "S1-s42,S1-s43 (attempt 2)",
+      "submitted": "2026-10-11T16:49:00+02:00",
+      "status": "COMPLETED",
+      "log": "logs/screen_2637454_%a.log",
+      "last_checked": "2026-10-13T15:59:23+02:00",
+      "note": "both COMPLETED 0:0 (10:09:42, 10:12:02), gx07; OPTIM betas (0.9, 0.95); s/step 2.8101/2.8276"
+    },
+    "2637455": {
+      "phase": "P5",
+      "box": "P5-E",
+      "arm": "S0-s42,S0-s43,S2-s42,S2-s43,S3-s42,S3-s43,S4-s42,S4-s43,S6-s42,S6-s43 (attempt 2)",
+      "submitted": "2026-10-11T16:49:00+02:00",
+      "status": "COMPLETED",
+      "log": "logs/screen_2637455_%a.log",
+      "last_checked": "2026-10-13T15:59:23+02:00",
+      "note": "all 10 COMPLETED 0:0; OPTIM betas 0.95; S6 'teacher: none', 1.1956/1.2141 s/step, 12.50 GB"
+    },
+    "2637456": {
+      "phase": "P5",
+      "box": "P5-E",
+      "arm": "S5-s42,S5-s43 (attempt 2)",
+      "submitted": "2026-10-11T16:49:00+02:00",
+      "status": "TIMEOUT",
+      "log": "logs/screen_2637456_%a.log",
+      "last_checked": "2026-10-15T21:12:46+02:00",
+      "note": "both TIMEOUT at 24 h as projected; continuations 2662840/2662841 PENDING (ReqNodeNotAvail on 2026-10-15)"
+    },
+    "2637457": {
+      "phase": "P5",
+      "box": "P5-D",
+      "arm": "screen2_* reader (afterok 2637454:2637455:2637456)",
+      "submitted": "2026-10-11T16:49:08+02:00",
+      "status": "CANCELLED",
+      "log": "logs/screen_metrics_2637457.log",
+      "last_checked": "2026-10-15T21:12:46+02:00",
+      "note": "cancelled by S5's TIMEOUT (afterok), as expected; 2662842 replaces it"
+    },
+    "2662834": {
+      "phase": "P5",
+      "box": "P5-D",
+      "arm": "screen2_* reader (12 finished runs; S5 partial)",
+      "submitted": "2026-10-13T15:56:40+02:00",
+      "status": "COMPLETED",
+      "log": "logs/screen_metrics_2662834.log",
+      "last_checked": "2026-10-13T15:59:23+02:00",
+      "note": "attempt-2 VAL for 12 finished runs (S5 partial): S1 5.3634/5.3530, S0 6.0241/6.0431, S2 5.3611/5.3257, S3 5.2920/5.3094, S4 5.3585/5.3571, S6 5.4175/5.3966; no collapse (max 250-step CE after step 2000 <= 2.86)"
+    },
+    "2662840": {
+      "phase": "P5",
+      "box": "P5-E",
+      "arm": "S5-s42 continuation (afternotok 2637456_0)",
+      "submitted": "2026-10-13T15:59:24+02:00",
+      "status": "COMPLETED",
+      "log": "logs/screen_2662840_0.log",
+      "last_checked": "2026-10-20T16:06:46+02:00"
+    },
+    "2662841": {
+      "phase": "P5",
+      "box": "P5-E",
+      "arm": "S5-s43 continuation (afternotok 2637456_1)",
+      "submitted": "2026-10-13T15:59:24+02:00",
+      "status": "COMPLETED",
+      "log": "logs/screen_2662841_0.log",
+      "last_checked": "2026-10-20T16:06:46+02:00"
+    },
+    "2662842": {
+      "phase": "P5",
+      "box": "P5-F",
+      "arm": "screen2_* reader (afterok 2662840:2662841)",
+      "submitted": "2026-10-13T15:59:24+02:00",
+      "status": "COMPLETED",
+      "log": "logs/screen_metrics_2662842.log",
+      "last_checked": "2026-10-20T16:06:46+02:00"
+    },
+    "2663318": {
+      "phase": "P5",
+      "box": "P5-G",
+      "arm": "eval_probes S1,S0,S2,S3,S4,S6 x s42/s43 (_0.._11 in ARMS order)",
+      "submitted": "2026-10-13T17:57:32+02:00",
+      "status": "FAILED",
+      "log": "logs/eval_probes_2663318_%a.log",
+      "last_checked": "2026-10-15T21:12:46+02:00",
+      "note": "all 12 FAILED exit 1 after ~12 min: every val-PPL JSON written (logs/eval_2663318/*.valppl.json; S1-s42 ppl 5.3634 = reader), then evaluate_probes.py crashed in multihop.build_items: parse_citation rejected gii '1-DM-GoldmünzG §4'. 11,423 of 90,255 gii citation ids (12.7%, 899 acts: SGB 5, 13. BImSchV, EEG 2023...) failed the one-token code; 111 more were mis-parsed as decisions (court pattern [A-Z]..G). Fixed: _STATUTE code = everything before the provision, lazy (all 90,255 parse; the 78,671 old statute parses unchanged; only the 111 decision->statute change). Tests: citation grammar cases, prose rejection, multihop over SGB 5 codes; eval_probes.sh VALPPL=0. validate.sh exit 0, 1081 passed. Resubmitted probes only."
+    },
+    "2663319": {
+      "phase": "P5",
+      "box": "P5-G",
+      "arm": "eval_probes S5-s42,S5-s43 (afterok 2662840:2662841)",
+      "submitted": "2026-10-13T17:57:32+02:00",
+      "status": "COMPLETED",
+      "log": "logs/eval_probes_2663319_%a.log",
+      "last_checked": "2026-10-20T16:06:46+02:00"
+    },
+    "2697615": {
+      "phase": "P5",
+      "box": "P5-G",
+      "arm": "eval_probes probes only (VALPPL=0), _0.._11 as 2663318",
+      "submitted": "2026-10-15T21:12:46+02:00",
+      "status": "COMPLETED",
+      "log": "logs/eval_probes_2697615_%a.log",
+      "last_checked": "2026-10-20T16:06:46+02:00"
+    },
+    "2724164": {
+      "phase": "P6",
+      "box": "P6-C",
+      "arm": "hybrid_legal_base s42 stage A (arm commercial_safe)",
+      "submitted": "2026-10-20T17:08:08+02:00",
+      "status": "COMPLETED",
+      "log": "logs/train_4gpu_2724164.log",
+      "last_checked": "2026-10-23T13:02:03+02:00",
+      "note": "COMPLETED 0:0, 1-07:20:27, gx11, restart 0; step 17000 (stage A), 6.4406 s/step, peak 43.18 GB; last.ckpt = step017000.ckpt; TRAIN DONE"
+    },
+    "2724165": {
+      "phase": "P6",
+      "box": "P6-D",
+      "arm": "hybrid_legal_base s43 stage A",
+      "submitted": "2026-10-20T17:08:08+02:00",
+      "status": "COMPLETED",
+      "log": "logs/train_4gpu_2724165.log",
+      "last_checked": "2026-10-26T16:01:37+01:00",
+      "note": "COMPLETED 1-07:12:44 gx07, restart 0, step 17000, 6.4041 s/step, 43.18 GB, TRAIN DONE; val PPL 3.9724 @16999 (reader 2792759)"
+    },
+    "2724166": {
+      "phase": "P6",
+      "box": "P6-E",
+      "arm": "transformer_legal_base s42 stage A",
+      "submitted": "2026-10-20T17:08:08+02:00",
+      "status": "COMPLETED",
+      "log": "logs/train_4gpu_2724166.log",
+      "last_checked": "2026-10-26T16:01:37+01:00",
+      "note": "COMPLETED 22:42:33 gx09, restart 0, step 17000, 4.6218 s/step, 43.58 GB, TRAIN DONE; val PPL 4.0236 @16999"
+    },
+    "2724167": {
+      "phase": "P6",
+      "box": "P6-F",
+      "arm": "hybrid_legal_base s42 stage A, research arm",
+      "submitted": "2026-10-20T17:08:08+02:00",
+      "status": "COMPLETED",
+      "log": "logs/train_4gpu_2724167.log",
+      "last_checked": "2026-10-26T16:01:37+01:00",
+      "note": "COMPLETED 1-07:54:48 gx12, restart 0, step 17000, 6.5021 s/step, 43.18 GB, TRAIN DONE; val PPL 4.0215 @16999 on the research val set"
+    },
+    "2726834": {
+      "phase": "P7",
+      "box": "P7-A",
+      "arm": "cleanup: repo:envs/scrub/.venv (home 87% full; user 2026-10-21)",
+      "submitted": "2026-10-21T09:00:31+02:00",
+      "status": "COMPLETED",
+      "log": "logs/cleanup_2726834.log",
+      "last_checked": "2026-10-21T09:08:07+02:00",
+      "note": "deleted /sc/home/.../lexhybrid/envs/scrub/.venv (6.9G); home 174G -> 168G (87% -> 84%); nothing on scratch touched"
+    },
+    "2732006": {
+      "phase": "P6",
+      "box": "P6-G",
+      "arm": "p6_* reader (mid-run check)",
+      "submitted": "2026-10-21T19:13:22+02:00",
+      "status": "COMPLETED",
+      "log": "logs/screen_metrics_2732006.log",
+      "last_checked": "2026-10-23T13:02:03+02:00",
+      "note": "mid-run VAL p6_hybrid_s42_A (4096 rows): 18.66 @999, 8.26 @1999, 6.10 @2999, 5.43 @3999, 5.07 @4999, 4.89 @5999, 4.74 @6999"
+    },
+    "2764152": {
+      "phase": "P6",
+      "box": "P6-J",
+      "arm": "hybrid s42 stage B (INIT_FROM A last.ckpt)",
+      "submitted": "2026-10-23T13:02:03+02:00",
+      "status": "COMPLETED",
+      "log": "logs/train_4gpu_2764152.log",
+      "last_checked": "2026-10-26T16:01:37+01:00",
+      "note": "COMPLETED 04:48:40 gx07, restart 0, started from p6_hybrid_s42_A last.ckpt, step 18037, 16.2168 s/step, 33.22 GB; last.ckpt global_step 18037 (verify_handoff 2792762 PASS)"
+    },
+    "2764153": {
+      "phase": "P6",
+      "box": "P6-J",
+      "arm": "hybrid s43 stage B (afterok 2724165)",
+      "submitted": "2026-10-23T13:02:03+02:00",
+      "status": "COMPLETED",
+      "log": "logs/train_4gpu_2764153.log",
+      "last_checked": "2026-10-27T20:28:01+01:00",
+      "note": "COMPLETED 04:41 gx10, restart 0, started from <A>/last.ckpt, step 18037, ~15.9 s/step, 33.22 GB, TRAIN DONE"
+    },
+    "2764154": {
+      "phase": "P6",
+      "box": "P6-J",
+      "arm": "transformer s42 stage B (afterok 2724166)",
+      "submitted": "2026-10-23T13:02:03+02:00",
+      "status": "COMPLETED",
+      "log": "logs/train_4gpu_2764154.log",
+      "last_checked": "2026-10-26T16:01:37+01:00",
+      "note": "COMPLETED 03:13:21 gx12, restart 0, from p6_transformer_s42_A last.ckpt, step 18037, 10.6359 s/step, 33.62 GB; handoff PASS"
+    },
+    "2764155": {
+      "phase": "P6",
+      "box": "P6-J",
+      "arm": "research hybrid s42 stage B (afterok 2724167)",
+      "submitted": "2026-10-23T13:02:03+02:00",
+      "status": "COMPLETED",
+      "log": "logs/train_4gpu_2764155.log",
+      "last_checked": "2026-10-27T20:28:01+01:00",
+      "note": "COMPLETED 04:41 gx10, restart 0, started from <A>/last.ckpt, step 18037, ~15.9 s/step, 33.22 GB, TRAIN DONE"
+    },
+    "2764156": {
+      "phase": "P6",
+      "box": "P6-G",
+      "arm": "reader p6_hybrid_s42_A final val",
+      "submitted": "2026-10-23T13:02:03+02:00",
+      "status": "COMPLETED",
+      "log": "logs/screen_metrics_2764156.log",
+      "last_checked": "2026-10-26T16:01:37+01:00",
+      "note": "p6_hybrid_s42_A val 3.9775 @16999"
+    },
+    "2764157": {
+      "phase": "P6",
+      "box": "P6-G",
+      "arm": "late-25 PPL p6_hybrid_s42_A at 4096 (PROBES=0)",
+      "submitted": "2026-10-23T13:02:03+02:00",
+      "status": "COMPLETED",
+      "log": "logs/eval_probes_2764157_0.log",
+      "last_checked": "2026-10-26T16:01:37+01:00",
+      "note": "p6_hybrid_s42_A @4096: ppl 3.9775, late_doc 3.7814 (14,186,980 tokens), late_row 3.7720"
+    },
+    "2792759": {
+      "phase": "P6",
+      "box": "P6-G",
+      "arm": "reader PREFIX=p6_ (all A and B)",
+      "submitted": "2026-10-26T15:57:51+01:00",
+      "status": "COMPLETED",
+      "log": "logs/screen_metrics_2792759.log",
+      "last_checked": "2026-10-26T16:01:37+01:00",
+      "note": "VAL @16999 (4096): s42 3.9775, s43 3.9724, transformer 4.0236, research 4.0215 (research val); stage B @17499 (8192): s42 3.8050, transformer 3.8563"
+    },
+    "2792760": {
+      "phase": "P6",
+      "box": "P6-H",
+      "arm": "late-25 @4096: s43_A, transformer_A, research_A",
+      "submitted": "2026-10-26T15:57:51+01:00",
+      "status": "COMPLETED",
+      "log": "logs/eval_probes_2792760_%a.log",
+      "last_checked": "2026-10-27T20:27:49+01:00",
+      "note": "@4096: s43_A 3.9724 late 3.7727; transformer_A 4.0236 late 3.8240; research_A (cs val) 4.0365 late 3.8441"
+    },
+    "2792761": {
+      "phase": "P6",
+      "box": "P6-K",
+      "arm": "val+late @8192: A (s42,s43,trf,research) before, B (s42,trf) after",
+      "submitted": "2026-10-26T15:57:51+01:00",
+      "status": "COMPLETED",
+      "log": "logs/eval_probes_2792761_%a.log",
+      "last_checked": "2026-10-27T20:27:49+01:00",
+      "note": "@8192: before B: s42 3.8638 late 3.7886, s43 3.8635 late 3.8107, research 3.9206 late 3.8682, transformer 8.2270 late 119.93 (no length extrapolation past 4096); after B: s42 3.7861 late 3.6533 (-3.57% rel), transformer 3.8337 late 3.7156"
+    },
+    "2792762": {
+      "phase": "P6",
+      "box": "P6-L",
+      "arm": "verify_handoff s42_B, transformer_B",
+      "submitted": "2026-10-26T15:57:51+01:00",
+      "status": "COMPLETED",
+      "log": "logs/verify_handoff_2792762.log",
+      "last_checked": "2026-10-26T16:01:37+01:00",
+      "note": "HANDOFF p6_hybrid_s42_B PASS, p6_transformer_s42_B PASS (0 missing / 0 unexpected; global_step 18037)"
     }
   },
-  "artifacts": {},
+  "artifacts": {
+    "P6.hybrid.s42.stageA_dir": "$SCRATCH_ROOT/outputs/p6_hybrid_s42_A",
+    "P6.hybrid.s43.stageA_dir": "$SCRATCH_ROOT/outputs/p6_hybrid_s43_A",
+    "P6.transformer.s42.stageA_dir": "$SCRATCH_ROOT/outputs/p6_transformer_s42_A",
+    "P6.research_hybrid.s42.stageA_dir": "$SCRATCH_ROOT/outputs/p6_research_hybrid_s42_A"
+  },
   "sessions": [
     {
       "started": "2026-09-27T13:36:18+02:00",
@@ -1560,7 +2005,30 @@
         "P4-L",
         "P4-M",
         "P4-Z",
-        "P5-C"
+        "P5-C",
+        "P5-E",
+        "P5-C",
+        "P5-E",
+        "P5-D",
+        "P5-G",
+        "P5-F",
+        "P5-H",
+        "P5-I",
+        "P5-Z",
+        "P6-B",
+        "P6-C",
+        "P6-D",
+        "P6-E",
+        "P6-F",
+        "P6-J",
+        "P6-G",
+        "P6-H",
+        "P6-I",
+        "P7-E",
+        "P7-F",
+        "P7-G",
+        "P7-H",
+        "P7-J"
       ],
       "jobs": [
         "2588677",
@@ -1597,7 +2065,44 @@
         "2599735",
         "2599890",
         "2626201",
-        "2626202"
+        "2626202",
+        "2629409",
+        "2629410",
+        "2636358",
+        "2636379",
+        "2636405",
+        "2636406",
+        "2637389",
+        "2637390",
+        "2637405",
+        "2637413",
+        "2637454",
+        "2637455",
+        "2637456",
+        "2637457",
+        "2662834",
+        "2662840",
+        "2662841",
+        "2662842",
+        "2663318",
+        "2663319",
+        "2697615",
+        "2724164",
+        "2724165",
+        "2724166",
+        "2724167",
+        "2726834",
+        "2732006",
+        "2764152",
+        "2764153",
+        "2764154",
+        "2764155",
+        "2764156",
+        "2764157",
+        "2792759",
+        "2792760",
+        "2792761",
+        "2792762"
       ]
     }
   ],
@@ -1931,7 +2436,155 @@
     "2026-10-09: submitted job 2626201 (P5-C gpu_tests_tfla_blockwise)",
     "2026-10-09: submitted job 2626202 (P5-C S1-s42,S1-s43 (retry))",
     "2026-10-09: TFLA fix per decisions.tfla_overflow: exact path keeps the one-factor re-centring when it fits; otherwise _row_block picks the largest divisor of the chunk whose own half-range < 40 and _blockwise_scores re-centres each row block on its midpoint (plain non-increasing cumsum; keys after the block -inf before exp; earlier-block key factors <= 1). fallback (error|sequential) applies only when no block >= min_block (default 1) fits -- impossible for blocks <= 6 rows under the 1e-6 gate clamp. fp64: forward/backward equal the sequential scan (<= 1e-12 / 1e-10); fp32 finite; grad_f rel err 3.8e-6 at half-range 50 (S1 regime), 5e-5 at bias -4, 1.2e-3 at bias -8. ARCH unchanged (chunk 128, fallback=error). Tests: 3 updated (old raise-on-wide-chunk behaviour now via min_block=chunk), 3 new CPU + 1 CUDA; port map section 4 updated. validate.sh exit 0, 1029 passed. Leftover interrupt.ckpt (2.6 GB each) in outputs/screen_S1_s4{2,3}/checkpoints from 2599890: never resumed (only last.ckpt is). Submitted gpu_tests 2626201 -> S1 retry 2626202 (afterok, --array=0-1, --time=16:00:00).",
-    "2026-10-09: Docs/HANDOFF.md added (branch goal, decisions, done, next steps, checks); CLAUDE.md points to it after resume. Correction to the 2026-10-03 note: 0.70 it/s is the progress-bar rate of attempt 2599890; whether it counts optimizer steps or micro-batches (accum 2) is unconfirmed, so '~1.43 s/step, ~4.8 h' was not established."
+    "2026-10-09: Docs/HANDOFF.md added (branch goal, decisions, done, next steps, checks); CLAUDE.md points to it after resume. Correction to the 2026-10-03 note: 0.70 it/s is the progress-bar rate of attempt 2599890; whether it counts optimizer steps or micro-batches (accum 2) is unconfirmed, so '~1.43 s/step, ~4.8 h' was not established.",
+    "2026-10-09: job 2626201 -> COMPLETED",
+    "2026-10-09: job 2626202 -> PENDING",
+    "2026-10-09: submitted job 2629409 (P5-E S0-s42,S0-s43,S2-s42,S2-s43,S3-s42,S3-s43,S4-s42,S4-s43,S6-s42,S6-s43)",
+    "2026-10-09: submitted job 2629410 (P5-E S5-s42,S5-s43)",
+    "2026-10-09: decision p5e_submit_before_p5d: 2026-10-09 user: 'submit P5-E's 12 runs now, if the s1 fails then we can cancel the p5-e job and re run it'. Submitted without afterok on S1 2626202; if S1 fails on an infrastructure error, scancel 2629409 2629410, fix, resubmit S1 and P5-E.",
+    "2026-10-09: ticked P5-E",
+    "2026-10-11: job 2626202 -> RUNNING",
+    "2026-10-11: job 2629409 -> RUNNING",
+    "2026-10-11: job 2629410 -> PENDING",
+    "2026-10-11: STEPSTATS step = trainer.global_step (optimizer steps, lexhybrid/training/callbacks.py:124), so screen runs take 2.73-3.13 s/step, ~10-11 h per arm (logs/screen_2626202_*.log, screen_2629409_*.log); 2599890's 0.70 it/s counted micro-batches. Gaps found for P5-D/F: (1) val/perplexity goes only to the rich progress bar (not rendered in the SLURM log) and TensorBoard under outputs/<exp>/logs on scratch -- no tool yet brings it to logs/ or analysis/; (2) late-25% PPL has no tool (evaluate_lm.py gives whole-row PPL only); (3) S6 (distill.alpha=0) still runs the teacher forward (pretrain_module.py:83 checks self.teacher, not alpha), so its s/step and peak GB include the teacher; PPL unaffected. Record (3) as a caveat in P5-F; do not change the running arm.",
+    "2026-10-11: submitted job 2636358 (P5-D screen_* (TB reader))",
+    "2026-10-11: job 2636358 -> COMPLETED",
+    "2026-10-11: job 2626202 -> COMPLETED",
+    "2026-10-11: S1 2626202 and 2629409 _0-_5,_8,_9 COMPLETED (exit 0, TRAIN DONE); _6,_7 (S4) RUNNING; 2629410 (S5) PENDING. scripts/screen_metrics.py + scripts/slurm/screen_metrics.sh (TB reader; tests in test_scripts.py, test_slurm_wrappers.py; validate.sh exit 0, 1035 passed) -> job 2636358. val PPL = exp(val/loss) at step 11999 (logged val/perplexity is a batch-mean of exp(CE): S0-s43 step 7999 logged 31.69 vs exp(loss) 8.19 -- training-side logging defect to fix before P6). S1 s42 1184.765 (DIVERGED: spike steps 3500-3749, grad norm max 93.3, then CE ~7.4 plateau), s43 5.563 -> SD 833.822, bar = max(2SD, 0.10) = 1667.644 PPL (degenerate). S3-s43 also diverged (spike steps 6250-6499, grad norm max 541.6; PPL 1186.425). Others: S0 6.196/6.226, S2 5.571/5.481, S3-s42 5.464, S6 5.270/5.280. Spikes that recovered in every KD run (max grad norm 4.2-74.6) vs 3.9/3.1 in the no-KD S6 runs: a hint, not a finding. No pre-spike checkpoint (last.ckpt only). analysis/screen_results.md seed table + section 7 filled.",
+    "2026-10-11: BLOCKED on P5-D: USER DECISION: S1-s42 (and S3-s43) diverged at LR 4e-4; pre-registered bar = 1667.644 PPL is degenerate. Accept as result, or diagnose + re-run the screen with one stability fix for every arm (rule i: no re-run of a measurement without the user).",
+    "2026-10-11: job 2629410 -> CANCELLED",
+    "2026-10-11: decision p5_divergence: 2026-10-11 user chose 'Diagnose, then re-run (Recommended)': S1-s42 and S3-s43 diverged (PPL ~1185; bar 1667.6 degenerate). Cancel S5 2629410; re-run S1-s42 once with checkpoints every 250 steps and per-layer grad/gate diagnostics to find the spike's cause; then one stability fix applied to every arm and the whole screen re-run (~150 GPU-h). Results of 2626202/2629409 stay on record as the first screen attempt.",
+    "2026-10-11: unblocked (P5-D)",
+    "2026-10-11: job 2629409 -> COMPLETED",
+    "2026-10-11: job 2629410 -> CANCELLED",
+    "2026-10-11: submitted job 2636379 (P5-D screen_* (TB reader, exp(val_loss); S4 final))",
+    "2026-10-11: job 2636379 -> COMPLETED",
+    "2026-10-11: submitted job 2636405 (P5-D S1-s42 diag (decisions.p5_divergence))",
+    "2026-10-11: submitted job 2636406 (P5-D diag_* reader (WINDOW=50; afterok 2636405))",
+    "2026-10-11: spike diagnosis per decisions.p5_divergence. New: lexhybrid/training/diagnostics.py SpikeDiagnosticsCallback (callbacks.diagnostics, off by default): per-part (embed, L<i>_<type>, final_norm) grad norm pre-clip and update ratio every optimizer step; every 10 steps block-output rms/max, MLP max, mLSTM gate logits + TFLA half-range + row block chosen, attention q/k logit bound, Mamba dt max, head logit max, param norms; DIAG SPIKE lines (>5x median or non-finite); stop_at_step. Bit-identical weights with/without (CPU test). scripts/slurm/diag_spike.sh (S1-s42 screen settings, max_steps 12000 unchanged, ckpt every 250 kept, stop 7000, experiment diag_S1_s42). screen_metrics.py --dump/--steps. Tests: 4 in test_training.py, 2+1 compose case in test_slurm_wrappers.py, 1 in test_scripts.py; validate.sh exit 0, 1047 passed. Observations from the code map: AdamW betas (0.9, 0.999) eps 1e-8 (beta2_schedule off in every model config); norm_topology hybrid feeds every block's MLP except block 0 the un-normalised stream (post-norm after the add); Mamba3 A_log, D, conv1d.weight are weight-decayed. Submitted diag 2636405 -> reader 2636406 (afterok, PREFIX=diag_ WINDOW=50).",
+    "2026-10-11: submitted job 2637389 (P5-D S1-s42 attempt-1 train/* 3000-3900)",
+    "2026-10-11: submitted job 2637390 (P5-D S3-s43 attempt-1 train/* 5800-6700)",
+    "2026-10-11: submitted job 2637405 (P5-D inspect last.ckpt S1-s42/s43, S3-s43/s42)",
+    "2026-10-11: job 2637389 -> COMPLETED",
+    "2026-10-11: job 2637390 -> COMPLETED",
+    "2026-10-11: submitted job 2637413 (P5-D attempt-1 grad_norm/kl/ce all runs, all steps)",
+    "2026-10-11: job 2637405 -> COMPLETED",
+    "2026-10-11: job 2637413 -> COMPLETED",
+    "2026-10-11: spike evidence while diag 2636405 queues (ReqNodeNotAvail): (1) collapse within <=25 steps after one pre-clip grad norm of 93 / 542, no build-up (jobs 2637389/90); (2) after it, AdamW update rms per block falls ~10x per block downwards (1e-8..1e-3 in the lower stack vs 0.14-0.22 healthy), weights otherwise unremarkable (2637405) -> lower stack starved of gradient; hybrid topology = post-norm after every block but 0, no identity path; (3) spikes batch-triggered and KD-amplified (2637413); (4) both seeds share the data order (dataset seed 0). analysis/screen_results.md section 7 updated.",
+    "2026-10-11: decision p5_fix: 2026-10-11 user chose 'AdamW β2 0.95 (Recommended)' and S6 'Yes, skip it (Recommended)': screen attempt 2 = adam_beta2 0.95 in every legal model yaml (S0-S6 incl. S5, transformer_legal_base), S6 builds no teacher when distill.alpha=0; runs in outputs/screen2_<arm>_s<seed> (scripts/screen_arms.py ATTEMPT=2). Evidence: spikes batch-triggered and KD-amplified (2637413), collapse in <=25 steps after one pre-clip grad norm of 93/542 (2637389/90), lower stack starved of gradient afterwards (2637405). Diag 2636405 keeps attempt 1's recipe (model.adam_beta2=0.999).",
+    "2026-10-11: screen attempt 2 (decisions.p5_fix): resubmitted with AdamW beta2 0.95; attempt 1 jobs 2626202, 2629409, 2629410 stay on record in analysis/screen_results.md",
+    "2026-10-11: submitted job 2637454 (P5-C S1-s42,S1-s43 (attempt 2))",
+    "2026-10-11: submitted job 2637455 (P5-E S0-s42,S0-s43,S2-s42,S2-s43,S3-s42,S3-s43,S4-s42,S4-s43,S6-s42,S6-s43 (attempt 2))",
+    "2026-10-11: submitted job 2637456 (P5-E S5-s42,S5-s43 (attempt 2))",
+    "2026-10-11: ticked P5-C",
+    "2026-10-11: ticked P5-E",
+    "2026-10-11: submitted job 2637457 (P5-D screen2_* reader (afterok 2637454:2637455:2637456))",
+    "2026-10-11: implemented decisions.p5_fix: HybridLightningModule adam_beta2 (default 0.999; guard against beta2_schedule mismatch; OPTIM line in the log); adam_beta2: 0.95 in hybrid_legal_{base,attn0,attn4,ds64,legacy,mtp} and transformer_legal_base; train_pretrain.build_module extracted; build_teacher returns None when distill.alpha=0; screen_arms ATTEMPT=2 -> EXPERIMENT screen2_<arm>_s<seed> (attempt 1's last.ckpt not resumed, tested); diag_spike.sh pins model.adam_beta2=0.999 and EXPERIMENT diag_S1_s42. Also: val/perplexity now exp(token-weighted epoch CE) (HybridLightningModule._accumulate_val, all-reduced); scripts/inspect_checkpoint.py + slurm/inspect_ckpt.sh. Tests added in test_training.py (beta2 x7 configs, guard, teacher skip, val ppl, inspector), test_slurm_wrappers.py, test_scripts.py; validate.sh exit 0, 1061 passed. Plan P5 section: attempt-2 paragraph. Submitted attempt 2: 2637454 (S1), 2637455 (S0,S2,S3,S4,S6), 2637456 (S5, 24 h) -> reader 2637457 (afterok all three).",
+    "2026-10-13: submitted job 2662834 (P5-D screen2_* reader (12 finished runs; S5 partial))",
+    "2026-10-13: ticked P5-D",
+    "2026-10-13: pre-registered P5.bar_value",
+    "2026-10-13: pre-registered P5.bar_value_source",
+    "2026-10-13: job 2662834 -> COMPLETED",
+    "2026-10-13: job 2637454 -> COMPLETED",
+    "2026-10-13: job 2637455 -> COMPLETED",
+    "2026-10-13: job 2637456 -> RUNNING",
+    "2026-10-13: job 2636405 -> COMPLETED",
+    "2026-10-13: job 2636406 -> COMPLETED",
+    "2026-10-13: submitted job 2662840 (P5-E S5-s42 continuation (afternotok 2637456_0))",
+    "2026-10-13: submitted job 2662841 (P5-E S5-s43 continuation (afternotok 2637456_1))",
+    "2026-10-13: submitted job 2662842 (P5-F screen2_* reader (afterok 2662840:2662841))",
+    "2026-10-13: screen attempt 2: S1 (2637454) and S0,S2,S3,S4,S6 (2637455) COMPLETED, no collapse, every log OPTIM betas (0.9, 0.95); S6 teacher none (1.20 s/step, 12.5 GB). P5-D ticked: bar 0.10 PPL (S1 5.3634/5.3530, SD 0.0074; floor binds); RESULTS block in plan; pre_registered.P5.bar_value=0.10. S5 (2637456) RUNNING at ~9.2 s/step -> TIMEOUT at 24 h expected; continuations 2662840/2662841 (afternotok per task) -> reader 2662842; 2637457 will be cancelled by the TIMEOUT. Diag 2636405 ran with beta2 0.95 (sbatch snapshot of the old diag_spike.sh; memory saved), survived 7000 steps with 108 spikes (max 69.7 @2948, lower stack), all recovered. analysis/screen_results.md: attempt-2 seed table (section 3.1), attempt 1 moved to 3.1b, section 7 diag + spikes.",
+    "2026-10-13: submitted job 2663318 (P5-G eval_probes S1,S0,S2,S3,S4,S6 x s42/s43 (_0.._11 in ARMS order))",
+    "2026-10-13: submitted job 2663319 (P5-G eval_probes S5-s42,S5-s43 (afterok 2662840:2662841))",
+    "2026-10-13: decision late25_ppl: 2026-10-13 user asked me to choose the recommended option: late-25% PPL = PPL of predicted tokens with at least 1,536 (= 0.75 x 2,048) tokens of their own document before them in the row (late_doc; packed rows restart position and state at every document, so in-document context is what the model uses). The row-position variant (positions 1,536-2,047, late_row) is reported beside it, with token counts. Tool: scripts/evaluate_val_ppl.py (same val rows and CE as training's val/loss).",
+    "2026-10-13: ticked P5-G",
+    "2026-10-13: P5-G: scripts/slurm/eval_probes.sh (array per arm-seed; screen_arms env on the node; evaluate_val_ppl.py then evaluate_probes.py on outputs/screen2_*/checkpoints/last.ckpt; statutes = scrubbed gii parts; JSON to logs/eval_<array>/), scripts/evaluate_val_ppl.py (late_doc = decisions.late25_ppl, late_row beside; overall = training val CE, tested equal to compute_losses), statute_recall.build_items max_items (early stop, identical to [:n]; full build was quadratic at gii size). Tests: test_training (late context sums), test_data (end-to-end on packed shards; max_items), test_slurm_wrappers (eval_probes task). validate.sh exit 0, 1069 passed. Submitted 2663318 (12 runs) and 2663319 (S5, afterok continuations).",
+    "2026-10-13: scripts/screen_table.py (P5-F/H/I prep): seed table + per-arm mean +/- SD from reader VAL lines (val_ppl), STEPSTATS final=1 (step-weighted over legs), logs/eval_*/ JSON; applies the P5 rule as written with the bar; incomplete arms never decided. Decided BEFORE any probe result: statute-recall's rule score is exact match (the probe reproduces Absatz 2 verbatim; char-F1 reported beside), and the bar (0.10) applies to statute-recall EM and multi-hop EM on their 0-1 scale as the rule's 'by more than the bar'. Tests in test_scripts.py; validate.sh exit 0, 1072 passed. Status 21:40: eval 2663318 PENDING (Priority); S5 2637456 at steps 7000 / 5500 (9.33 / 9.07 s/step).",
+    "2026-10-13: decision p5_rule_scores: 2026-10-13, before any probe result: P5 rule uses statute-recall exact match (char-F1 beside) and multi-hop exact match; 'lose by more than the bar' = S1 mean minus arm mean > 0.10 on the 0-1 scale; computed by scripts/screen_table.py.",
+    "2026-10-15: job 2663318 -> FAILED",
+    "2026-10-15: submitted job 2697615 (P5-G eval_probes probes only (VALPPL=0), _0.._11 as 2663318)",
+    "2026-10-15: job 2637456 -> TIMEOUT",
+    "2026-10-15: job 2637457 -> CANCELLED",
+    "2026-10-15: eval 2663318: val-PPL step OK for all 12 (evaluator ppl == reader val_ppl within 0.0001; late_doc 16,061,503 tokens = 21.4%); probes crashed on gii citation codes -> schema._STATUTE fixed (code = everything before the provision, lazy; all 90,255 gii ids parse; 78,671 old statute parses unchanged; 111 decision->statute corrections); tests added; eval_probes.sh VALPPL=0; validate.sh exit 0, 1081 passed; probes resubmitted as 2697615. Late-25% (late_doc) means: S0 5.885, S1 5.001, S2 4.984, S3 4.950, S4 5.002, S6 5.106 (analysis/screen_results.md 3.1). S5 2637456 TIMEOUT x2 as projected; continuations 2662840/41 PENDING ReqNodeNotAvail (UnavailableNodes). Process slip: one read-only 'git stash list' ran inside a compound command (rule d); nothing changed.",
+    "2026-10-20: ticked P5-F",
+    "2026-10-20: ticked P5-H",
+    "2026-10-20: ticked P5-I",
+    "2026-10-20: decision backbone: 2026-10-20, P5-I by the pre-registered rule (bar 0.10 PPL): S1 = hybrid_legal_base (attentionx2, mamba3x7, mlstmx3; mlstm chunk 128 exact; norm_topology hybrid) with AdamW beta2 0.95 (decisions.p5_fix). Two-seed mean val PPL 5.3582 (jobs 2637454; reader 2662834); no lever beat it by more than the bar.",
+    "2026-10-20: verdict P5: S1 hybrid_legal_base (beta2 0.95) advances by the rule: no arm beats its val PPL 5.3582 by >0.10 (S3 -0.058, S2 -0.015); statute-recall and multi-hop EM 0.000 everywhere (floor); predictions PARTIAL (3 confirmed, 2 refuted, 1 partial).",
+    "2026-10-20: job 2662840 -> COMPLETED",
+    "2026-10-20: job 2662841 -> COMPLETED",
+    "2026-10-20: job 2662842 -> COMPLETED",
+    "2026-10-20: job 2663319 -> COMPLETED",
+    "2026-10-20: job 2697615 -> COMPLETED",
+    "2026-10-20: all P5 jobs COMPLETED: S5 continuations 2662840/41 (resumed last.ckpt, TRAIN DONE; S5 val PPL 6.6649/6.6138 via 2662842), probes 2697615 (12) + 2663319 (S5 val/late/probes). Statute-recall EM and multi-hop EM 0.000 in all 14 runs (floor); MQAR 0.000-0.196. screen_table.py: killed leg (no final=1) uses its last STEPSTATS (test). P5-F, P5-H, P5-I ticked; decisions.backbone = S1 hybrid_legal_base + beta2 0.95; verdict recorded; analysis/screen_results.md complete (sections 1-8); RESULTS block in plan. Failed/timeouts seen in sacct on 2026-10-20 (rag_m3_s42, rag_transformer_s42 FAILED; chat_server TIMEOUT x4) belong to the user's other project, not lexhybrid. P5-Z (validate.sh --full, next) waits for the user per rule j.",
+    "2026-10-20: ticked P5-Z",
+    "2026-10-20: P5 complete -> current_phase P6",
+    "2026-10-20: decision nc_arm: 2026-10-20 user: 'Yes, add the research arm' -> P6-F submits one more 4xH100 hybrid run on commercial-safe + NC (research arm, multilegalpile German rows; 7.47B available tokens).",
+    "2026-10-20: ticked P6-B",
+    "2026-10-20: found: the training DataLoader is not resumable; on resume Lightning restarts it at row 0 (PossibleUserWarning in screen_2662840_0.log). S5's continuations re-read the schedule's first rows (64,000 / 48,000) instead of continuing; recorded in analysis/screen_results.md section 7 (decision unchanged, no re-run). Blocks P6: requeues and the stage-B resume must continue the data schedule; fix before P6-C.",
+    "2026-10-20: decision p6_source_weights: 2026-10-20, user asked for the recommended option: square-root (temperature 0.5) sampling within the legal group, each source capped at 4 passes at P6's 3.5B legal tokens (Muennighoff et al. 2023: up to ~4 epochs of repetition cost little). configs/dataset/mixture_pretrain.yaml weights gii 138.0, rii 699.7, oldp 1809.2, dip 853.1, multilegalpile 1216.8 (research). Commercial-safe passes: gii 4.00, rii 1.53, oldp 0.59, dip 1.26, fineweb2_de 0.80; research arm: gii 2.97, rii 1.14, oldp 0.44, dip 0.93, multilegalpile 0.65. Old 1/1/1/0.5 gave gii 29 passes. Test: test_p6_source_weights_cap_every_source_at_four_passes.",
+    "2026-10-20: decision resume_data: 2026-10-20: the training loader resumes the data schedule: ScheduleSampler (lexhybrid/data/datasets.py) skips the micro-batches Lightning restored as done in the current epoch; ranks read r, r+w, ... (n//w each); ShardSampler for validation (equal counts); Trainer use_distributed_sampler=False for packed data. trainer.stop_at_step ends P6 stage A at a checkpoint step inside the max_steps horizon; train_pretrain_1gpu.sh INIT_FROM starts stage B from stage A's last.ckpt. Tests: resume == unbroken run (bit-identical weights), stage B starts its schedule at row 0 and reads on across a requeue, 2-rank CPU DDP split + resume. Found because screen S5's continuation re-read its first rows.",
+    "2026-10-20: decision p7_rebuild: 2026-10-20, user asked for the recommended option: rebuild the P7 retrieval chunks and BM25 index at the start of P7 (which the plan opens after P6-E, worked locally while P6 trains): untick the affected P7 boxes (P7-B, P7-C1, P7-C and whatever reads gii ids or parse_citation) and rebuild from the current scrub/pack (gii ids changed 2026-10-03) with the 2026-10-15 statute grammar (11,423 more gii citations parse; 111 decision->statute). Nothing in P6 reads them.",
+    "2026-10-20: decision p6_probe_scores: 2026-10-20, user asked for the recommended option, BEFORE any P6 result: P6's pre-registered probe prediction stays as written (statute-recall at 8K >= its 2K value, exact match). Added as secondary, continuous scores so the floor (EM 0.000 in all 14 P5 runs) cannot hide a difference: statute-recall char-F1 (already computed) and the gold answer's per-token NLL given the prompt (teacher-forced; statute recall's Absatz 2 and multi-hop's title), reported at 2K and 8K for every P6 checkpoint. The NLL scorer is to be added to evaluate_probes.py before P6-M.",
+    "2026-10-20: pre-registered P6.secondary_probe_scores",
+    "2026-10-20: submitted job 2724164 (P6-C hybrid_legal_base s42 stage A (arm commercial_safe))",
+    "2026-10-20: submitted job 2724165 (P6-D hybrid_legal_base s43 stage A)",
+    "2026-10-20: submitted job 2724166 (P6-E transformer_legal_base s42 stage A)",
+    "2026-10-20: submitted job 2724167 (P6-F hybrid_legal_base s42 stage A, research arm)",
+    "2026-10-20: ticked P6-C",
+    "2026-10-20: ticked P6-D",
+    "2026-10-20: ticked P6-E",
+    "2026-10-20: ticked P6-F",
+    "2026-10-20: current_phase -> P7",
+    "2026-10-20: P5-Z ticked (validate.sh --full exit 0, 1091 passed) -> P6. P6-B: decisions.nc_arm = yes (user). Before P6 submission: decisions.resume_data (ScheduleSampler/ShardSampler, stop_at_step, INIT_FROM; found via S5 replay), decisions.p6_source_weights (sqrt + 4-pass cap), decisions.p7_rebuild (at P7 start), decisions.p6_probe_scores + pre_registered.P6.secondary_probe_scores (char-F1, gold NLL; before any P6 result). validate.sh exit 0, 1092 passed. Submitted stage A: 2724164 (hybrid s42), 2724165 (hybrid s43), 2724166 (transformer s42), 2724167 (research hybrid s42); est. start 2026-10-25 (Priority). Ticked P6-B..F. Phase set to P7 per the P6 section (job-bound P6-G..M are ticked from P7).",
+    "2026-10-21: submitted job 2726834 (P7-A cleanup: repo:envs/scrub/.venv (home 87% full; user 2026-10-21))",
+    "2026-10-21: storage. /sc/home is the full filesystem (200G quota, 174G used, 87%); scratch is a shared 420T gpfs at 32%. lexhybrid on home: .venv 7.1G (kept, jobs use it), envs/scrub/.venv 6.9G, the rest < 20M. User: 'No data is to be deleted on the scratch as only the data at home dir size is to be reduced' + delete the scrub env. New scripts/slurm/cleanup.sh (explicit DELETE list, whole list checked first, protected paths refused; test in test_slurm_wrappers.py, 117 passed). Submitted cleanup 2726834 (DELETE=repo:envs/scrub/.venv); rebuild later with uv sync --locked in envs/scrub when scrubbing again. The rest of home belongs to the user's other projects (hybrid_isbi, hybrid_textenc, hybrid_chat_ui, hybrid_mamba_xlstm, mlmaba_doctors_guide, dataset, chat_sessions, isbi_tmp, ~/.cache/huggingface, ~/.cache/chexbert, ~/.triton): not touched. P6 2724164 RUNNING since 2026-10-21 04:47 (step 1000 at 06:40).",
+    "2026-10-21: job 2726834 -> COMPLETED",
+    "2026-10-21: job 2724164 -> RUNNING",
+    "2026-10-21: submitted job 2732006 (P6-G p6_* reader (mid-run check))",
+    "2026-10-21: job 2724164 -> RUNNING",
+    "2026-10-21: job 2724165 -> PENDING",
+    "2026-10-21: job 2724166 -> PENDING",
+    "2026-10-21: job 2724167 -> PENDING",
+    "2026-10-23: job 2724164 -> COMPLETED",
+    "2026-10-23: job 2732006 -> COMPLETED",
+    "2026-10-23: submitted job 2764152 (P6-J hybrid s42 stage B (INIT_FROM A last.ckpt))",
+    "2026-10-23: submitted job 2764153 (P6-J hybrid s43 stage B (afterok 2724165))",
+    "2026-10-23: submitted job 2764154 (P6-J transformer s42 stage B (afterok 2724166))",
+    "2026-10-23: submitted job 2764155 (P6-J research hybrid s42 stage B (afterok 2724167))",
+    "2026-10-23: submitted job 2764156 (P6-G reader p6_hybrid_s42_A final val)",
+    "2026-10-23: submitted job 2764157 (P6-G late-25 PPL p6_hybrid_s42_A at 4096 (PROBES=0))",
+    "2026-10-23: ticked P6-J",
+    "2026-10-23: p6_hybrid_s42_A COMPLETED (2724164: 31h20m, 0 restarts, step 17000, 6.44 s/step, 43.18 GB). Added FinalCheckpointCallback (last.ckpt at the final step; stage B ends at 18,037, not a checkpoint step; test) and eval_probes.sh RUNS / PROBES=0 modes (test); validate.sh exit 0, 1101 passed. Submitted stage B: 2764152 (s42, direct), 2764153/54/55 (s43, transformer, research; afterok their A). P6-G inputs: reader 2764156, late-25 eval 2764157 (4096). Stage A 2724165/66/67 still PENDING ReqNodeNotAvail (UnavailableNodes).",
+    "2026-10-26: submitted job 2792759 (P6-G reader PREFIX=p6_ (all A and B))",
+    "2026-10-26: submitted job 2792760 (P6-H late-25 @4096: s43_A, transformer_A, research_A)",
+    "2026-10-26: submitted job 2792761 (P6-K val+late @8192: A (s42,s43,trf,research) before, B (s42,trf) after)",
+    "2026-10-26: submitted job 2792762 (P6-L verify_handoff s42_B, transformer_B)",
+    "2026-10-26: job 2724165 -> COMPLETED",
+    "2026-10-26: job 2724166 -> COMPLETED",
+    "2026-10-26: job 2724167 -> COMPLETED",
+    "2026-10-26: job 2764152 -> COMPLETED",
+    "2026-10-26: job 2764154 -> COMPLETED",
+    "2026-10-26: job 2764156 -> COMPLETED",
+    "2026-10-26: job 2764157 -> COMPLETED",
+    "2026-10-26: job 2792759 -> COMPLETED",
+    "2026-10-26: job 2792762 -> COMPLETED",
+    "2026-10-26: decisions.p7_rebuild correction: P7-A/B/C are code boxes tested on fixtures; no chunk or BM25 artifact was ever built on the cluster (SCRATCH_ROOT/data holds http_cache, manifests, raw, scrubbed, shards only). Nothing to untick or rebuild: the first real index is built from the current scrubbed corpus in P7-D/P7-K, with the 2026-10-15 statute grammar (chunking.py calls parse_citation). Also: gold-answer NLL scorer added (lexhybrid/data/probes/likelihood.py; statute_recall.score and multihop.score return gold_nll; test) per decisions.p6_probe_scores; verify_handoff.sh written (P6-L; global_step printed; test). validate.sh exit 0, 1107 passed.",
+    "2026-10-26: ticked P6-G",
+    "2026-10-27: ticked P6-H",
+    "2026-10-27: job 2792760 -> COMPLETED",
+    "2026-10-27: job 2792761 -> COMPLETED",
+    "2026-10-27: ticked from P7 as the P6 section allows (job-bound boxes P6-G..M)",
+    "2026-10-27: job 2764153 -> COMPLETED",
+    "2026-10-27: job 2764155 -> COMPLETED",
+    "2026-10-27: all P6 training finished: stage B s43 (2764153) and research (2764155) COMPLETED 04:41 each, 0 restarts, step 18037. P6-H, P6-I ticked (P6-I with --force from P7, as the P6 section allows). @8192 before->after stage B: hybrid s42 late-25 3.7886 -> 3.6533 (-3.57% rel; prediction >= 3%), transformer 119.93 -> 3.7156 (no extrapolation past 4096 before B). Remaining P6 needs the cluster (user: hold cluster jobs until the queue frees): verify_handoff s43_B + research_B (P6-L), val/late @8192 for s43_B + research_B (P6-K), probes @8192 on the three stage-B ckpts (P6-M). Then P6-N, P6-Z. This session: P7 local code boxes. Note: macOS revoked ~/Desktop access mid-session once more (2026-10-27); the user restored it.",
+    "2026-10-27: pre-registered P7.nli_threshold",
+    "2026-10-27: ticked P7-E",
+    "2026-10-27: ticked P7-F",
+    "2026-10-27: ticked P7-G",
+    "2026-10-27: ticked P7-H",
+    "2026-10-27: ticked P7-J",
+    "2026-10-27: P7-E (me), P7-F, P7-G, P7-H, P7-J via workflow wf_e116799e-5fd (3 implementers + 3 reviewers; all approve_after_fixes; fixed: registry stale no-op, failed rebuild left index.json, 0600 mode, NLI truncation cut the claim, empty-hypothesis citation passed, quadratic sentence split). Shared answer grammar lexhybrid/renderer/segments.py accepts <|cite|><|cK|> with or without sentences and quote spans: the pointer FSM (decoding/pointer_constraints.py) requires a sentence after <|cite|><|cK|> while sft_format.Cite writes none, to reconcile at P7-L. decisions.cite_every_copy (missed in the agents' contract, caught in review): lexhybrid/retrieval/copies.py groups dedup.jsonl cross-source links, build_index --dedup fills Chunk.copies, renderer and verifier labels add '; Quellen: ...'. Known limits recorded by the reviewers, not fixed: free-text quotation marks are only checked by NLI; leak.py misses logged names with lower-case particles or >= 4 words; the party regex misses 'Gegen wen richtete sich die Klage?' and 'Beteiligte'; claim splitting treats '1.'/'12.' before a capital as an ordinal (two sentences may merge); decisions carry their date as valid_from, so the valid-on filter drops a decision before it was decided. pre_registered.P7.nli_threshold = 0.5 (before calibration). validate.sh exit 0, 1171 passed."
   ],
   "open_questions": []
 }

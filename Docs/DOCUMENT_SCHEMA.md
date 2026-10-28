@@ -49,7 +49,7 @@ A record that breaks these rules raises `ValueError` on construction and on load
 Three grammars, parsed by `lexhybrid.data.schema.parse_citation`.
 
 **Statutes and regulations:** `<code> §<n>` or `<code> Art. <n>`, where `<code>` is the act's
-abbreviation (or `SR <number>`) and may be followed by `SchlT`; then, optionally,
+official abbreviation as printed, whatever precedes the provision (or `SR <number>`; gii has `SGB 5`, `13. BImSchV`, `1-DM-GoldmünzG`, `II. BV`), and may be followed by `SchlT`; then, optionally,
 `Abs. <k>`, then `Satz <s>` or `S. <s>`, then `Nr. <m>`, then `lit. <x>`. For example:
 - `BGB §573 Abs. 2 Nr. 1`: German Civil Code
 - `ABGB §1295`: Austrian General Civil Code

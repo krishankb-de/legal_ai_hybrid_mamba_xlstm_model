@@ -10,6 +10,9 @@ strategy: auto
 compile_model: false
 max_epochs: -1
 max_steps: 12000
+# P6 stage A ends at a checkpoint step inside the max_steps horizon (WSD over the combined A+B
+# horizon; scripts/train_pretrain.py check_stage_keys). null: train to max_steps.
+stop_at_step: null
 val_every_opt_steps: 4000
 check_val_every_n_epoch: null
 log_every_n_steps: 25
