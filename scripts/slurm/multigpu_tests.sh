@@ -12,16 +12,16 @@
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.log
 #
-# multigpu_tests.sh -- the `multigpu` test layer on two H100 of one node (plan P4-J3, §8.1): the
+# multigpu_tests.sh -- the `multigpu` test layer on two H100 of one node: the
 # DDP step of tests/test_multigpu.py, gradients identical across ranks.
-# Submit from the Mac:  ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch --gpus=2 scripts/slurm/multigpu_tests.sh"
-# (`--gpus=2` on the sbatch line as well: port map §11.1.) The log ends in "MULTIGPU TESTS PASSED"
+# Submit from your workstation:  ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch --gpus=2 scripts/slurm/multigpu_tests.sh"
+# (`--gpus=2` on the sbatch line as well.) The log ends in "MULTIGPU TESTS PASSED"
 # only if every step exits 0.
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
 
 NUM_GPUS="${NUM_GPUS:-2}"
-# Environment block, port map §11.2
+# Environment block
 SCRATCH_ROOT="${SCRATCH_ROOT:-/sc/scratch/$USER/lexhybrid}"
 export HF_HOME="${SCRATCH_ROOT}/.hf"
 export HF_HUB_OFFLINE=1
@@ -30,12 +30,12 @@ export TORCHINDUCTOR_CACHE_DIR="${SCRATCH_ROOT}/.torchinductor/multigpu_tests_${
 export PYTORCH_CUDA_ALLOC_CONF="expandable_segments:True"
 export CUDA_LAUNCH_BLOCKING=0
 export PYTHONUNBUFFERED=1
-export PATH="$HOME/.local/bin:$PATH"   # uv, for check_env.py (job 2588703)
+export PATH="$HOME/.local/bin:$PATH"   # uv, for check_env.py
 mkdir -p logs "$TORCHINDUCTOR_CACHE_DIR"
 
 echo "host: $(hostname)  job: ${SLURM_JOB_ID:-none}  NUM_GPUS: $NUM_GPUS"
 echo "sync_stamp: $(cat .sync_stamp 2>/dev/null || echo missing)"
-# A directive in this file is not overridden by an environment variable (port map §11.1): fail
+# A directive in this file is not overridden by an environment variable: fail
 # fast when the node shows fewer GPUs than the run needs, instead of skipping every test.
 .venv/bin/python -c "import torch, sys; n = torch.cuda.device_count(); print('GPUs:', n, [torch.cuda.get_device_name(i) for i in range(n)]); sys.exit(0 if n >= int(sys.argv[1]) else 1)" "$NUM_GPUS"
 nvidia-smi

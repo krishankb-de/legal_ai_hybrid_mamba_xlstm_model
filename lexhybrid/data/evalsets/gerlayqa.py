@@ -1,4 +1,4 @@
-"""GerLayQA: laypeople's legal questions answered by lawyers, grounded in BGB paragraphs (plan P3-Q).
+"""GerLayQA: laypeople's legal questions answered by lawyers, grounded in BGB paragraphs.
 
 Source: Büttner and Habernal (EACL 2024), ``data/bgb_eval.json`` in
 ``trusthlt/eacl24-german-legal-questions`` at a pinned commit: the paper's evaluation split, 2,154
@@ -6,8 +6,8 @@ items ``{Question_text, Answer_text, Paragraphs}`` where ``Paragraphs`` names th
 lawyer's answer rests on (``§ 573b``, mapped to ``BGB §573b``). The GPT-3.5 answers of
 ``bgb_eval_qa.json`` are not used.
 
-The repository's notice restricts the data to non-commercial scientific research, and the plan
-excludes it from training explicitly: evaluation only, ``research_only``.
+The repository's notice restricts the data to non-commercial scientific research, and it is
+excluded from training explicitly: evaluation only, ``research_only``.
 """
 
 import re
@@ -22,7 +22,7 @@ INFO = EvalSetInfo(
     task="qa",
     licence="non-commercial scientific research only (repository notice); the authors claim no copyright",
     source=f"https://github.com/trusthlt/eacl24-german-legal-questions@{COMMIT[:7]}",
-    note="evaluation split bgb_eval.json; never training data (plan P3-Q)",
+    note="evaluation split bgb_eval.json; never training data",
     research_only=True,
 )
 _PARAGRAPH = re.compile(r"^§\s*(\d+[a-z]*)$")

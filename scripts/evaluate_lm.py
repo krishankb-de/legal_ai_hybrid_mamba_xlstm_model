@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Language-model evaluation: perplexity, bits per token, throughput and peak memory.
 
-Ported from the reference ``scripts/evaluate_lm.py``. Changes: the model is built from its yaml
-through ``HybridConfig.from_hydra`` (the reference hard-coded a kwarg list -- the FM5 bug class);
+Ported from the upstream reference implementation's ``scripts/evaluate_lm.py``. Changes: the model is built from its yaml
+through ``HybridConfig.from_hydra`` (the upstream implementation hard-coded a kwarg list, so a config key could silently not reach the model);
 the checkpoint loads through the guarded loader (>50% missing keys is a hard failure; the
-reference only warned, defect 13) and the architecture read off the checkpoint must equal the
+upstream implementation only warned) and the architecture read off the checkpoint must equal the
 yaml's; data is a packed parquet shard (``input_ids``, optional ``doc_ids``) or ``synthetic``;
 the metric is called bits per token, which is what ``loss / ln 2`` is.
 

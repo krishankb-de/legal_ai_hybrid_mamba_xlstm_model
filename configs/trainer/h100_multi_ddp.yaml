@@ -1,5 +1,5 @@
 # Four H100 on one node, DDP. The strategy object is built in code as
-# DDPStrategy(find_unused_parameters=False, gradient_as_bucket_view=True): the reference's
+# DDPStrategy(find_unused_parameters=False, gradient_as_bucket_view=True): the upstream
 # `find_unused_parameters` key here was never read (its entry point passed the string "ddp").
 # Under DDP, max_steps counts GLOBAL optimizer steps, so tokens per step scale with `devices`.
 accelerator: gpu
@@ -10,7 +10,7 @@ strategy: ddp
 compile_model: false
 max_epochs: -1
 max_steps: 20000
-# P6 stage A ends at a checkpoint step inside the max_steps horizon (WSD over the combined A+B
+# Stage A of pretraining ends at a checkpoint step inside the max_steps horizon (WSD over the combined A+B
 # horizon; scripts/train_pretrain.py check_stage_keys). null: train to max_steps.
 stop_at_step: null
 val_every_opt_steps: 1000

@@ -1,6 +1,6 @@
-# Continuous integration (plan §8.4). Runs on every push and pull request; the network smoke and
-# the macOS clean install run weekly and on demand. GPU and multi-GPU tests cannot run on GitHub's
-# runners and run on the aisc cluster instead (scripts/slurm/gpu_tests.sh, multigpu_tests.sh).
+# Continuous integration. Runs on every push and pull request; the network smoke and the macOS
+# clean install run weekly and on demand. GPU and multi-GPU tests cannot run on GitHub's runners
+# and run on the GPU cluster instead (scripts/slurm/gpu_tests.sh, multigpu_tests.sh).
 #
 # Every job installs with `uv sync --locked`: the environment is exactly uv.lock -- on Linux that is
 # torch 2.11.0+cu128, the same build the cluster runs (executed on CPU here). No job uses pip.
@@ -41,8 +41,6 @@ jobs:
       # Before anything is installed, the checkout is exactly what was pushed: no venv, no caches.
       - name: Pushed tree is clean (size, data, secrets, case collisions, CRLF, critical files)
         run: python3 scripts/check_repo_hygiene.py --ci
-      - name: Plan and state are consistent
-        run: python3 scripts/plan_state.py check
 
   lint:
     name: lint (lock, ruff, shell, workflow)
@@ -55,7 +53,7 @@ jobs:
           enable-cache: true
       - name: uv.lock is up to date with pyproject.toml
         run: uv lock --check
-      - name: the scrub environment's lock is up to date (decision 22)
+      - name: the scrub environment's lock is up to date
         run: uv lock --check --project envs/scrub
       - name: Install the locked dev tools only
         run: uv sync --locked --only-group dev
@@ -88,7 +86,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       # The runner has ~86 GB free and the CUDA build of torch needs ~7 GB, so nothing is deleted
-      # (deleting runner toolchains once took 6+ minutes, run 36322586655). Report it instead.
+      # (deleting runner toolchains takes 6+ minutes). Report it instead.
       - name: Disk space before the CUDA build of torch
         run: df -h /
       - uses: astral-sh/setup-uv@v6
@@ -117,7 +115,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       # The runner has ~86 GB free and the CUDA build of torch needs ~7 GB, so nothing is deleted
-      # (deleting runner toolchains once took 6+ minutes, run 36322586655). Report it instead.
+      # (deleting runner toolchains takes 6+ minutes). Report it instead.
       - name: Disk space before the CUDA build of torch
         run: df -h /
       - uses: astral-sh/setup-uv@v6
@@ -161,7 +159,7 @@ jobs:
         run: uv sync --locked
       - name: Environment equals the lock
         run: .venv/bin/python scripts/check_env.py
-      - name: validate.sh (the gate a code box is ticked on)
+      - name: validate.sh (the fast local selection)
         run: bash scripts/validate.sh
 
   network:
@@ -176,7 +174,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       # The runner has ~86 GB free and the CUDA build of torch needs ~7 GB, so nothing is deleted
-      # (deleting runner toolchains once took 6+ minutes, run 36322586655). Report it instead.
+      # (deleting runner toolchains takes 6+ minutes). Report it instead.
       - name: Disk space before the CUDA build of torch
         run: df -h /
       - uses: astral-sh/setup-uv@v6
@@ -184,10 +182,10 @@ jobs:
           enable-cache: true
       - name: Install the locked environment
         run: uv sync --locked
-      - name: pytest -m network (collectors against the live sources, from P3)
+      - name: pytest -m network (collectors against the live sources)
         run: |
           set +e
           .venv/bin/python -m pytest tests/ -m network -q
           rc=$?
-          if [ "$rc" -eq 5 ]; then echo "no network tests collected yet (they arrive with the P3 collectors)"; exit 0; fi
+          if [ "$rc" -eq 5 ]; then echo "no network tests collected"; exit 0; fi
           exit "$rc"

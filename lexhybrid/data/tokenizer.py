@@ -1,9 +1,9 @@
-"""The student's tokenizer: Qwen3's own, plus the SFT pointer specials (plan P3-C, decisions 6-7).
+"""The student's tokenizer: Qwen3's own, plus the SFT pointer specials.
 
 ``Qwen/Qwen3-1.7B-Base``'s tokenizer (pinned revision; Apache-2.0) has 151,669 entries; its EOS,
 ``<|endoftext|>`` = 151,643, ends every document, so the teacher's KD target at a document end is
 meaningful and no new EOS is added. The student's embedding has ``VOCAB_SIZE`` = 151,936 rows (the
-teacher's padded size), which leaves 267 free ids; decision 7's 87 specials take ids 151,669 to
+teacher's padded size), which leaves 267 free ids; the 87 specials take ids 151,669 to
 151,755 and appear only in SFT data, never in pretraining or KD:
 
     <|q|> <|cite|> <|c1|>..<|c16|> <|s1|>..<|s64|> <|unanswerable|> <|passage|> <|/passage|>
@@ -26,7 +26,7 @@ QWEN3_REVISION = "ea980cb0a6c2ae4b936e82123acc929f1cec04c1"  # main on 2026-09-2
 EOS_TOKEN = "<|endoftext|>"
 EOS_ID = 151643
 BASE_LEN = 151669  # Qwen3's tokenizer before the specials
-VOCAB_SIZE = 151936  # the student's embedding rows (decision 6)
+VOCAB_SIZE = 151936  # the student's embedding rows
 N_PASSAGES, N_SENTENCES = 16, 64
 SPECIALS = (
     "<|q|>",
@@ -52,7 +52,7 @@ def cache_dir() -> str | None:
 
 
 def load_tokenizer(with_specials: bool = True, name: str = QWEN3_TOKENIZER, revision: str = QWEN3_REVISION):
-    """Qwen3's tokenizer, with decision 7's specials unless ``with_specials=False``.
+    """Qwen3's tokenizer, with the pointer specials unless ``with_specials=False``.
 
     Raises ``ValueError`` if the EOS is not id 151,643 or the vocabulary outgrows the student's
     embedding, and ``OSError`` if the files are neither cached nor downloadable (offline)."""

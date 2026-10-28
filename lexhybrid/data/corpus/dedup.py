@@ -1,4 +1,4 @@
-"""Deduplication of the training corpus (plan P3-S; decision 13): exact, then near-duplicate.
+"""Deduplication of the training corpus: exact, then near-duplicate.
 
 1. **Exact.** Documents with the same text hash (``Document.sha256``) are one document.
 2. **Near.** ``datasketch`` MinHash over lowercased word 5-gram shingles, 128 permutations, and an LSH
@@ -9,19 +9,19 @@
 documents are visited commercial-safe first, then research-only, then by source and id, and the
 first copy of a group is kept, so a run gives the same answer every time.
 
-**Across sources every copy is kept** (decision 13 as amended by the user on 2026-09-29: "keep both
+**Across sources every copy is kept** ("keep both
 and when cited cite both"): the RII and the OLDP copy of a decision, a web page in FineWeb that
 reproduces a statute, the Multi Legal Pile copy of an OLDP decision (research arm only) -- each is
 packed with its own source, and the log links it to the copy it matches, so the retrieval index can
-group the copies and a citation can name every source (P7). The log (``DedupLog``) names every
+group the copies and a citation can name every source. The log (``DedupLog``) names every
 dropped document and every linked copy (``dropped`` False), the document it matches, the kind and
 the estimate.
 
 This deduplicates **training** data. Versions of one provision (RIS, Fedlex) are near-duplicates by
-design and are collapsed here (they share a source); the retrieval index (P7) is built from the
+design and are collapsed here (they share a source); the retrieval index is built from the
 collected documents, not from this output, so every version stays retrievable.
 
-At corpus scale (P4-L) the texts do not fit in memory: ``signature`` reduces a document to what
+At corpus scale the texts do not fit in memory: ``signature`` reduces a document to what
 the decisions need -- its visiting order, id, source, text hash and 128 MinHash values (512 bytes) -- and
 ``deduplicate_stream`` computes the signatures in worker processes, then runs the same decisions
 (``deduplicate_signatures``) over them. ``deduplicate`` is that procedure over a list.
@@ -47,7 +47,7 @@ class DedupLog:
     duplicate_of: str
     kind: str  # "exact" or "near"
     jaccard: float  # 1.0 for exact duplicates; the MinHash estimate for near ones
-    dropped: bool = True  # False: a copy in another source, kept and linked (decision 13 as amended)
+    dropped: bool = True  # False: a copy in another source, kept and linked
 
 
 def shingles(text: str, n: int = SHINGLE) -> set[str]:
@@ -98,7 +98,7 @@ def deduplicate_signatures(
     signatures = list(signatures)
     counts = Counter(s.id for s in signatures)  # ids carry their source: "<source>:..."
     repeated = sorted(i for i, n in counts.items() if n > 1)
-    if repeated:  # the index, the drop list and the split all key on ids (job 2594824)
+    if repeated:  # the index, the drop list and the split all key on ids
         raise ValueError(f"{len(repeated)} document ids occur more than once: {repeated[:10]}")
     scheme = MinHash(num_perm=num_perm, seed=1).scheme  # the scheme ``minhash`` hashes with
     kept: list[str] = []

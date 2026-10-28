@@ -1,8 +1,8 @@
 """Seeded random-token rows with packed-document ids, for smoke tests and profiling.
 
 Rows look like real packed pretraining rows: documents of random length separated by an EOS id,
-with ``doc_ids`` incremented after each EOS (the convention of ``lexhybrid/data/packing.py`` in
-P3), so every code path that consumes ``doc_ids`` is exercised without any data on disk.
+with ``doc_ids`` incremented after each EOS (the convention of ``lexhybrid/data/packing.py``),
+so every code path that consumes ``doc_ids`` is exercised without any data on disk.
 """
 
 import torch

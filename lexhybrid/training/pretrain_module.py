@@ -1,6 +1,6 @@
-"""Pretraining Lightning module: slab-wise CE, optional logit KD, MTP, and a real NaN guard (P2-U).
+"""Pretraining Lightning module: slab-wise CE, optional logit KD, MTP, and a real NaN guard.
 
-Differences from the reference's stage-0 distillation module (defect 12):
+Differences from the reference's stage-0 distillation module:
 
 * The loss is ``lexhybrid.training.distill.slab_ce_kl`` over ``model.backbone`` and ``model.head``:
   (B, L, V) logits never exist, the document-boundary mask applies to CE and KL alike, and a teacher
@@ -30,8 +30,8 @@ from lexhybrid.training.metrics import compute_perplexity
 class PretrainLightningModule(HybridLightningModule):
     """Args: those of ``HybridLightningModule`` plus
 
-    teacher: optional frozen Hugging Face causal LM (decision 8); None trains on CE alone.
-    kd_alpha, kd_temperature: decision 9 (0.5, 2.0).
+    teacher: optional frozen Hugging Face causal LM; None trains on CE alone.
+    kd_alpha, kd_temperature: KD weight and temperature (0.5, 2.0).
     loss_slab: positions per slab of the CE/KL computation.
     max_nan_skips: consecutive non-finite steps tolerated before the run is stopped.
     """

@@ -14,24 +14,23 @@
 #SBATCH --open-mode=append   # pot-hpi-aisc-batch is preemptible: without this a requeue TRUNCATES the log
 #SBATCH --requeue
 #
-# train_pretrain_1gpu.sh -- one run of scripts/train_pretrain.py (plan P5-B; port map §11.1, §11.2,
-# §11.4). The screen array (screen_array.sh), the 4-GPU wrapper (train_pretrain_4gpu.sh) and the
+# train_pretrain_1gpu.sh -- one run of scripts/train_pretrain.py. The screen array (screen_array.sh), the 4-GPU wrapper (train_pretrain_4gpu.sh) and the
 # probes delegate to this body with `bash`; their own #SBATCH header is the one SLURM reads.
-# Submit directly from the Mac:
+# Submit directly from your workstation:
 #   ssh $CLUSTER_HOST "cd $CLUSTER_REPO && MODEL_CONFIG=hybrid_legal_base SEED=42 sbatch scripts/slurm/train_pretrain_1gpu.sh"
 #
 # Levers (environment; unset ones leave the yaml's value):
 #   MODEL_CONFIG SEED DATASET_CONFIG TRAINER_CFG DISTILL_CFG(=none: CE only) EXPERIMENT NUM_GPUS
 #   SAVE_TOP_K CKPT_EVERY MAX_STEPS ACCUM VAL_EVERY BATCH_SIZE ROW_LEN COMPILE LR WARMUP GRAD_CLIP
 #   GRAD_CKPT STOP_AT (trainer.stop_at_step) TRAIN_SAMPLES (dataset.train_samples), and EXTRA_OVERRIDES (Hydra arguments, word-split, applied last: the last value wins).
-#   ARM_EXPECT / ARM_FORBID ("|"-separated): tokens the ARCH line must / must not show (FL1).
-# A requeued run resumes from $OUT/checkpoints/last.ckpt (defect 12: the reference restarted at 0).
-# INIT_FROM: a checkpoint to start from while the run has no last.ckpt of its own (P6 stage B starts
+#   ARM_EXPECT / ARM_FORBID ("|"-separated): tokens the ARCH line must / must not show.
+# A requeued run resumes from $OUT/checkpoints/last.ckpt (the upstream reference implementation restarted at 0).
+# INIT_FROM: a checkpoint to start from while the run has no last.ckpt of its own (pretraining stage B starts
 # from stage A's); once it has one, a requeue resumes from that.
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
 
-# Environment block, port map §11.2
+# Environment block
 SCRATCH_ROOT="${SCRATCH_ROOT:-/sc/scratch/$USER/lexhybrid}"
 export SCRATCH_ROOT   # configs/config.yaml places output_dir under it
 export HF_HOME="${SCRATCH_ROOT}/.hf"
@@ -53,23 +52,23 @@ MODEL_CONFIG="${MODEL_CONFIG:-hybrid_legal_base}"
 SEED="${SEED:-42}"
 DATASET_CONFIG="${DATASET_CONFIG:-mixture_pretrain}"
 TRAINER_CFG="${TRAINER_CFG:-h100_single_gpu}"
-DISTILL_CFG="${DISTILL_CFG:-qwen3_8b}"   # decisions.teacher (P4-U, 2026-10-01)
-# The 8B teacher fits only with gradient checkpointing: OOM without it at 4,096 x 8 (job 2589362),
-# 43.18 GB with it (job 2589417). An 8B run therefore checkpoints unless GRAD_CKPT says otherwise.
+DISTILL_CFG="${DISTILL_CFG:-qwen3_8b}"   # the teacher
+# The 8B teacher fits only with gradient checkpointing: OOM without it at 4,096 x 8,
+# 43.18 GB with it. An 8B run therefore checkpoints unless GRAD_CKPT says otherwise.
 if [[ "$DISTILL_CFG" == qwen3_8b ]]; then GRAD_CKPT="${GRAD_CKPT:-true}"; fi
-SAVE_TOP_K="${SAVE_TOP_K:-0}"             # R6: 0 on arms; pipeline runs pass 1 (+ last.ckpt)
+SAVE_TOP_K="${SAVE_TOP_K:-0}"             # 0 on arms; pipeline runs pass 1 (+ last.ckpt)
 CKPT_EVERY="${CKPT_EVERY:-1000}"
 EXPERIMENT="${EXPERIMENT:-pretrain_${MODEL_CONFIG}_s${SEED}}"
 OUT="${SCRATCH_ROOT}/outputs/${EXPERIMENT}"
 CKPT="${OUT}/checkpoints/last.ckpt"
 
-# R6: how full scratch is, before anything else
+# how full scratch is, before anything else
 du -sh "${SCRATCH_ROOT}/outputs" 2>/dev/null || echo "du: ${SCRATCH_ROOT}/outputs does not exist yet"
 echo "host: $(hostname)  job: ${SLURM_JOB_ID:-none}  array: ${SLURM_ARRAY_JOB_ID:-}_${SLURM_ARRAY_TASK_ID:-}  restart: ${SLURM_RESTART_COUNT:-0}"
 echo "sync_stamp: $(cat .sync_stamp 2>/dev/null || echo missing)"
 echo "experiment: $EXPERIMENT  model: $MODEL_CONFIG  seed: $SEED  trainer: $TRAINER_CFG  distill: $DISTILL_CFG  NUM_GPUS: $NUM_GPUS"
 echo "output_dir: $OUT"
-# A directive is not overridden by an environment variable (port map §11.1): the run needs the
+# A directive is not overridden by an environment variable: the run needs the
 # GPUs it is configured for, or it stops here.
 .venv/bin/python -c "import torch, sys; n = torch.cuda.device_count(); print('GPUs:', n, [torch.cuda.get_device_name(i) for i in range(n)]); sys.exit(0 if n >= int(sys.argv[1]) else 1)" "$NUM_GPUS" \
   || { echo "FATAL: fewer than NUM_GPUS=$NUM_GPUS CUDA devices visible"; exit 1; }
@@ -82,7 +81,7 @@ ARGS=(
   "experiment_name=${EXPERIMENT}" "output_dir=${OUT}"
 )
 # none: CE only. config.yaml already defaults to `distill: null`, and Hydra refuses `distill=null` as a
-# group override (job 2589359: "Config group override must be a string or a list. Got NoneType").
+# group override ("Config group override must be a string or a list. Got NoneType").
 if [[ "$DISTILL_CFG" != none ]]; then ARGS+=("distill=${DISTILL_CFG}"); fi
 opt() {  # hydra_key, value: passed only when the value is set
   if [[ -n "$2" ]]; then ARGS+=("$1=$2"); fi
@@ -102,20 +101,20 @@ opt dataset.train_samples "${TRAIN_SAMPLES:-}"
 read -r -a EXTRA <<< "${EXTRA_OVERRIDES:-}"   # one Hydra argument per word, applied last
 ARGS+=("${EXTRA[@]+"${EXTRA[@]}"}")
 
-# FL1: the ARCH line of the model these exact overrides build, checked before step 0.
+# The ARCH line of the model these exact overrides build, checked before step 0.
 ARCH_LINE="$(.venv/bin/python scripts/train_pretrain.py "${ARGS[@]}" +arch_only=true | grep '^ARCH ' | tail -n 1)" \
   || { echo "FATAL: no ARCH line from train_pretrain.py +arch_only=true"; exit 1; }
 echo "$ARCH_LINE"
 IFS='|' read -r -a EXPECT <<< "${ARM_EXPECT:-}"
 for tok in "${EXPECT[@]+"${EXPECT[@]}"}"; do
   if ! grep -qF -- "$tok" <<< "$ARCH_LINE"; then
-    echo "FATAL: ARCH line lacks '$tok' (a lever did not reach the model; FL1)"; exit 1
+    echo "FATAL: ARCH line lacks '$tok' (a lever did not reach the model)"; exit 1
   fi
 done
 IFS='|' read -r -a FORBID <<< "${ARM_FORBID:-}"
 for tok in "${FORBID[@]+"${FORBID[@]}"}"; do
   if grep -qF -- "$tok" <<< "$ARCH_LINE"; then
-    echo "FATAL: ARCH line shows forbidden '$tok' (FL1)"; exit 1
+    echo "FATAL: ARCH line shows forbidden '$tok'"; exit 1
   fi
 done
 echo "ARCH CHECK OK (${#EXPECT[@]} expected, ${#FORBID[@]} forbidden tokens)"

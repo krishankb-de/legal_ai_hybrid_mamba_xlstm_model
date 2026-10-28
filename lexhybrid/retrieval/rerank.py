@@ -1,10 +1,10 @@
-"""Cross-encoder reranking of fused candidates into the prompt's passages (plan P7-E).
+"""Cross-encoder reranking of fused candidates into the prompt's passages.
 
 The fused ranking's top ``candidates`` (50) are scored against the question by a cross-encoder,
 ``BAAI/bge-reranker-v2-m3`` in production. Chunks are then taken best first while two limits hold:
 at most ``max_chunks`` (8), and at most ``token_budget`` (4,096) tokens of passage text in total. A
 chunk that would overflow the budget is skipped, not cut, because a passage is quoted by
-sentence. The plan's lower bound of 3 chunks is what a normal question gets; a question with fewer
+sentence. A normal question gets at least 3 chunks; a question with fewer
 candidates, or whose candidates are long, gets fewer. ``select`` never pads with chunks that do
 not fit.
 
@@ -60,7 +60,7 @@ def select(
 
 
 def rerank_and_select(question: str, candidates: Sequence[Chunk], scorer: Scorer, **limits) -> list[Chunk]:
-    """P7-E's step from the fused top 50 to the 3-8 passages (<= 4K tokens) of the prompt."""
+    """The step from the fused top 50 to the 3-8 passages (<= 4K tokens) of the prompt."""
     select_keys = {k: limits.pop(k) for k in ("max_chunks", "token_budget") if k in limits}
     return select(rerank(question, candidates, scorer, **limits), **select_keys)
 

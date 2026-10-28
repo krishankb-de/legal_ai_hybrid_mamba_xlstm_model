@@ -1,4 +1,4 @@
-"""Pointer resolution (plan P7-H): every pointer of an answer names a passage and sentences that exist.
+"""Pointer resolution: every pointer of an answer names a passage and sentences that exist.
 
 The answer's pointers (``lexhybrid/renderer/segments.py``) are 1-based into the retrieved passages in
 prompt order, passage ``K`` being ``chunks[K - 1]``. The parser checks only their syntax; here each

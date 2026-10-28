@@ -1,7 +1,7 @@
 """float64 sequential oracle for the recurrence ``tfla_forward_parallel`` computes.
 
 Moved out of the reference test suite (``tests/test_mamba3_numerics.py::sequential_mlstm_fp64``)
-into the package so kernels, tests and the P2 boundary-masking work share one definition.
+into the package so kernels and tests share one definition.
 
     C_t[d,e] = f_t[d] C_{t-1}[d,e] + i_t[d] k_t[d] v_t[e]
     n_t[d]   = f_t[d] n_{t-1}[d]   + i_t[d] k_t[d]

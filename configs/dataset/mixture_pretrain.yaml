@@ -1,23 +1,23 @@
-# Pretraining mixture over packed shards (plan P3-V, decisions 2 and 13; P6 trains on it).
+# Pretraining mixture over packed shards.
 # Build the shards with scripts/build_shards.py (scrubbed, deduplicated, split by document).
 name: packed
 shards_root: ${oc.env:SCRATCH_ROOT,.}/data/shards
 row_len: 4096
-# commercial_safe: shippable (no research_only source may enter); research: decision 2's NC arm.
+# commercial_safe: shippable (no research_only source may enter); research: the non-commercial arm.
 arm: commercial_safe
 # Token shares of the groups; rows are fixed length, so row shares are token shares.
 groups:
   legal: 0.7
   general: 0.3
 # Weights within a group. `arm: research` marks a source that only the research arm admits.
-# The sources pack_corpus.sh packs (P4-M, job 2599735): the German market (decisions.market: ris,
-# fedlex, bger out) without eurlex (decisions.eurlex_training); a source without shards stops the run.
+# The sources pack_corpus.sh packs: German law only (ris,
+# fedlex, bger out) without eurlex; a source without shards stops the run.
 sources:
-# decisions.p6_source_weights (2026-10-20): square-root (temperature 0.5) sampling within legal, each
-# source capped at 4 passes over its training tokens at P6's 3.5 B legal tokens. The weights are the
+# Source weights: square-root (temperature 0.5) sampling within legal, each
+# source capped at 4 passes over its training tokens at 3.5 B legal tokens. The weights are the
 # commercial-safe arm's tokens per source, in millions: gii 4.00 passes, rii 1.53, oldp 0.59, dip 1.26
 # (and fineweb2_de 0.80 of 1.87 B). The research arm adds multilegalpile on the same square-root scale:
-# gii 2.97 passes, rii 1.14, oldp 0.44, dip 0.93, multilegalpile 0.65. The P5 screen (attempt 2) ran
+# gii 2.97 passes, rii 1.14, oldp 0.44, dip 0.93, multilegalpile 0.65. The architecture screen ran
 # on the old weights 1 / 1 / 1 / 0.5 (multilegalpile 1), which gave gii 20% of the rows: 29 passes at 5 B.
   gii: {group: legal, weight: 138.0}
   rii: {group: legal, weight: 699.7}

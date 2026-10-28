@@ -1,13 +1,12 @@
 """Configuration dataclass for the hybrid decoder.
 
 Ported from the reference package's ``models/configuration_hybrid.py`` (branch ``h100_efficiency``,
-HEAD ``900acee``). Phase ids in comments (M1-F, M2-F, FM5, Phase 9, ...) refer to the reference
-project's plans; ``Docs/REFERENCE_PORT_MAP.md`` summarises them.
+HEAD ``900acee``).
 
-P1 ports the dataclass faithfully, minus the fields that only served the medical retrieval and
+The dataclass follows the upstream one, minus the fields that only served its retrieval and
 report-generation stack (sLSTM, pooling, bidirectional encoding, projection-head dropout,
-``use_cache``, ``use_tfla``). Defaults are unchanged, including ``scan_impl``/``tfla_impl`` =
-``"legacy"``, so the P1 parity fixtures hold; P2 adds the legal defaults.
+``use_cache``, ``use_tfla``). The ``scan_impl``/``tfla_impl`` = ``"legacy"`` defaults match
+upstream so the parity fixtures hold; the legal defaults sit on top.
 """
 
 import dataclasses
@@ -26,7 +25,7 @@ class HybridConfig:
 
     One dataclass serves every architecture: ``layer_pattern`` selects the mixer of each block
     (cycled over ``num_layers``), and the per-mixer fields are only read by the mixers that use
-    them. ``from_hydra`` is the only way the training entry points build it (FM5).
+    them. ``from_hydra`` is the only way the training entry points build it.
     """
 
     # Architecture
@@ -41,34 +40,34 @@ class HybridConfig:
     expand_factor: int = 2
     dt_rank: int | None = None  # dim // 16 when None
     use_fast_path: bool = True
-    # M1: all four default to the reference's historical behaviour, so adding them changed nothing.
+    # All four default to the reference's historical behaviour, so adding them changed nothing.
     scan_impl: str = "legacy"  # "legacy" | "exact"
     dt_init_strategy: str = "none"  # "none" | "mamba" (reference logU[dt_min, dt_max] init)
     dt_min: float = 1e-3
     dt_max: float = 1e-1
-    tfla_impl: str = "legacy"  # "legacy" | "exact" -- the mLSTM counterpart (M1-H)
+    tfla_impl: str = "legacy"  # "legacy" | "exact" -- the mLSTM counterpart
     # What exact TFLA does when a chunk's log-decay is too wide for the fp32 factorisation
-    # (defect 9, P2-C): "error" (default: the model must be configured so the fast path holds) or
+    # "error" (default: the model must be configured so the fast path holds) or
     # "sequential" (exact, slow).
     tfla_fallback: str = "error"
 
-    # Mamba-3 (M2). Every flag defaults to the Mamba-2 reduction, so a `mamba3` layer built from
+    # Mamba-3. Every flag defaults to the Mamba-2 reduction, so a `mamba3` layer built from
     # defaults is exactly Mamba-2 SSD and each arm moves one variable.
     mamba3_d_state: int = 128
     mamba3_head_dim: int = 64
-    # Mamba-3's own inner expansion (defect 4, P2-A): it used to read the Mamba-1 `expand_factor`,
+    # Mamba-3's own inner expansion: it used to read the Mamba-1 `expand_factor`,
     # so widening the legacy mixer silently widened every Mamba-3 layer too.
     mamba3_expand_factor: int = 2
     mamba3_ngroups: int = 1  # >1 leaves the parameter-matched regime
     mamba3_chunk_size: int = 64
     mamba3_use_conv: bool = True
     mamba3_conv_size: int = 4
-    mamba3_use_trapezoid: bool = False  # paper Sec 3.1 (M3)
-    mamba3_use_rope: bool = False  # paper Sec 3.2 (M4)
+    mamba3_use_trapezoid: bool = False  # paper Sec 3.1
+    mamba3_use_rope: bool = False  # paper Sec 3.2
     mamba3_rope_fraction: float = 0.5
     # theta_max bounds the per-token angular rate: theta = theta_max * tanh(proj(x)), and the
-    # rotation angle is Delta_t * theta_t. It was missing from the reference dataclass until
-    # 2026-09-06, so the block default of 1.0 was the only value its screen could run: with
+    # rotation angle is Delta_t * theta_t. It was missing from the upstream dataclass for a
+    # while, so the block default of 1.0 was the only value its screen could run: with
     # dt_limit=1.0 that is 1 rad/token, 81 full turns over 512 tokens, and every rope-on arm
     # collapsed to ~1166 val PPL. A relative rotation is a positional signal only inside one turn.
     mamba3_theta_max: float = 1.0
@@ -76,7 +75,7 @@ class HybridConfig:
     mamba3_dt_min: float = 1e-3
     mamba3_dt_max: float = 1e-1
     mamba3_dt_init_floor: float = 1e-4
-    mamba3_bc_bias: str = "none"  # "none" | "zero_init" | "one_init" (paper Sec 3.4, M5)
+    mamba3_bc_bias: str = "none"  # "none" | "zero_init" | "one_init" (paper Sec 3.4)
     mamba3_mimo_rank: int = 1  # plumbed, never run
     mamba3_a_mode: str = "static"  # "static" (Mamba-2) | "data_dependent" (Mamba-3)
     mamba3_a_floor: float = 1e-4
@@ -89,20 +88,20 @@ class HybridConfig:
     proj_factor: int = 2
     mlstm_gate_soft_cap: float = 15.0
     mlstm_input_gate_bias_init: float = -10.0
-    # 3.0 (P2-C, decision 10): f = sigmoid(3) = 0.95 at init keeps exact TFLA factorised at chunk
+    # 3.0: f = sigmoid(3) = 0.95 at init keeps exact TFLA factorised at chunk
     # 128 (half-range 3.1). The reference's 0.0 gave f = 0.5 and half-range 44.4 > 40, i.e. the slow
-    # fallback from step 0 -- invisible until P2-B, because the model init zeroed the bias anyway.
+    # fallback from step 0 -- invisible while the model init zeroed the bias anyway.
     mlstm_forget_gate_bias_init: float = 3.0
-    # TFLA chunk length (defect 9, P2-A/P2-C): the reference picked 32/64/128 from the sequence
+    # TFLA chunk length: the reference picked 32/64/128 from the sequence
     # length inside the kernel, so the trained operator changed with the row length.
     mlstm_chunk_size: int = 128
 
     # Attention parameters
     attn_dropout: float = 0.0
-    # 500,000 (P2-H, decision 10). The reference's 10,000 is a Llama-1 setting: its slowest RoPE
+    # 500,000. The reference's 10,000 is a Llama-1 setting: its slowest RoPE
     # frequency completes a turn in ~63K tokens and separates distant offsets poorly at 8K+ rows.
     rope_theta: float = 500000.0
-    # Packed-row attention kernel (P2-J): "flex" (FlexAttention block mask from doc_ids), "sdpa"
+    # Packed-row attention kernel: "flex" (FlexAttention block mask from doc_ids), "sdpa"
     # (dense (B,1,L,L) mask), "auto" (flex on CUDA, dense on CPU).
     attn_impl: str = "auto"
 
@@ -120,11 +119,11 @@ class HybridConfig:
     dropout: float = 0.1
     initializer_range: float = 0.02
 
-    # Output head. Tied by default (P2-M, decision 10): at the Qwen3 vocabulary the untied head is
+    # Output head. Tied by default: at the Qwen3 vocabulary the untied head is
     # another 116.7M parameters, more than the whole non-embedding backbone.
     tie_word_embeddings: bool = True
 
-    # Multi-token prediction (P2-S, screen arm S4): mtp_n tokens predicted per position; 1 is off.
+    # Multi-token prediction: mtp_n tokens predicted per position; 1 is off.
     # mtp_n = 2 adds one sequential depth (DeepSeek-V3 style) sharing the embedding and the head.
     mtp_n: int = 1
     mtp_loss_weight: float = 0.3
@@ -149,8 +148,8 @@ class HybridConfig:
                     f"Invalid layer type '{layer_type}'. Must be one of {set(VALID_LAYER_TYPES)}"
                 )
 
-        # M1-F: norm_topology used to be unvalidated, so a typo silently behaved as "pre_rms" --
-        # the silent-drop class that cost the reference project a run in Phase 9.
+        # norm_topology used to be unvalidated, so a typo silently behaved as "pre_rms" --
+        # the silent-drop class that cost an upstream training run.
         if self.norm_topology not in ("pre_rms", "hybrid", "hybrid_bc"):
             raise ValueError(
                 f"norm_topology must be 'pre_rms', 'hybrid' or 'hybrid_bc', got {self.norm_topology!r}"
@@ -247,11 +246,11 @@ class HybridConfig:
     def from_hydra(cls, model_cfg, **overrides) -> "HybridConfig":
         """Build a config from a Hydra ``cfg.model`` node, keeping every field the dataclass has.
 
-        M2-F / FM5. Every training entry point in the reference used to spell out ~25
+        Every training entry point in the reference used to spell out ~25
         ``field=cfg.model.field`` lines by hand, so a new field silently fell back to its default
-        unless all twelve were edited. It happened twice: ``norm_topology`` in Phase 9, and on
-        2026-09-06 ``scan_impl``/``tfla_impl``/``dt_init_strategy`` reached the yaml but not the
-        model (job 2513007 trained an arm with its defects intact; only the ARCH fingerprint
+        unless all twelve were edited. It happened twice: ``norm_topology``, and later
+        ``scan_impl``/``tfla_impl``/``dt_init_strategy`` reached the yaml but not the
+        model (a run trained with the old defects intact; only the ARCH fingerprint
         caught it). Filtering against ``dataclasses.fields`` removes the class of bug: a field
         added to the dataclass and set in a yaml arrives with no further wiring.
 

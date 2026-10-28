@@ -11,7 +11,7 @@
 #SBATCH --error=logs/%x_%j.log
 #
 # screen_metrics.sh -- the screen runs' validation PPL and training curves, read from the TensorBoard
-# events under outputs/ on scratch into this log (scripts/screen_metrics.py; P5-D, P5-F). CPU only.
+# events under outputs/ on scratch into this log (scripts/screen_metrics.py). CPU only.
 #   ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch scripts/slurm/screen_metrics.sh"
 # PREFIX (default screen_) picks the run directories; WINDOW (default 250) the steps per CURVE row;
 # DUMP (a tag regex) and STEPS (A-B) print every value of the matching tags, e.g. for diag_spike.sh:

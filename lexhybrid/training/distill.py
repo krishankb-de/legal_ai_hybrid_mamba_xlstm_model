@@ -1,9 +1,9 @@
-"""Online logit distillation from an open teacher (plan P2-T, decision 9).
+"""Online logit distillation from an open teacher.
 
     loss = (1 - alpha) * CE(student, labels) + alpha * T^2 * KL(softmax(teacher / T) || softmax(student / T))
 
 with alpha = 0.5 and T = 2 by default. Both terms are means over the same supervised positions: the
-document-boundary label mask of P2-L applies to the KL too, because at a document's last token
+document-boundary label mask of the main loss applies to the KL too, because at a document's last token
 neither model should be graded on the next document's first.
 
 The reference distilled mean-pooled hidden-state cosine; logit KL at a 151,936-token vocabulary is
@@ -46,7 +46,7 @@ def teacher_forward_packed(
 ) -> torch.Tensor:
     """The teacher's final hidden states (after its final norm), (B, L, D_teacher), without logits.
 
-    ``teacher`` is a Hugging Face causal LM (``Qwen3ForCausalLM`` for the plan's
+    ``teacher`` is a Hugging Face causal LM (``Qwen3ForCausalLM`` for
     ``Qwen/Qwen3-1.7B-Base``); its decoder is called directly so the (B, L, V) logits are never
     formed here -- ``slab_ce_kl`` applies ``teacher.get_output_embeddings()`` slab by slab.
     """
@@ -93,7 +93,7 @@ def slab_ce_kl(
         teacher_hidden: (B, L, D_t) from ``teacher_forward_packed`` at the same positions, or None
             for plain CE (``alpha`` is then ignored).
         teacher_lm_head: the teacher's output layer.
-        alpha, T: decision 9's weight and temperature.
+        alpha, T: KD weight and temperature.
         slab: positions per slab.
 
     Returns:

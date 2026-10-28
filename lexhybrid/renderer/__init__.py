@@ -1,1 +1,1 @@
-"""renderer (built in P7)."""
+"""Renderer: pointer answers to the text a reader sees."""

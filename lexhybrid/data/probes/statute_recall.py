@@ -1,4 +1,4 @@
-"""Statute recall (plan P3-W): read a provision, read more law, then reproduce its Absatz 2 verbatim.
+"""Statute recall: read a provision, read more law, then reproduce its Absatz 2 verbatim.
 
 An item is built from a statute ``Document`` with an Absatz 2 section: the prompt is the provision
 itself, then other provisions (seeded order) until the prompt reaches ``context_tokens`` less the
@@ -61,7 +61,7 @@ def build_items(
 
     ``max_items`` stops after that many items, which equals ``build_items(...)[:max_items]``. Without
     it every statute of the corpus is built, and each item copies and shuffles the whole statute
-    list, which is quadratic: hours at gii's size (P5-G)."""
+    list, which is quadratic: hours at gii's size."""
     statutes = [d for d in documents if d.doc_type in ("statute", "regulation")]
     items = []
     for doc in statutes:
@@ -114,6 +114,6 @@ def score(
     return {
         "exact_match": sum(em) / k if k else float("nan"),
         "char_f1": sum(f1) / k if k else float("nan"),
-        "gold_nll": sum(nll) / k if k else float("nan"),  # decisions.p6_probe_scores; lower is better
+        "gold_nll": sum(nll) / k if k else float("nan"),  # lower is better
         "items": k,
     }

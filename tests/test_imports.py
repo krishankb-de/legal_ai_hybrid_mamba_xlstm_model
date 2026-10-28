@@ -1,6 +1,6 @@
 """Every module imports, and every internal import names the file with its exact on-disk case.
 
-macOS filesystems are case-insensitive, so `from lexhybrid.Layers import ...` works on the Mac and
+macOS filesystems are case-insensitive, so `from lexhybrid.Layers import ...` works on macOS and
 fails on Linux (CI, the cluster). Checking the case here catches it before the push.
 """
 

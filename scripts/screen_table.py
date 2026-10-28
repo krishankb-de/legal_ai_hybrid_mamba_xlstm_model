@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""The P5 screen's seed table, per-arm means and the pre-registered decision rule (P5-F, P5-H, P5-I).
+"""The architecture screen's seed table, per-arm means and the decision rule.
 
     .venv/bin/python scripts/screen_table.py --prefix screen2_ \\
-        --val-logs cluster/logs/screen_metrics_2662834.log cluster/logs/screen_metrics_2662842.log \\
-        --train-logs cluster/logs/screen_2637454_*.log cluster/logs/screen_2637455_*.log ... \\
-        --eval-dirs cluster/logs/eval_2663318 cluster/logs/eval_2663319 --bar 0.10
+        --val-logs cluster/logs/screen_metrics_<jobid>.log cluster/logs/screen_metrics_<jobid>.log \\
+        --train-logs cluster/logs/screen_<jobid>_*.log cluster/logs/screen_<jobid>_*.log ... \\
+        --eval-dirs cluster/logs/eval_<jobid> cluster/logs/eval_<jobid> --bar 0.10
 
 Assembles every column from the job outputs, so nothing is copied by hand:
 
 * val PPL: the ``val_ppl`` of the run's validation at ``--final-step`` (``VAL`` lines of
   ``screen_metrics.py``, which computes exp(``val_loss``) at full precision; a later log wins for
   the same run);
-* late-25% PPL (``decisions.late25_ppl``): ``late_doc_ppl`` of ``<run>.valppl.json``, ``late_row_ppl``
+* late-25% PPL: ``late_doc_ppl`` of ``<run>.valppl.json``, ``late_row_ppl``
   beside it;
 * MQAR accuracy, statute-recall exact match (the probe's score: Absatz 2 reproduced verbatim) with
   char-F1 beside it, multi-hop exact match: ``<run>.probes.json``;
@@ -20,7 +20,7 @@ Assembles every column from the job outputs, so nothing is copied by hand:
   several legs (a continuation after a TIMEOUT) gets the step-weighted mean s/step and the largest
   peak.
 
-Then the rule as written in the plan, with the bar from P5-D: the simplest arm, S1, advances unless
+Then the decision rule, with the bar given by ``--bar``: the simplest arm, S1, advances unless
 another arm beats it on the two-seed mean val PPL by more than the bar and does not lose
 statute-recall or multi-hop by more than the bar. A lever that wins PPL but loses recall is
 recorded and not adopted. An arm missing a column is reported as incomplete, never decided.
@@ -148,7 +148,7 @@ def apply_rule(means: dict, bar: float, base: str = "S1") -> list[str]:
         if beats and not loses:
             adopt.append(arm)
     lines.append(f"RULE winner: {base} (no lever beats it as the rule requires)" if not adopt
-                 else f"RULE candidates over {base}: {', '.join(adopt)} (more than one: the user decides)" if len(adopt) > 1
+                 else f"RULE candidates over {base}: {', '.join(adopt)} (more than one: choose manually)" if len(adopt) > 1
                  else f"RULE winner: {adopt[0]}")  # fmt: skip
     return lines
 
@@ -181,7 +181,12 @@ def main(argv=None) -> int:
     ap.add_argument("--val-logs", nargs="*", default=[])
     ap.add_argument("--train-logs", nargs="*", default=[])
     ap.add_argument("--eval-dirs", nargs="*", default=[])
-    ap.add_argument("--bar", type=float, required=True, help="pre_registered.P5.bar_value")
+    ap.add_argument(
+        "--bar",
+        type=float,
+        required=True,
+        help="margin: an arm must beat S1's val PPL by more than this and lose no probe by more than this",
+    )
     ap.add_argument("--final-step", type=int, default=11999)
     args = ap.parse_args(argv)
     rows = build_rows(

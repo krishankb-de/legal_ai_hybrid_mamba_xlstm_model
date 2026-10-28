@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Parameter counts of the legal model configs (plan P2-W) -> ``analysis/param_counts.md``.
+"""Parameter counts of the legal model configs -> ``analysis/param_counts.md``.
 
     .venv/bin/python scripts/param_counts.py            # print the table
     .venv/bin/python scripts/param_counts.py --write    # (re)write analysis/param_counts.md
     .venv/bin/python scripts/param_counts.py --check    # exit 1 if the file is stale
 
-Models are built on the ``meta`` device, so no weights are allocated. Counts follow decision 11:
+Models are built on the ``meta`` device, so no weights are allocated. Counts follow this convention:
 ``non_embedding = total - embedding - (lm_head if untied)``. The MTP head is training-only (it is
 discarded at inference), so it is reported in its own column and left out of the inference counts
 the parameter bands compare. ``tests/test_config_invariants.py::test_param_bands`` asserts the bands
@@ -27,8 +27,8 @@ BASE = "hybrid_legal_base"
 # (config, role) in table order.
 CONFIGS = [
     ("hybrid_legal_base", "base; screen arm S1 (control)"),
-    ("transformer_legal_base", "matched Transformer (plan §4)"),
-    ("hybrid_legal_legacy", "legacy-operator ablation (decision 17; arm S5)"),
+    ("transformer_legal_base", "matched Transformer"),
+    ("hybrid_legal_legacy", "legacy-operator ablation (arm S5)"),
     ("hybrid_legal_attn0", "screen arm S0: no attention"),
     ("hybrid_legal_attn4", "screen arm S2: four attention layers"),
     ("hybrid_legal_ds64", "screen arm S3: Mamba-3 d_state 64"),
@@ -65,8 +65,8 @@ def render(rows: list[dict]) -> str:
         "# Parameter counts of the legal model configs",
         "",
         "> Computed from the model definitions by `scripts/param_counts.py` (models built on the `meta`",
-        "> device; no job, no measurement). `tests/test_config_invariants.py::test_param_bands` fails if",
-        "> this file is stale and asserts the plan's bands (P2-W). Counts follow decision 11:",
+        "> device, so nothing is allocated). `tests/test_config_invariants.py::test_param_bands` fails if",
+        "> this file is stale and asserts the parameter bands. Counts follow this convention:",
         "> non-embedding = total - embedding - (lm_head if untied). The MTP head is training-only and is",
         "> reported in its own column, outside the inference counts.",
         "",
@@ -81,10 +81,9 @@ def render(rows: list[dict]) -> str:
         )
     lines += [
         "",
-        "Bands (P2-W): Transformer within ±2.5% of the base; each screen variant within ±3%, its delta",
-        "reported. The legacy ablation (S5) was pre-registered at <= 1% but measures +2.36% for the",
-        "9 x mamba + 3 x mlstm shape; by the user's decision of 2026-09-27 (plan §14) it is reported as a",
-        "stated difference inside ±2.5%, not reshaped: S5 measures the old recipe, PPL/probe-only, and",
+        "Bands: Transformer within ±2.5% of the base; each screen variant within ±3%, its delta",
+        "reported. The legacy ablation (S5) measures +2.36% for its 9 x mamba + 3 x mlstm shape and is",
+        "reported as a stated difference within ±2.5% rather than reshaped: S5 measures the old recipe, PPL/probe-only, and",
         "the difference favours legacy, so a hybrid win is conservative and a legacy win inside the",
         "margin is inconclusive.",
         "",

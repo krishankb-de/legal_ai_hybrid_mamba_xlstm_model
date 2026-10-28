@@ -1,4 +1,4 @@
-"""FineWeb-2 German (``deu_Latn``): general-German web text, the replay share of the mixture (plan P3-N).
+"""FineWeb-2 German (``deu_Latn``): general-German web text, the replay share of the mixture.
 
 Source: the Hugging Face dataset ``HuggingFaceFW/fineweb-2``, config ``deu_Latn``, streamed with
 ``datasets`` (nothing is downloaded beyond the rows read). A row is one CommonCrawl page after
@@ -7,7 +7,7 @@ FineWeb-2's extraction, filtering and deduplication: ``text`` (paragraphs separa
 
 One ``Document`` per page: ``doc_type=general``, ``jurisdiction=DE`` (the schema's convention for
 general-German text), no citation id, one section per paragraph, ``valid_from`` = the crawl date.
-The dataset's own order is oldest crawl first, so a capped collection (P4-K takes a few million of
+The dataset's own order is oldest crawl first, so a capped collection (a few million of
 its pages, the replay share of the token budget) would come from one crawl: the stream is shuffled
 with a seed -- the order of its files, then a buffer of rows -- so the pages sample across dumps.
 Licence: ODC-By 1.0, and CommonCrawl's terms of use apply (register row ``fineweb2_de``).

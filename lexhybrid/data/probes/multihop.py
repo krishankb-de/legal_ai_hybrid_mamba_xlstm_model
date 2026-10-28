@@ -1,4 +1,4 @@
-"""Two-hop cross-reference probe (plan P3-X): the answer needs both passages.
+"""Two-hop cross-reference probe: the answer needs both passages.
 
 An item takes a provision A that refers to exactly one other provision B of the same act
 (``§ 280 Abs. 1`` inside the BGB, ``Art. 97`` inside the OR, ``Artikel 6`` inside the GDPR) and
@@ -129,7 +129,7 @@ def score(
     model, items: Sequence[MultihopItem], encode, decode, device: str = "cpu", max_new_tokens: int = 32
 ) -> dict:
     """Exact match of the first line of a greedy continuation against the title, and the title's
-    teacher-forced per-token NLL after the question (``gold_nll``, decisions.p6_probe_scores)."""
+    teacher-forced per-token NLL after the question (``gold_nll``)."""
     from lexhybrid.data.probes.likelihood import gold_nll
     from lexhybrid.decoding.generate import greedy, greedy_cached
 

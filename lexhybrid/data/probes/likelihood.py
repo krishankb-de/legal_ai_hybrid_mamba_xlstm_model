@@ -1,7 +1,6 @@
-"""Gold-answer likelihood: a continuous probe score that an exact-match floor cannot hide
-(``decisions.p6_probe_scores``, pre-registered 2026-10-20 before any P6 result).
+"""Gold-answer likelihood: a continuous probe score that an exact-match floor cannot hide.
 
-In all 14 P5 runs, statute recall and multi-hop scored 0.000 by exact match: a 220M model at
+In the screening runs, statute recall and multi-hop scored 0.000 by exact match: a 220M model at
 393M tokens does not reproduce an Absatz verbatim, nor answer the two-hop question exactly. The
 teacher-forced negative log-likelihood of the reference answer after the prompt moves before exact
 match does. Lower is better, and a model that has learned to copy from far back in the context

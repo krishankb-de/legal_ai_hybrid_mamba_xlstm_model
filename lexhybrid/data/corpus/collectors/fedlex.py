@@ -1,4 +1,4 @@
-"""Fedlex: Swiss federal law, the classified compilation (SR), in German (plan P3-K).
+"""Fedlex: Swiss federal law, the classified compilation (SR), in German.
 
 Source: the Federal Chancellery's linked-data platform. Its SPARQL endpoint
 ``https://fedlex.data.admin.ch/sparqlendpoint`` (JOLux ontology) lists every act of the SR
@@ -17,7 +17,7 @@ carries the SR number, the German title and abbreviation, and the version's date
 One ``Document`` per article (``OR Art. 97``); its sections are the Absätze (``Art. 97 Abs. 1``,
 ``Art. 6 Abs. 2bis``). ``valid_from`` is the article's own version date: the latest ``in Kraft
 seit`` / ``mit Wirkung seit`` date in the footnotes of the article or of the headings above it,
-else the act's entry into force -- per provision, which the currency changelog (P3-T) needs. A
+else the act's entry into force -- per provision, which the currency changelog needs. A
 heading's footnote counts for every article under it, so an article may be dated later than its
 text last changed, never earlier. Repealed articles and Absätze (``…``) are skipped. The citation
 code is the act's German abbreviation (``OR``, ``ZGB``, ``SchKG``), else ``SR <number>``; articles

@@ -3,10 +3,10 @@
 ``SignalCheckpointCallback`` saves ``<checkpoint_dir>/interrupt.ckpt`` on SIGTERM / SIGUSR1 (SLURM
 preemption) or on an uncaught exception, once. Pair it with a wrapper that resumes from
 ``last.ckpt``: the reference's wrappers never passed a resume path, so a requeued job restarted from
-step 0 (defect 12).
+step 0.
 
 ``StepStatsCallback`` prints seconds per optimizer step and peak GPU memory for every rank as
-``STEPSTATS`` lines, the numbers the KD probe (P4-T) and the screen tables (P5-F) record.
+``STEPSTATS`` lines, the numbers the throughput probes and run tables record.
 """
 
 import os
@@ -61,7 +61,7 @@ class SignalCheckpointCallback(Callback):
 
 
 class StepStatsCallback(Callback):
-    """Seconds per optimizer step and peak GPU memory, per rank (plan P4-T, P5-F).
+    """Seconds per optimizer step and peak GPU memory, per rank.
 
     Every ``every_n_steps`` optimizer steps, and once when training ends, each rank prints::
 
@@ -132,7 +132,7 @@ class StepStatsCallback(Callback):
 
 class StopAtStepCallback(Callback):
     """End training after optimizer step ``stop_at_step`` while the LR schedule keeps the horizon
-    ``trainer.max_steps`` (P6 stage A: 90% of the budget, WSD over the combined A+B horizon). The
+    ``trainer.max_steps`` (e.g. stage A of a two-stage run: 90% of the budget, WSD over the combined horizon). The
     step must be a checkpoint step, so ``last.ckpt`` is that step (``ModelCheckpoint`` runs after
     this callback on the same batch); ``scripts/train_pretrain.py`` checks it before training."""
 
@@ -147,8 +147,8 @@ class StopAtStepCallback(Callback):
 class FinalCheckpointCallback(Callback):
     """Write ``<checkpoint_dir>/last.ckpt`` when training ends normally. ``ModelCheckpoint`` saves only
     every ``every_n_train_steps``, so a run whose last step is not a multiple of it would end with
-    ``last.ckpt`` short of its final steps. P6 stage B ends at step 18,037 with checkpoints every 1,000,
-    so the last 37 steps would be missing. Every rank calls this; ``trainer.save_checkpoint`` writes
+    ``last.ckpt`` short of its final steps. A run ending at step 18,037 with checkpoints every 1,000
+    would miss the last 37 steps. Every rank calls this; ``trainer.save_checkpoint`` writes
     once."""
 
     def __init__(self, checkpoint_dir: str, filename: str = "last.ckpt"):

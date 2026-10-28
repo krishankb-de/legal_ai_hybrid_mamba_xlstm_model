@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Performance profiling: latency, throughput, peak memory and scaling exponents.
 
-Ported from the reference ``scripts/performance_profile.py``. Modes:
+Ported from the upstream reference implementation's ``scripts/performance_profile.py``. Modes:
 
   single (default)  one (batch_size, seq_length) point.
   --sweep           efficiency curves: sweep sequence length (and optionally batch size) across
@@ -10,18 +10,18 @@ Ported from the reference ``scripts/performance_profile.py``. Modes:
   --per-layer       split a forward by mixer type and by ``ssd_chunked_scan``, and print the
                     Amdahl bound.
 
-Protocol (plan R7): every compiled number is measured one shape per process with its own
+Protocol: every compiled number is measured one shape per process with its own
 ``TORCHINDUCTOR_CACHE_DIR`` -- the SLURM wrapper does that -- because a shared Inductor cache once
-timed two chunk sizes identically to the microsecond in the reference. The chunk sizes are read back
+timed two chunk sizes identically to the microsecond in the upstream implementation. The chunk sizes are read back
 off the built module and recorded in every row.
 
-Packed rows and the training loss (plan P4-P). ``--doc-len N`` gives every row ``doc_ids`` with a
+Packed rows and the training loss. ``--doc-len N`` gives every row ``doc_ids`` with a
 new document every N tokens (each row's layout shifted, as packed rows are), so attention takes its
 packed path -- the flex block mask on CUDA -- and every mixer resets at the boundaries; without it
 rows are unpacked (causal SDPA). ``--loss slab`` times the training step the way
 ``PretrainLightningModule`` computes it: the backbone (compiled on its own under ``--compile``), then
 the boundary-masked slab-wise cross-entropy through the head, so ``(B, L, V)`` logits never exist.
-The default ``--loss logits`` is the reference's ``logits.float().mean()``, kept for the sanity
+The default ``--loss logits`` is the upstream implementation's ``logits.float().mean()``, kept for the sanity
 points; at the Qwen3 vocabulary its logits alone are 10 GB for a (4, 8192) batch in bf16.
 
     .venv/bin/python scripts/performance_profile.py --sweep --models hybrid_legal_base transformer_legal_base \
@@ -333,10 +333,10 @@ def run_sweep(
 ):
     """Sweep sequence length (x batch size) across models and fit exponents.
 
-    `attn_backend` (E0-D) and `compile_model` (E1-B) are recorded on every row so
+    `attn_backend` and `compile_model` are recorded on every row so
     two sweeps written to different directories can be compared arm by arm; the
-    published 14A-7 numbers are the `auto` / uncompiled arm. So are the packing
-    (`doc_len`, the attention path it takes) and the training `loss` (P4-P).
+    baseline numbers are the `auto` / uncompiled arm. So are the packing
+    (`doc_len`, the attention path it takes) and the training `loss`.
     """
     rows: list[dict[str, Any]] = []
 
@@ -348,8 +348,8 @@ def run_sweep(
             config.mlstm_chunk_size = mlstm_chunk_size
         model = build_model(config, device, dtype)
         num_params = model.get_num_params(non_embedding=True)
-        # Read the chunk size back OFF THE BUILT MODULE, not off the config. In the
-        # E1 run (job 2580198) the compiled cs=64 and cs=128 arms timed identically
+        # Read the chunk size back OFF THE BUILT MODULE, not off the config. In an
+        # earlier run the compiled cs=64 and cs=128 arms timed identically
         # to 1 microsecond at L=4096 and L=8192 while the uncompiled arms differed by
         # 45%, which is not a plausible coincidence. Either the override stopped
         # reaching the operator under compile, or those points genuinely plateau.
@@ -521,7 +521,7 @@ def run_sweep(
 def profile_decode(
     config, prompt_len=256, new_tokens=64, batch_size=1, device="cpu", dtype=torch.float32, beam_size=1
 ):
-    """Prefill, time-to-first-token and per-token decode, cached vs full recompute (reference M6-E).
+    """Prefill, time-to-first-token and per-token decode, cached vs full recompute.
 
     Reports, for each path:
         prefill / TTFT  -- seconds to the first sampled token
@@ -602,7 +602,7 @@ def profile_decode(
 
 
 # ---------------------------------------------------------------------------
-# Where does the time go? (reference efficiency plan E0.) Split by mixer type
+# Where does the time go? Split by mixer type
 # (the Amdahl bound), split the Mamba-3 block into `ssd_chunked_scan` and the
 # rest, sweep the chunk size, and re-time attention with the fused SDPA
 # backends disabled -- which separates the algorithm from kernel engineering.
@@ -613,7 +613,7 @@ SDPA_BACKENDS = ("auto", "math", "flash", "efficient")
 
 @contextmanager
 def attention_backend(name):
-    """Restrict `F.scaled_dot_product_attention` to one backend (E0-D).
+    """Restrict `F.scaled_dot_product_attention` to one backend.
 
     `auto` is PyTorch's own dispatch, i.e. the fused FlashAttention kernel on an
     H100 -- that is the arm every published efficiency number was measured in.
@@ -650,9 +650,9 @@ def attention_backend(name):
 
 
 def maybe_compile(model, enabled):
-    """`torch.compile` the model for inference only (E1-B).
+    """`torch.compile` the model for inference only.
 
-    The reference pinned compile off because its Mamba-1 and mLSTM blocks loop in
+    The upstream implementation pinned compile off because its Mamba-1 and mLSTM blocks loop in
     Python over (row, segment) for document boundaries. SSD handles boundaries
     with masks, so that reason does not transfer; this flag is how it is tested.
     Compile time is reported because a long compile for a small steady-state gain
@@ -689,7 +689,7 @@ def _delta_ms(cuda, a, b):
 
 
 class LayerSplit:
-    """Per-`HybridBlock` timing, aggregated by mixer type (E0-A).
+    """Per-`HybridBlock` timing, aggregated by mixer type.
 
     Markers are queued on the same stream as the work, so on CUDA this costs two
     event records per layer per iteration and does not serialise the forward.
@@ -742,7 +742,7 @@ class LayerSplit:
 
 
 class ScanSplit:
-    """Time every `ssd_chunked_scan` call inside the Mamba-3 blocks (E0-B).
+    """Time every `ssd_chunked_scan` call inside the Mamba-3 blocks.
 
     `mamba3_block.py` imports the symbol directly, so the patch target is that
     module's attribute, not the kernel package's. Restores on exit even if the
@@ -800,11 +800,11 @@ def run_layer_split(
     output_dir=None,
     warmup=3,
 ):
-    """E0-A/E0-B: split a forward pass by mixer type and by the SSD scan.
+    """Split a forward pass by mixer type and by the SSD scan.
 
     Prints, per model and sequence length, the milliseconds and share of the
     forward spent in each mixer type, the share inside `ssd_chunked_scan`, and
-    the Amdahl bound (E0-F) that follows: the best speedup available from making
+    the Amdahl bound that follows: the best speedup available from making
     the Mamba-3 path free is 1 / (1 - its share).
     """
     rows = []
@@ -850,7 +850,7 @@ def run_layer_split(
                         _sync(device)
                         split.reset()
                         scan.reset()
-                        # Rule R2 is checked against this: a chunk size or a compile arm that
+                        # Peak memory is checked against this: a chunk size or a compile arm that
                         # buys speed by exceeding the Transformer's peak memory is rejected.
                         _reset_peak_memory(device)
                         split.enabled = scan.enabled = True
@@ -910,7 +910,7 @@ def run_layer_split(
                     )
                     row["ssd_scan_share"] = round(scan_ms / wall_ms, 4)
 
-                # E0-F, stated as data rather than left to the reader.
+                # Stated as data rather than left to the reader.
                 m3_ms = by_type.get("mamba3", 0.0) + by_type.get("mamba", 0.0)
                 if m3_ms > 0:
                     share = m3_ms / wall_ms
@@ -1030,14 +1030,14 @@ def main(argv=None):
     parser.add_argument(
         "--per-layer",
         action="store_true",
-        help="E0-A/E0-B: split the forward by mixer type and by ssd_chunked_scan, and print the Amdahl bound",
+        help="split the forward by mixer type and by ssd_chunked_scan, and print the Amdahl bound",
     )
     parser.add_argument(
         "--attn-backend",
         type=str,
         default="auto",
         choices=list(SDPA_BACKENDS),
-        help="E0-D: restrict scaled_dot_product_attention to one "
+        help="restrict scaled_dot_product_attention to one "
         "backend. `auto` is the fused kernel every published "
         "number used; `math` is the unfused reference and is "
         "what separates algorithm from kernel engineering",
@@ -1046,16 +1046,16 @@ def main(argv=None):
         "--chunk-size",
         type=int,
         default=None,
-        help="E0-C: override mamba3_chunk_size. The chunked "
+        help="override mamba3_chunk_size. The chunked "
         "decomposition is exact for any chunk size, so this is "
         "a pure performance knob -- but it changes float "
-        "association, so equivalence (rule R1) is not optional",
+        "association, so operator equivalence is not optional",
     )
     parser.add_argument(
         "--compile",
         dest="compile_model",
         action="store_true",
-        help="torch.compile the model (measure one shape per process with its own Inductor cache, plan R7)",
+        help="torch.compile the model (measure one shape per process with its own Inductor cache)",
     )
     parser.add_argument(
         "--mlstm-chunk-size", type=int, default=None, help="override mlstm_chunk_size (--sweep)"
@@ -1072,7 +1072,7 @@ def main(argv=None):
         choices=LOSSES,
         default="logits",
         help="with --backward: 'slab' is the training loss (backbone + slab-wise CE, no (B, L, V) "
-        "logits); 'logits' is the reference's logits.float().mean()",
+        "logits); 'logits' is the upstream implementation's logits.float().mean()",
     )
 
     args = parser.parse_args(argv)

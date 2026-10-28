@@ -1,6 +1,6 @@
-"""Corpus assembly gate (plan P3-B, rule R9): which documents may enter which training arm.
+"""Corpus assembly gate: which documents may enter which training arm.
 
-Two arms (decision 2): ``commercial_safe`` admits only documents whose licence and flags permit a
+Two arms: ``commercial_safe`` admits only documents whose licence and flags permit a
 shippable model; ``research`` additionally admits ``research_only`` documents (the non-commercial
 research-exception arm). Every document must carry a registered, known licence consistent with its
 flags, or the whole build stops: a licence problem is never filtered away silently.

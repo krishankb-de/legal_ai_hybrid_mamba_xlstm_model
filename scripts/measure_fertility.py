@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Tokenizer fertility on DACH legal text (plan P3-D; prediction in analysis/tokenizer_fertility.md).
+"""Tokenizer fertility on DACH legal text (results in analysis/tokenizer_fertility.md).
 
     .venv/bin/python scripts/measure_fertility.py --collect      # live sample -> data/cache/fertility/
     .venv/bin/python scripts/measure_fertility.py                # measure the sample and the fixtures
@@ -98,7 +98,7 @@ def _texts(path: Path) -> list[str]:
 
 
 def fixture_texts() -> dict[str, list[str]]:
-    """Document texts of the P3-F..M fixtures, parsed by their collectors."""
+    """Document texts of the collector fixtures, parsed by their collectors."""
     from lexhybrid.data.corpus.collectors import bger, dip, eurlex, fedlex, gii, oldp, rii, ris
 
     out: dict[str, list[str]] = {}
@@ -199,7 +199,7 @@ def main(argv=None) -> int:
     fixture_rows += [pooled(fixture_rows, LEGAL, name) for name in tokenizers]
     print("| sample | source | tokenizer | documents | words | tokens | tokens/word |")
     print("|---|---|---|---:|---:|---:|---:|")
-    for label, table in (("live 2026-09-27", rows), ("P3 fixtures", fixture_rows)):
+    for label, table in (("live 2026-09-27", rows), ("collector fixtures", fixture_rows)):
         for r in table:
             print(
                 f"| {label} | {r['source']} | {r['tokenizer']} | {r['docs']:,} | {r['words']:,} | {r['tokens']:,} | {r['fertility']:.3f} |"

@@ -14,17 +14,17 @@
 #SBATCH --open-mode=append   # pot-hpi-aisc-batch is preemptible: a requeued task appends to its log
 #SBATCH --requeue
 #
-# scrub_array.sh -- the LER scrub at corpus scale (plan P4-L, first step; R11): flair/ner-german-legal
+# scrub_array.sh -- the LER scrub at corpus scale: flair/ner-german-legal
 # on one H100 per task. Task i scrubs part i % PARTS of source SOURCES[i / PARTS] (stride shares:
-# lines k, k+PARTS, ...), so the array size is (number of sources) x PARTS. Submit from the Mac:
+# lines k, k+PARTS, ...), so the array size is (number of sources) x PARTS. Submit from your workstation:
 #   ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch --array=0-55 scripts/slurm/scrub_array.sh"   # 7 sources x 8 parts
-# The defaults are the German market (decisions.market, 2026-10-02): ris, fedlex and bger are out,
+# The defaults are German law only: ris, fedlex and bger are out,
 # and JURISDICTIONS keeps multilegalpile's German rows only (its Swiss rows are never scrubbed).
-# (measured on the Mac CPU: ~1,000 characters/s, P3-R; the GPU is what makes the corpus feasible).
+# (measured on a laptop CPU: ~1,000 characters/s; the GPU is what makes the corpus feasible).
 # Writes $SCRATCH_ROOT/data/scrubbed/<src>.part-<k>-of-<PARTS>.jsonl and the scrub log
 # $SCRATCH_ROOT/data/manifests/scrub_<src>.part-<k>-of-<PARTS>.jsonl, renamed from *.partial when
 # the part completes; a part already written is skipped, so resubmitting the array redoes only what
-# is missing (FORCE=1 scrubs it again: a source recollected after a fix, as gii after job 2594824).
+# is missing (FORCE=1 scrubs it again: a source recollected after a fix).
 # Every part hashes names with ONE key ($SCRATCH_ROOT/.secrets/scrub_hmac.key, created atomically
 # by the first task; never printed). Needs the scrub environment (setup_env.sh builds it) and
 # flair's weights in $HF_HOME (fetch_hf.sh). The log ends in "SCRUB <src> PART <k>/<n> DONE".
@@ -60,7 +60,7 @@ echo "source: $SRC  part: $PART of $PARTS  jurisdictions: ${JURISDICTIONS}  in: 
 if [[ "${FORCE:-0}" != 1 && -f "$OUT" && -f "$LOG" ]]; then
   echo "SCRUB ${SRC} PART ${PART}/${PARTS} DONE (already scrubbed: $OUT)"; exit 0
 fi
-[[ -f "$RAW" ]] || { echo "FATAL: $RAW is missing (collect it first: build_corpus_array.sh, P4-K)"; exit 1; }
+[[ -f "$RAW" ]] || { echo "FATAL: $RAW is missing (collect it first: build_corpus_array.sh)"; exit 1; }
 [[ -x envs/scrub/.venv/bin/python ]] || { echo "FATAL: no scrub environment: sbatch scripts/slurm/setup_env.sh"; exit 1; }
 
 # One HMAC key for every part and every source: the first task links a complete key file into

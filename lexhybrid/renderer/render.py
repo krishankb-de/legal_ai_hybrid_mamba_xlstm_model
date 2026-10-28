@@ -1,19 +1,19 @@
-"""The renderer (plan P7-G): the model's pointer answer as the text a reader sees.
+"""The renderer: the model's pointer answer as the text a reader sees.
 
 The answer (``lexhybrid/renderer/segments.py`` reads its grammar) is rendered against the retrieved
 passages in prompt order, passage ``K`` being ``chunks[K - 1]``:
 
 * ``<|q|><|cK|><|sJ1|>…<|sJn|>`` -> ``„<sentences J1..Jn of passage K, joined by one space>“ (<label>)``,
   German quotes U+201E / U+201C. The sentences are the chunk's own strings byte for byte: no
-  normalisation, no truncation, so a quote is checkable against the source (P7-H). The label of one
+  normalisation, no truncation, so a quote is checkable against the source. The label of one
   sentence is ``chunks[K - 1].labels[J - 1]`` (``BeurkG §3 Abs. 1 Nr. 2``); of a span, the span's
   labels in order with duplicates removed, joined by ``"; "``;
 * ``<|cite|><|cK|>`` -> ``(<chunks[K - 1].citation_id>)`` (``(BGB §573)``); with sentences,
   ``<|cite|><|cK|><|sJ|>…`` -> ``(<their labels, deduplicated, joined by "; ">)``
   (``(BGB §573 Abs. 2 Nr. 1)``);
-* a passage held by more than one source (``Chunk.copies``, ``decisions.cite_every_copy``) adds every
+* a passage held by more than one source (``Chunk.copies``) adds every
   source to its label: ``(BGH VIII ZR 12/20 Rn. 14; Quellen: rechtsprechung-im-internet.de,
-  openlegaldata.io)``. The quoted text itself is unchanged, so the quote check (P7-H) is unaffected;
+  openlegaldata.io)``. The quoted text itself is unchanged, so the quote check is unaffected;
 * text between pointers is copied unchanged;
 * ``<|unanswerable|>``, and an answer whose rendered body is empty or whitespace (it answers
   nothing), render as ``REFUSAL``.
@@ -23,7 +23,7 @@ answer, a refusal included, ends with the notice, appended once. Text is not sea
 answer that writes the notice itself shows it twice. A pointer to a passage outside
 ``1..len(chunks)`` or to a sentence outside ``1..len(chunk.sentences)`` is outside the retrieved set
 and raises ``RenderError`` naming the pointer; a malformed answer raises the parser's
-``PointerSyntaxError``. Both are ``ValueError``. The verifier (P7-H) reuses ``render_quote`` and
+``PointerSyntaxError``. Both are ``ValueError``. The verifier reuses ``render_quote`` and
 ``render_cite`` so that what it checks is what the reader sees.
 """
 
@@ -55,7 +55,7 @@ def _check_sentences(chunk: Chunk, sentences: Sequence[int]) -> None:
             raise RenderError(f"sentence {j} is outside {chunk.id}, which has {len(chunk.sentences)}")
 
 
-# display names of the sources a citation names (decisions.cite_every_copy); an unknown source id is shown as is
+# display names of the sources a citation names; an unknown source id is shown as is
 SOURCE_NAMES = {
     "gii": "gesetze-im-internet.de", "rii": "rechtsprechung-im-internet.de", "oldp": "openlegaldata.io",
     "dip": "dip.bundestag.de", "eurlex": "eur-lex.europa.eu", "ris": "ris.bka.gv.at", "fedlex": "fedlex.admin.ch",

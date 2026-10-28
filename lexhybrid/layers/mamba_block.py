@@ -1,6 +1,6 @@
 """Mamba-1 mixer with the selective scan -- the legacy incumbent.
 
-Only the ``hybrid_legal_legacy`` ablation arm uses this mixer (decision 17): it shows that the
+Only the ``hybrid_legal_legacy`` ablation arm uses this mixer: it shows that the
 operator correction still matters on legal text. It has no ``step()``, so a model containing it
 cannot use the cached decode path, and its document-boundary handling is a per-(row, segment)
 Python loop. Ported unchanged from the reference apart from the ``doc_ids`` name.
@@ -62,7 +62,7 @@ class MambaBlock(nn.Module):
         if scan_impl not in ("legacy", "exact"):
             raise ValueError(f"scan_impl must be 'legacy' or 'exact', got {scan_impl!r}")
         self.scan_impl = scan_impl
-        # M1-F: the reference Mamba dt init only takes effect if (1) it is re-applied after the
+        # The reference Mamba dt init only takes effect if (1) it is re-applied after the
         # model's weight pass zeroes every bias (post_model_init) and (2) the Delta RMSNorm is off,
         # because that norm rescales Delta to unit RMS and discards the bias offset.
         if dt_init_strategy not in ("none", "mamba"):

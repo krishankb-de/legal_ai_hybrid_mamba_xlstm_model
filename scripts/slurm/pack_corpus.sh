@@ -12,19 +12,18 @@
 #SBATCH --open-mode=append   # pot-hpi-aisc-batch is preemptible: a requeued run appends to its log
 #SBATCH --requeue
 #
-# pack_corpus.sh -- dedup -> pack at 4,096 and 8,192 over the scrubbed corpus (plan P4-L, second
-# step, after scrub_array.sh; verdict P4-M): scripts/build_shards.py streams every source's scrub
+# pack_corpus.sh -- dedup -> pack at 4,096 and 8,192 over the scrubbed corpus (after
+# scrub_array.sh): scripts/build_shards.py streams every source's scrub
 # parts (their original order restored), deduplicates all sources together (the commercial-safe copy
 # survives), splits each source by document (0.1%, at least 2,000) and packs it at both row lengths
 # from one tokenisation, one source per worker process. One source per shard directory: the
 # research-only source (multilegalpile) is a shard set of its own, which only the research arm
-# admits. Submit from the Mac once every scrub task is COMPLETED:
+# admits. Submit from your workstation once every scrub task is COMPLETED:
 #   ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch scripts/slurm/pack_corpus.sh"
-# SOURCES defaults to scrub_array.sh's list, the German market (decisions.market), without eurlex
-# (decisions.eurlex_training: 565 documents cannot give the >= 2,000-document validation split; job
-# 2599610); a collected but unscrubbed source outside it (ris, fedlex, bger) is never read.
+# SOURCES defaults to scrub_array.sh's list, German law only, without eurlex
+# (565 documents cannot give the >= 2,000-document validation split); a collected but unscrubbed source outside it (ris, fedlex, bger) is never read.
 # Writes $SCRATCH_ROOT/data/shards/{4096,8192}/<src>/{train,val}/ + meta.json, <row_len>/dedup.jsonl
-# and build_summary.json (the numbers of analysis/corpus_manifest.md, P4-M). A requeued run starts
+# and build_summary.json (the numbers of analysis/corpus_manifest.md). A requeued run starts
 # over (it rewrites every shard). The log ends in "PACK CORPUS DONE".
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"

@@ -1,1 +1,1 @@
-"""Evaluation metrics (text metrics now; citation metrics from P9)."""
+"""Evaluation metrics."""

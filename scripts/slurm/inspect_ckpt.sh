@@ -11,7 +11,7 @@
 #SBATCH --error=logs/%x_%j.log
 #
 # inspect_ckpt.sh -- per-parameter weights and AdamW state of training checkpoints
-# (scripts/inspect_checkpoint.py; decisions.p5_divergence). CPU only. Default: screen attempt 1's
+# (scripts/inspect_checkpoint.py). CPU only. Default: screen attempt 1's
 # collapsed runs next to healthy runs of the same configs. RUNS is "<experiment>:<model config>"
 # pairs; CKPT (default last.ckpt) the file under each run's checkpoints/.
 #   ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch scripts/slurm/inspect_ckpt.sh"

@@ -1,4 +1,4 @@
-"""The one-line ``ARCH`` summary every model logs at construction (reference M2-I).
+"""The one-line ``ARCH`` summary every model logs at construction.
 
 The expensive failure mode is not a crash but training the wrong thing for days: a lever reaches
 the yaml and never the mixer. The fingerprint prints at step 0 of every job, so "is this really the

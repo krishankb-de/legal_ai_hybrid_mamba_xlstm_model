@@ -1,6 +1,6 @@
-"""Scrub leaks into the index (plan P7-J; decisions 13 and 22): no scrubbed name in a retrievable chunk.
+"""Scrub leaks into the index: no scrubbed name in a retrievable chunk.
 
-The scrub (P3-R, ``lexhybrid/data/corpus/scrub_ler.py``) replaces every tagged person, judge, lawyer
+The scrub (``lexhybrid/data/corpus/scrub_ler.py``) replaces every tagged person, judge, lawyer
 and street by a placeholder and logs a keyed hash of the entity text, never the text. A chunk that
 still holds one of those texts is a leak: the renderer could quote it. ``leaked_entities`` finds them
 without the names: every candidate surface form in a chunk -- each capitalised word, and each run of

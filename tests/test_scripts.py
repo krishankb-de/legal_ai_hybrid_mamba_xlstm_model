@@ -1,4 +1,4 @@
-"""The ported command-line scripts run end to end on CPU with tiny models (plan P1-R..T)."""
+"""The ported command-line scripts run end to end on CPU with tiny models."""
 
 import json
 import math
@@ -146,7 +146,7 @@ def test_check_operator_equivalence_passes_on_cpu(script):
 
 
 def test_check_operator_equivalence_sweeps_only_the_mamba3_chunk(script, monkeypatch, capsys):
-    """Job 2589360: ref_hybrid_m3 runs Mamba-3 at chunk 64 and mLSTM at 128. The sweep set every
+    """ref_hybrid_m3 runs Mamba-3 at chunk 64 and mLSTM at 128. The sweep set every
     mixer's chunk_size, so "chunk 64 vs the chunk-64 baseline" moved the mLSTM to 64 and failed at
     4.5e-4, and the reset left it there for the compile check. Re-running the baseline chunk must
     reproduce the baseline exactly, and the mLSTM chunk must not move."""
@@ -204,7 +204,7 @@ def test_packed_doc_ids_shift_the_layout_per_row(script):
 
 
 def test_performance_profile_packed_training_rows_with_the_slab_loss(script, tmp_path, monkeypatch):
-    """P4-P's training rows: packed doc_ids, the slab-wise loss (no (B, L, V) logits), both chunk
+    """Training rows: packed doc_ids, the slab-wise loss (no (B, L, V) logits), both chunk
     sizes read back off the built module and written to every row."""
     pp = script("performance_profile")
     cfg = HybridConfig(
@@ -283,11 +283,11 @@ def test_analyze_generation_diversity(script, tmp_path):
     assert mod.main(["--hyps", str(hyps), "--output", str(tmp_path / "d.md")]) == 0
 
 
-# -- screen arms (P2-X) ---------------------------------------------------------------------
+# -- screen arms ---------------------------------------------------------------------
 
 
 def test_screen_arms_verify_reduced(script):
-    """P2-X: every arm builds through HybridConfig.from_hydra at reduced width, runs a packed
+    """Every arm builds through HybridConfig.from_hydra at reduced width, runs a packed
     forward/backward, and shows its expected ARCH tokens (and none of its forbidden ones)."""
     arms = script("screen_arms")
     assert set(arms.ARMS) == {"S0", "S1", "S2", "S3", "S4", "S5", "S6"}
@@ -296,7 +296,7 @@ def test_screen_arms_verify_reduced(script):
 
 def test_screen_arms_verify_full_passes_with_the_decided_s5_band(script, capsys):
     """Full size on `meta` with the bands: every arm passes; S5 carries +2.36% as a stated difference
-    inside ±2.5% (user decision 2026-09-27, plan §14)."""
+    inside ±2.5%."""
     arms = script("screen_arms")
     assert arms.verify(reduced=False, full=True) == []
     assert arms.ARMS["S5"].band_pct == 2.5
@@ -320,7 +320,7 @@ def test_screen_arm_env_is_what_the_wrapper_evals(script):
 
 
 def test_screen_arm_expect_tokens_catch_a_lever_that_did_not_arrive(script):
-    """The FM5 defence: if an arm's lever never reaches the model, its ARCH line lacks the token."""
+    """Guard: if an arm's lever never reaches the model, its ARCH line lacks the token."""
     arms = script("screen_arms")
     import torch
 
@@ -334,11 +334,11 @@ def test_screen_arm_expect_tokens_catch_a_lever_that_did_not_arrive(script):
     )
 
 
-# -- tokenizer fertility (P3-D) -----------------------------------------------------------------
+# -- tokenizer fertility -----------------------------------------------------------------
 
 
 def test_fertility_sampling_and_arithmetic(script):
-    """P3-D's method as pre-registered: whole documents until the word budget, documents over the cap
+    """The method: whole documents until the word budget, documents over the cap
     skipped; tokens/word per source and pooled word-weighted."""
     from types import SimpleNamespace
 
@@ -373,9 +373,9 @@ def _tb_run(root, exp, version, scalars):
 
 
 def test_screen_metrics_reads_val_and_curves_from_the_latest_version(tmp_path, script, capsys):
-    """P5-D/F: val PPL is only in TensorBoard; the reader takes the run's highest version (the
+    """Val PPL is only in TensorBoard; the reader takes the run's highest version (the
     earlier one is a failed attempt), reports exp(val/loss) as the PPL (the logged val/perplexity is a
-    batch-mean of exp(CE), job 2636358) and averages the training curve per window."""
+    batch-mean of exp(CE)) and averages the training curve per window."""
     sm = script("screen_metrics")
     _tb_run(tmp_path, "screen_S1_s42", 0, {"train/loss": [(25, 99.0)]})
     _tb_run(
@@ -463,7 +463,7 @@ def _screen_outputs(tmp_path, runs):
 
 
 def test_screen_table_applies_the_pre_registered_rule(tmp_path, script, capsys):
-    """P5-F/H/I: columns come from the job outputs (val PPL = exp(val_loss) at step 11,999; a
+    """Columns come from the job outputs (val PPL = exp(val_loss) at step 11,999; a
     continuation's s/step is step-weighted), and the rule is applied as written: S1 advances unless
     an arm beats its mean val PPL by more than the bar without losing statute-recall or multi-hop by
     more than the bar; a PPL win that loses recall is recorded, not adopted."""

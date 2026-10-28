@@ -1,10 +1,10 @@
 """``HybridBlock``: pre-norm -> mixer -> residual, then the MLP, for every mixer type.
 
-Ported from the reference with the sLSTM branch removed. P2-A fixed two dispatch defects: the
-``mlstm_*`` config keys now reach ``mLSTMBlock`` with their prefix stripped (defect 2: the reference
+Ported from the reference with the sLSTM branch removed. Two dispatch defects of the reference are
+fixed: the ``mlstm_*`` config keys reach ``mLSTMBlock`` with their prefix stripped (the reference
 filtered on the unprefixed names, so ``mlstm_gate_soft_cap`` and friends silently fell back to the
-block defaults), and Mamba-3 reads ``mamba3_expand_factor`` rather than the Mamba-1 ``expand_factor``
-(defect 4). For both prefixed mixers a prefixed key always wins over an unprefixed one of the same
+block defaults), and Mamba-3 reads ``mamba3_expand_factor`` rather than the Mamba-1 ``expand_factor``.
+For both prefixed mixers a prefixed key always wins over an unprefixed one of the same
 name, whatever order the keys arrive in.
 """
 

@@ -1,1 +1,1 @@
-"""Data: synthetic rows now; schema, collectors, packing and probes from P3."""
+"""Data: synthetic rows, document schema, collectors, packing and probes."""

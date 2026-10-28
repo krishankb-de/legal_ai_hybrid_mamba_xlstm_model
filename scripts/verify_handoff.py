@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Verify that a training checkpoint loads cleanly into the model its yaml builds.
 
-Ported from the reference ``verify_stage0_handoff.py``: the static guard for the "silent fresh
+Ported from the upstream reference implementation's ``verify_stage0_handoff.py``: the static guard for the "silent fresh
 load" (``strict=False`` hides a config mismatch, the backbone loads nothing, the metrics are
 wrong). PASS means 0 missing and 0 unexpected keys after taking the ``model.``-prefixed entries of
 the Lightning checkpoint. Exit code 0 on PASS, 1 otherwise, so a SLURM wrapper can gate on it.

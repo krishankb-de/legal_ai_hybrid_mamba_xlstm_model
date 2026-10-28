@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Repository hygiene: the tree that would be (or was) pushed is clean (plan §8.1, P1-W2).
+"""Repository hygiene: the tree that would be (or was) pushed is clean.
 
 Two modes, same checks:
-  default  walk the working tree minus what ``.gitignore`` excludes -- what a commit would contain.
+  default  walk the working tree minus what ``.gitignore`` and ``.git/info/exclude`` exclude -- what a
+           commit would contain.
            ``validate.sh`` uses this in every mode (it runs after the venv and caches exist).
   --ci     walk the checkout minus ``.git/``. The CI ``hygiene`` job runs this on a pristine
            checkout, before anything is installed, so the walked tree IS the pushed tree. Needs no
@@ -10,10 +11,9 @@ Two modes, same checks:
 
 Fails on: a file over the size limit; checkpoints, tensors or data files outside
 ``tests/fixtures/``; anything under ``Reference/``, ``.venv/``, ``outputs/``, ``logs/``,
-``cluster/``, ``data/raw/``, ``data/shards/``; CRLF line endings in text files; two paths that
+``cluster/``, ``data/raw/``, ``data/shards/``, ``data/hf/``, ``data/index/``; CRLF line endings in text files; two paths that
 differ only by case (they break checkouts on macOS); secret-shaped strings; shell scripts without a
-shebang; and critical files that are absent or that ``.gitignore`` would silently exclude (an
-analysis document once reported as committed was in fact ignored in the reference).
+shebang; and critical files that are absent or that ``.gitignore`` would silently exclude.
 """
 
 import argparse
@@ -48,6 +48,7 @@ FORBIDDEN_PREFIXES = (
     "data/raw/",
     "data/shards/",
     "data/hf/",
+    "data/index/",
 )
 TEXT_SUFFIXES = {
     ".py",
@@ -65,16 +66,14 @@ TEXT_SUFFIXES = {
 }
 CRITICAL_FILES = (
     "README.md",
-    "CLAUDE.md",
-    "LEGAL_BUILD_PLAN.md",
-    "legal_build_state.json",
+    "LICENSE",
     "uv.lock",
     "pyproject.toml",
     ".python-version",
     ".gitignore",
     ".github/workflows/ci.yml",
 )
-MUST_NOT_BE_IGNORED_GLOBS = ("Docs/*.md", "analysis/*.md", "analysis/**/*.md", "tests/fixtures/**/*")
+MUST_NOT_BE_IGNORED_GLOBS = ("docs/*.md", "analysis/*.md", "analysis/**/*.md", "tests/fixtures/**/*")
 SECRET_PATTERNS = {
     "Hugging Face token": re.compile(r"\bhf_[A-Za-z0-9]{30,}\b"),
     "GitHub token": re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b"),
@@ -84,11 +83,14 @@ SECRET_PATTERNS = {
 
 
 def load_ignore(root: Path):
-    """``.gitignore`` as a ``pathspec`` matcher (git's own wildmatch semantics)."""
+    """``.git/info/exclude`` then ``.gitignore`` (which wins) as a ``pathspec`` matcher (git's wildmatch semantics)."""
     import pathspec  # dev dependency; not needed for --ci on a pristine checkout
 
-    gi = root / ".gitignore"
-    lines = gi.read_text().splitlines() if gi.exists() else []
+    lines: list[str] = []
+    # git gives .gitignore precedence over info/exclude: read exclude first, later lines win.
+    for gi in (root / ".git" / "info" / "exclude", root / ".gitignore"):
+        if gi.is_file():
+            lines += gi.read_text().splitlines()
     return pathspec.GitIgnoreSpec.from_lines(lines)
 
 
@@ -161,7 +163,7 @@ def check_critical(root: Path, files: list[str], ci: bool) -> list[str]:
         if not (root / rel).exists():
             problems.append(f"critical file missing: {rel}")
         elif rel not in present:
-            problems.append(f"critical file excluded by .gitignore: {rel}")
+            problems.append(f"critical file excluded by the ignore rules: {rel}")
     if ci:
         return problems
     spec = load_ignore(root)
@@ -170,7 +172,9 @@ def check_critical(root: Path, files: list[str], ci: bool) -> list[str]:
             if path.is_file():
                 rel = path.relative_to(root).as_posix()
                 if spec.match_file(rel):
-                    problems.append(f"{rel} exists but .gitignore excludes it (it would never be committed)")
+                    problems.append(
+                        f"{rel} exists but the ignore rules exclude it (it would never be committed)"
+                    )
     return problems
 
 

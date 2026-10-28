@@ -14,12 +14,12 @@
 #SBATCH --open-mode=append   # pot-hpi-aisc-batch is preemptible: without this a requeue TRUNCATES the log
 #SBATCH --requeue
 #
-# probe_ckpt_size.sh -- how big one hybrid_legal_base checkpoint is (plan P4-N; verdict P4-O): a
+# probe_ckpt_size.sh -- how big one hybrid_legal_base checkpoint is: a
 # 10-step run on one H100 through train_pretrain_1gpu.sh (so the training wrapper runs once end to
 # end before any screen) writing last.ckpt to scratch, then its size, then the probe's outputs are
 # deleted here (the login node has no rm). Synthetic rows at the Qwen3 vocabulary and no teacher:
 # the teacher is never part of a checkpoint (PretrainLightningModule keeps it out of state_dict).
-# Submit from the Mac:  ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch scripts/slurm/probe_ckpt_size.sh"
+# Submit from your workstation:  ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch scripts/slurm/probe_ckpt_size.sh"
 # The log ends with "CKPT_BYTES=<n> CKPT_GB=<x>" and "PROBE_CKPT DONE".
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"

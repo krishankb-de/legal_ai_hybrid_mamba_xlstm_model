@@ -1,4 +1,4 @@
-"""Checks that need Linux (plan §8.3): they run in CI and are skipped, with the reason, on the Mac."""
+"""Checks that need Linux: they run in CI and are skipped, with the reason, on macOS."""
 
 import pytest
 import torch
@@ -12,7 +12,7 @@ def test_inductor_cpu_compile_matches_eager():
     """torch.compile on the Inductor CPU backend (gcc) reproduces the eager logits.
 
     The reference could only ever test compile on the H100; this proves the compile path on every
-    push. P2-Y extends it to the legal model at chunk 128 and asserts the TFLA fast path.
+    push. A second test extends it to the legal model at chunk 128 and asserts the TFLA fast path.
     """
     torch.manual_seed(0)
     cfg = HybridConfig(

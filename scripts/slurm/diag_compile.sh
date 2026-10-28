@@ -12,9 +12,9 @@
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.log
 #
-# diag_compile.sh -- per-mixer, per-row compile-vs-eager drift on one H100 (P4-J2 follow-up to job
-# 2588779). Diagnostic only: prints a table, exits 0 unless the script itself breaks.
-# Submit from the Mac:  ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch scripts/slurm/diag_compile.sh"
+# diag_compile.sh -- per-mixer, per-row compile-vs-eager drift on one H100.
+# Diagnostic only: prints a table, exits 0 unless the script itself breaks.
+# Submit from your workstation:  ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch scripts/slurm/diag_compile.sh"
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
 

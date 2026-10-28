@@ -1,4 +1,4 @@
-"""Sequential reference for the SSD recurrence, and the single-token decode step (reference M2-A).
+"""Sequential reference for the SSD recurrence, and the single-token decode step.
 
 * ``ssd_sequential_reference`` is the oracle every chunked-scan test is checked against. It runs
   in float64 by default and is a plain Python loop, because an oracle has to be obviously correct

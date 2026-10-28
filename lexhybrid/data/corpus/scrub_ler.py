@@ -1,4 +1,4 @@
-"""The German legal-entity scrub (plan P3-R; decisions 13 and 22): names out before training.
+"""The German legal-entity scrub: names out before training.
 
 Entities come from ``flair/ner-german-legal`` (LER German F1 96.35), which runs in the scrub
 environment ``envs/scrub`` through ``scripts/scrub_ner_worker.py``; this module never imports flair.
@@ -19,7 +19,7 @@ and the log is versioned.
 
     python -m lexhybrid.data.corpus.scrub_ler --source bger     # data/raw/bger/bger.jsonl -> data/scrubbed/
 
-At corpus scale (P4-L; ~1,000 characters/s on a laptop CPU, so a GPU array on the cluster) a source
+At corpus scale (~1,000 characters/s on a laptop CPU, so a GPU array on the cluster) a source
 is split into ``--parts`` stride shares, one array task each (``--part k``: lines k, k+n, ...),
 streamed through ONE worker process that batches ``--docs-per-batch`` documents per NER call; the
 outputs are ``data/scrubbed/<source>.part-<k>-of-<n>.jsonl`` and the matching scrub log, renamed
@@ -192,7 +192,7 @@ def stream_worker(
 ) -> Iterator[tuple[Document, list[Entity]]]:
     """Each document with its entities, in order, from ONE worker process: the documents are fed on
     a thread while the results are read here, so memory stays bounded by ``in_flight`` documents
-    whatever the corpus size (P4-L). ``in_flight`` must exceed the worker's ``--docs-per-batch``.
+    whatever the corpus size. ``in_flight`` must exceed the worker's ``--docs-per-batch``.
     The worker's log goes to a temporary file; its throughput line lands in ``stats``."""
     _require(python)
     err = tempfile.TemporaryFile(mode="w+", encoding="utf-8")
@@ -263,8 +263,8 @@ def iter_part(
     path: Path, part: int = 0, parts: int = 1, jurisdictions: Iterable[str] | None = None
 ) -> Iterator[Document]:
     """The documents on lines ``part, part + parts, part + 2 * parts, ...`` of ``path``: a source
-    split across ``parts`` array tasks, each streaming its own share (P4-L). With ``jurisdictions``
-    only those documents count (decisions.market: Germany only, so multilegalpile's Swiss rows are
+    split across ``parts`` array tasks, each streaming its own share. With ``jurisdictions``
+    only those documents count (the scope is German law only, so multilegalpile's Swiss rows are
     never scrubbed) and the stride runs over them, so the parts still read back in collection
     order; every line is then parsed for its jurisdiction."""
     if not 0 <= part < parts:

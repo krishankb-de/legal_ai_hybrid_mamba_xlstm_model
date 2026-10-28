@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Probes on a checkpoint (plan P3-W, P3-X; P5-G and P6-M run it on the cluster): MQAR, statute
+"""Probes on a checkpoint (also run on the cluster): MQAR, statute
 recall and two-hop cross-references.
 
     .venv/bin/python scripts/evaluate_probes.py --model-config hybrid_legal_base \

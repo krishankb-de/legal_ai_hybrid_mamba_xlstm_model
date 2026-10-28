@@ -2,15 +2,15 @@
 
 Ported from the reference ``models/hybrid_lm.py`` (lines 1-600) without the retrieval encoder
 (``AttentionPooling``, ``HybridTextEncoder``) and without the image-prefix arguments of the decode
-methods. P2 fixes recorded here:
+methods. Differences from the reference:
 
-* P2-K (defect 7): ``prefill`` is one chunked forward per layer that fills the decode caches; the
+* ``prefill`` is one chunked forward per layer that fills the decode caches; the
   reference stepped the prompt token by token.
-* P2-L (defect 6): the loss no longer asks a document's last token to predict the next document's
+* The loss no longer asks a document's last token to predict the next document's
   first.
-* P2-M (defect 17): the weight pass runs before the head is tied (tying first drew the shared
+* The weight pass runs before the head is tied (tying first drew the shared
   matrix twice), and ``tie_word_embeddings`` defaults to True.
-* P2-N..P (defect 11): every decoder lives in ``lexhybrid.decoding`` with EOS, repetition and
+* Every decoder lives in ``lexhybrid.decoding`` with EOS, repetition and
   length penalties; ``generate``, ``generate_cached`` and ``beam_search_cached`` delegate there.
 """
 
@@ -52,10 +52,10 @@ class CausalLMOutput:
     logits: torch.Tensor = None
     hidden_states: tuple[torch.Tensor, ...] | None = None
     attentions: tuple[torch.Tensor, ...] | None = None
-    # Targets that entered the loss (P2-L): the boundary mask and -100 labels are excluded. A 0-dim
+    # Targets that entered the loss: the boundary mask and -100 labels are excluded. A 0-dim
     # tensor, so reading it forces no host sync until someone logs it.
     n_supervised_tokens: torch.Tensor | None = None
-    # The multi-token-prediction term before its weight (P2-S); None when MTP is off.
+    # The multi-token-prediction term before its weight; None when MTP is off.
     mtp_loss: torch.Tensor | None = None
 
 
@@ -63,10 +63,10 @@ def boundary_masked_labels(labels: torch.Tensor, doc_ids: torch.Tensor | None) -
     """Next-token targets ``labels[:, 1:]`` with every cross-document prediction set to -100.
 
     Position t predicts token t+1; when the two sit in different documents (t is the last token of
-    one -- normally its EOS -- and t+1 the first of the next) the target is masked (defect 6). The
+    one -- normally its EOS -- and t+1 the first of the next) the target is masked. The
     EOS itself stays a target, predicted from inside its own document, so the model still learns
     to end a document. A row that starts mid-document needs nothing special: no position predicts
-    into position 0. The distillation KL uses the same mask (P2-T).
+    into position 0. The distillation KL uses the same mask.
     """
     shifted = labels[:, 1:].clone()
     if doc_ids is not None:
@@ -96,8 +96,8 @@ class HybridLanguageModel(nn.Module):
         self.config = config
         self.embeddings = HybridEmbedding(config)
 
-        # Every dataclass field reaches the block factory (M2-F): hand-writing ~20 `name=config.name`
-        # lines is how a new field silently fell back to its default in the reference (Phase 9).
+        # Every dataclass field reaches the block factory: hand-writing ~20 `name=config.name`
+        # lines is how a new field silently fell back to its default in the reference.
         layer_kwargs = {f.name: getattr(config, f.name) for f in dataclasses.fields(config)}
         for reserved in _RESERVED_BLOCK_ARGS + _MODEL_ONLY_ARGS:
             layer_kwargs.pop(reserved, None)
@@ -117,7 +117,7 @@ class HybridLanguageModel(nn.Module):
         )
         self.lm_head = nn.Linear(config.dim, config.vocab_size, bias=False)
 
-        # Initialise, THEN tie (defect 17): tying first made the weight pass draw the shared matrix
+        # Initialise, THEN tie: tying first made the weight pass draw the shared matrix
         # twice (as an embedding, then as a linear weight), so the tied init depended on module
         # order. Now the embedding's draw is the tied matrix.
         self.apply(self._init_weights)
@@ -310,7 +310,7 @@ class HybridLanguageModel(nn.Module):
 
         return sample(self, input_ids, max_new_tokens, temperature, top_k, top_p, **decode_kwargs)
 
-    # -- O(1) cached decode (reference M6-C) -----------------------------------------------------
+    # -- O(1) cached decode -------------------------------------------------------------------
 
     def supports_cached_decode(self) -> bool:
         """True when every mixer has an O(1) ``step``; all-or-nothing by design, because one
@@ -333,7 +333,7 @@ class HybridLanguageModel(nn.Module):
         return self.lm_head(self.final_norm(hidden_t))
 
     def prefill(self, hidden: torch.Tensor, caches, doc_ids: torch.Tensor | None = None) -> torch.Tensor:
-        """Consume a prompt in ONE chunked forward per layer, filling every cache (P2-K, defect 7).
+        """Consume a prompt in ONE chunked forward per layer, filling every cache.
 
         Each mixer's forward writes its decode state when handed an empty cache (Mamba-3: SSM state,
         conv window, trapezoid and rotation state; mLSTM: C and n; attention: K and V), so the
@@ -393,7 +393,7 @@ class HybridLanguageModel(nn.Module):
         repetition_penalty: float = 1.0,
     ) -> torch.Tensor:
         """Beam search over the caches (``lexhybrid.decoding.beam_search_cached``): EOS-finished
-        hypotheses scored ``sum_logprob / generated ** length_penalty`` (defect 11: the reference
+        hypotheses scored ``sum_logprob / generated ** length_penalty`` (the reference
         had no EOS and its length penalty never changed a ranking)."""
         from lexhybrid.decoding.generate import beam_search_cached
 
@@ -410,7 +410,7 @@ class HybridLanguageModel(nn.Module):
     # -- introspection -----------------------------------------------------------------------------
 
     def get_num_params(self, non_embedding: bool = True) -> int:
-        """Parameter count (decision 11): ``total`` counts every distinct tensor once, so a tied head
+        """Parameter count: ``total`` counts every distinct tensor once, so a tied head
         is not double-counted; ``non_embedding = total - embedding - (lm_head if untied)``."""
         n_params = sum(p.numel() for p in self.parameters())
         if non_embedding:

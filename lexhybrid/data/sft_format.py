@@ -1,4 +1,4 @@
-"""The retrieval-grounded SFT format (plan P3-Y; decision 7): one prompt, pointer answers.
+"""The retrieval-grounded SFT format: one prompt, pointer answers.
 
 The prompt is **one document** -- no ``<|endoftext|>`` inside it, so per-document positions and the
 recurrent caches see question, passages and answer as one sequence::
@@ -14,7 +14,7 @@ The target mixes free text with pointers and ends on the EOS::
 
     Er braucht ein berechtigtes Interesse: <|q|><|c1|><|s1|> Die Frist regelt <|cite|><|c2|>.<|endoftext|>
 
-``<|q|><|cK|><|sJ|>`` quotes sentence J of passage K verbatim (the renderer, P7, replaces it by the
+``<|q|><|cK|><|sJ|>`` quotes sentence J of passage K verbatim (the renderer replaces it by the
 sentence and its citation label; the model never writes the sentence itself), ``<|cite|><|cK|>``
 cites passage K, and ``<|unanswerable|>`` is the whole answer when the passages do not support one.
 At most 16 passages of at most 64 sentences (``<|c1|>..<|c16|>``, ``<|s1|>..<|s64|>``).

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""German legal-entity recognition for the LER scrub (plan P3-R1, P3-R; decision 22).
+"""German legal-entity recognition for the LER scrub.
 
 Runs in the scrub environment (``envs/scrub``: flair with transformers < 5) and imports nothing from
 ``lexhybrid``; ``lexhybrid.data.corpus.scrub_ler`` starts it as a subprocess:
@@ -10,7 +10,7 @@ Input lines ``{"id": ..., "text": ...}``; output lines ``{"id": ..., "entities":
 label, score], ...]}`` with character offsets into ``text``. Each line of a text is tagged on its own,
 long lines in chunks of at most ``--max-tokens`` whitespace tokens split after sentence ends and of
 at most ``--max-chars`` characters (flair's character LM allocates per character: one DIP table line
-of ~33,000 characters in a mini-batch asked for 32 GiB, job 2593479_35);
+of ~33,000 characters in a mini-batch asked for 32 GiB);
 ``Sentence(use_tokenizer=False)`` as the model card advises for legal text. Throughput goes to
 stderr at the end. The model is ``flair/ner-german-legal`` at a pinned revision (LER German F1 96.35;
 19 tags), read from ``--cache-dir`` (default ``HF_HUB_CACHE``, else ``$HF_HOME/hub``, else

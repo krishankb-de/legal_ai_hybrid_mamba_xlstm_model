@@ -5,11 +5,11 @@ Checks, for each ``configs/model/*.yaml``:
   * ``compose("config", ["model=<name>", "dataset=synthetic", "trainer=cpu_debug"])`` succeeds and
     ``HybridConfig.from_hydra(cfg.model)`` builds (every key a mixer reads reaches the dataclass);
   * a non-empty ``layer_pattern``;
-  * operators pinned explicitly in the yaml itself (R8): ``tfla_impl`` when the pattern has an
+  * operators pinned explicitly in the yaml itself: ``tfla_impl`` when the pattern has an
     ``mlstm``, ``scan_impl`` when it has a ``mamba`` -- inheriting the dataclass default is how the
-    reference trained an arm with the wrong operator;
+    upstream reference implementation trained an arm with the wrong operator;
   * legacy operators only where allowed: ``hybrid_legal_legacy`` and the ``ref_*`` replicas;
-  * vocabulary: 151,936 for the legal yamls (Qwen3, decision 6), 50,257 for the ``ref_*`` replicas.
+  * vocabulary: 151,936 for the legal yamls (Qwen3), 50,257 for the ``ref_*`` replicas.
 
 Exit code 0 when every yaml passes.
 """
@@ -62,17 +62,15 @@ def check_model(name: str) -> list[str]:
     legacy_ok = name.startswith(LEGACY_ALLOWED)
     if not legacy_ok:
         if "mlstm" in pattern and config.tfla_impl == "legacy":
-            problems.append(f"{name}: tfla_impl legacy outside hybrid_legal_legacy / ref_* (R8)")
+            problems.append(f"{name}: tfla_impl legacy outside hybrid_legal_legacy / ref_*")
         if "mamba" in pattern and config.scan_impl == "legacy":
-            problems.append(f"{name}: scan_impl legacy outside hybrid_legal_legacy / ref_* (R8)")
+            problems.append(f"{name}: scan_impl legacy outside hybrid_legal_legacy / ref_*")
     if name.startswith("ref_") and config.vocab_size != REFERENCE_VOCAB:
         problems.append(
             f"{name}: reference replica must keep vocab {REFERENCE_VOCAB}, has {config.vocab_size}"
         )
     if not name.startswith("ref_") and config.vocab_size != LEGAL_VOCAB:
-        problems.append(
-            f"{name}: legal config must use vocab {LEGAL_VOCAB} (decision 6), has {config.vocab_size}"
-        )
+        problems.append(f"{name}: legal config must use vocab {LEGAL_VOCAB}, has {config.vocab_size}")
     return problems
 
 

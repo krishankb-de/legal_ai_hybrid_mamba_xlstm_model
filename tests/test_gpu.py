@@ -1,7 +1,7 @@
-"""CUDA checks (plan §8.1 "GPU" layer). Marked ``cuda``: they collect everywhere and skip, with the
-reason, on the Mac and in CI; the cluster runs them (``scripts/slurm/gpu_tests.sh``, P4-J1).
+"""CUDA checks. Marked ``cuda``: they collect everywhere and skip, with the
+reason, on macOS and in CI; the cluster runs them (``scripts/slurm/gpu_tests.sh``).
 
-P2-J adds the FlexAttention equivalence; P2-Y1 adds the rest of the GPU layer (SDPA flash vs math,
+Also covers the FlexAttention equivalence and the rest of the GPU layer (SDPA flash vs math,
 SSD/TFLA under autocast, compile vs eager, cached decode, peak memory).
 """
 
@@ -29,7 +29,7 @@ def _packed_doc_ids(batch: int, seq_len: int, device) -> torch.Tensor:
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16], ids=["fp32", "bf16"])
 def test_flex_block_mask_equals_dense_on_gpu(dtype):
-    """Defect 18 (P2-J), CUDA variant of tests/test_layers.py::test_flex_block_mask_equals_dense:
+    """CUDA variant of tests/test_layers.py::test_flex_block_mask_equals_dense:
     the compiled FlexAttention kernel equals the dense-mask path on packed 2,048-token rows."""
     torch.manual_seed(0)
     dense = AttentionBlock(dim=256, num_heads=4, attn_impl="sdpa").cuda().to(dtype)
@@ -87,7 +87,7 @@ def test_sdpa_flash_equals_math_bf16():
 
 @pytest.mark.parametrize("kind", ["mamba3", "mlstm"])
 def test_ssd_tfla_under_bf16_autocast_match_fp32(kind):
-    """SSD and TFLA keep fp32 state under bf16 autocast (P2-E); outputs stay within bf16 noise."""
+    """SSD and TFLA keep fp32 state under bf16 autocast; outputs stay within bf16 noise."""
     torch.manual_seed(0)
     if kind == "mamba3":
         block = Mamba3Block(dim=256, d_state=64, head_dim=64, chunk_size=128).cuda().eval()
@@ -105,7 +105,7 @@ def test_ssd_tfla_under_bf16_autocast_match_fp32(kind):
 
 @pytest.mark.parametrize("autocast", [False, True], ids=["fp32", "bf16-autocast"])
 def test_tfla_wide_chunk_factorises_per_block_on_gpu(autocast):
-    """Job 2599890's regime on the GPU: a 128-chunk whose log-decay overflows one factorisation
+    """On the GPU, a 128-chunk whose log-decay overflows one factorisation
     (forget bias -1: half-range ~84) runs per row block, matches the fp64 recurrence (within bf16
     noise under autocast) and back-propagates finite gradients."""
     from lexhybrid.kernels.tfla import sequential_mlstm_reference, tfla_forward_parallel
@@ -126,7 +126,7 @@ def test_tfla_wide_chunk_factorises_per_block_on_gpu(autocast):
 
 
 def test_compile_equals_eager_on_gpu():
-    """P2-Y's CUDA variant: the compiled legal base equals eager at 1e-4 in fp32 (TF32 off)."""
+    """CUDA variant of the compiled legal base check: the compiled legal base equals eager at 1e-4 in fp32 (TF32 off)."""
     torch.backends.cuda.matmul.allow_tf32 = False
     torch.backends.cudnn.allow_tf32 = False
     model = _reduced_base()
@@ -176,7 +176,7 @@ def test_peak_memory_slab_loss_on_gpu():
 
 
 def test_compiled_flex_attention_matches_eager_per_row():
-    """Job 2588784: under an outer torch.compile, a block mask traced inside the graph was wrong for
+    """Under an outer torch.compile, a block mask traced inside the graph was wrong for
     batch row 1 (drift 0.99). Rows with different document layouts, every row within 1e-4."""
     torch.backends.cuda.matmul.allow_tf32 = False
     model = _reduced_base(layer_pattern=["attention"], num_layers=2, attn_impl="flex")

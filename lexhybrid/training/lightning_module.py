@@ -1,9 +1,10 @@
 """PyTorch Lightning wrapper for causal-LM training (ported base class of the reference).
 
-P1 keeps the reference behaviour: manual gradient clipping in ``on_before_optimizer_step``
+Keeps the reference behaviour: manual gradient clipping in ``on_before_optimizer_step``
 (Lightning's own clipping is not used), WSD with an absolute warmup, the beta2 anneal keyed on
-``global_step``, and cosine/linear/constant alternatives wrapped in a linear warmup. P2-U adds the
-pretraining module (KD, NaN guard that skips the step, the ``val_check_interval`` product rule).
+``global_step``, and cosine/linear/constant alternatives wrapped in a linear warmup. The pretraining
+module (``pretrain_module.py``) adds KD, a NaN guard that skips the step, and the
+``val_check_interval`` product rule.
 """
 
 import pytorch_lightning as pl
@@ -31,7 +32,7 @@ class HybridLightningModule(pl.LightningModule):
         gradient_clip_val: max global grad norm, clipped manually before each optimizer step.
         compile_model: wrap the model in ``torch.compile``.
         beta2_schedule, beta2_start, beta2_end: anneal AdamW beta2 across the WSD decay phase.
-        adam_beta2: AdamW's beta2 (beta1 stays 0.9). The legal configs set 0.95 (decisions.p5_fix):
+        adam_beta2: AdamW's beta2 (beta1 stays 0.9). The legal configs set 0.95:
             at 0.999 the second moment lags ~700 steps, and one KD-amplified gradient spike gave
             the update that collapsed screen runs S1-s42 and S3-s43.
     """
@@ -104,7 +105,7 @@ class HybridLightningModule(pl.LightningModule):
     def _accumulate_val(self, ce: torch.Tensor, n: int) -> None:
         """Token-weighted sums for the epoch's ``val/perplexity``. Logged per batch with
         ``on_epoch=True`` it was the mean of per-batch exp(CE), which Jensen's inequality inflates
-        (screen attempt 1: 31.69 logged against exp(mean CE) = 8.19, job 2636358)."""
+        (31.69 logged against exp(mean CE) = 8.19)."""
         self._val_sums += torch.stack(
             [
                 ce.detach().double() * n,

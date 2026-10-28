@@ -1,4 +1,4 @@
-"""`scripts/sync_to_cluster.sh` and `scripts/sync_from_cluster.sh` (plan P4-D, rule f).
+"""`scripts/sync_to_cluster.sh` and `scripts/sync_from_cluster.sh`.
 
 Each script runs from a copy inside a temporary tree, with fake `ssh` and `rsync` on PATH that
 record their arguments, so nothing reaches the network or the real repository.
@@ -85,6 +85,14 @@ def test_sync_to_writes_stamp_makes_dirs_and_rsyncs_with_delete(tmp_path):
     assert len(got) == 2
 
 
+def test_sync_to_adds_the_optional_local_exclude_file(tmp_path):
+    root, bin_dir, log = make_tree(tmp_path)
+    (root / ".rsync-exclude.local").write_text("notes/\n")
+    res = run(root, bin_dir, "sync_to_cluster.sh")
+    assert res.returncode == 0, res.stderr
+    assert f"--exclude-from={root}/.rsync-exclude.local" in calls(log)[1]
+
+
 def test_sync_to_dry_run_touches_nothing_remote_and_writes_no_stamp(tmp_path):
     root, bin_dir, log = make_tree(tmp_path)
     res = run(root, bin_dir, "sync_to_cluster.sh", "--dry-run")
@@ -130,4 +138,4 @@ def test_sync_from_refuses_anything_but_logs_or_analysis(tmp_path, args):
 def test_scripts_run_no_git():
     for script in (TO, FROM):
         code = "\n".join(ln for ln in script.read_text().splitlines() if not ln.lstrip().startswith("#"))
-        assert not re.search(r"\bgit\b", code), f"{script.name} calls git (rule d)"
+        assert not re.search(r"\bgit\b", code), f"{script.name} calls git"

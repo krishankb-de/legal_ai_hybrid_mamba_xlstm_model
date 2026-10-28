@@ -8,11 +8,11 @@ Each decoder is split into two parts:
 * an **advance** function that turns "these rows now end in these tokens" into next-token logits.
 
 The uncached references (``greedy``, ``sample``, ``beam_search``) advance by recomputing the full
-forward pass over every row; the cached decoders (P2-O, P2-P) advance by one ``step`` through the
+forward pass over every row; the cached decoders advance by one ``step`` through the
 recurrent state and KV caches. Sharing the core means a cached decoder can differ from its reference
 only through the logits, which the cache-equivalence tests bound -- never through a subtly
 different rule. The reference project's cached beam was tested against an uncached one living in a
-dropped report-generation script (defect 11); this module is the new reference.
+dropped report-generation script; this module is the new reference.
 
 Conventions (as in Hugging Face ``generate``):
 
@@ -301,7 +301,7 @@ def beam_search_uncached(
     repetition_penalty: float = 1.0,
     logits_processor: LogitsProcessor | None = None,
 ) -> torch.Tensor:
-    """The P1 name of ``beam_search`` (ported from the reference's ``beam_search_decode``)."""
+    """The original name of ``beam_search`` (ported from the reference's ``beam_search_decode``)."""
     _check_one_sample(input_ids, "beam_search_uncached")
     return beam_search(
         model,
@@ -316,7 +316,7 @@ def beam_search_uncached(
 
 
 # ---------------------------------------------------------------------------------------------
-# cached decoders (P2-O, P2-P): the same cores, advanced one step through the caches
+# cached decoders: the same cores, advanced one step through the caches
 # ---------------------------------------------------------------------------------------------
 
 
@@ -422,7 +422,7 @@ def beam_search_cached(
     repetition_penalty: float = 1.0,
     logits_processor: LogitsProcessor | None = None,
 ) -> torch.Tensor:
-    """``beam_search`` over the caches (P2-P, defect 11), one sample at a time.
+    """``beam_search`` over the caches one sample at a time.
 
     The prompt is prefilled ONCE on one row and the caches are replicated to ``beam_size`` rows;
     every step reorders all of them (recurrent states, conv windows, KV caches, document starts)
@@ -480,11 +480,11 @@ def best_of_n(
     generator: torch.Generator | None = None,
     return_scores: bool = False,
 ):
-    """Draw ``n`` cached samples for one prompt and return the one ``scorer`` rates highest (P2-R).
+    """Draw ``n`` cached samples for one prompt and return the one ``scorer`` rates highest.
 
     The n samples decode as one batch of n rows over the caches. ``scorer`` receives each answer's
-    generated tokens (prompt removed, cut after the first EOS) and returns a float; the P7 verifier
-    (citation precision, quote fidelity, NLI) is the scorer the plan intends. Ties go to the
+    generated tokens (prompt removed, cut after the first EOS) and returns a float; the verifier
+    (citation precision, quote fidelity, NLI) is the intended scorer. Ties go to the
     earliest sample, so a constant scorer returns sample 0.
 
     Returns:

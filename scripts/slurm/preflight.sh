@@ -10,8 +10,8 @@
 #SBATCH --output=logs/%x_%j.log
 #SBATCH --error=logs/%x_%j.log
 #
-# preflight.sh -- CPU checks before any GPU job (plan P4-I, port map §11.1).
-# Submit from the Mac:  ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch scripts/slurm/preflight.sh"
+# preflight.sh -- CPU checks before any GPU job.
+# Submit from your workstation:  ssh $CLUSTER_HOST "cd $CLUSTER_REPO && sbatch scripts/slurm/preflight.sh"
 # Every step runs; the log ends in "PRE-FLIGHT PASSED" only if all of them exit 0.
 set -euo pipefail
 cd "${SLURM_SUBMIT_DIR:-.}"
@@ -22,7 +22,7 @@ export HF_HUB_OFFLINE=1
 export HF_DATASETS_OFFLINE=1
 export TORCHINDUCTOR_CACHE_DIR="${SCRATCH_ROOT}/.torchinductor"
 export PYTHONUNBUFFERED=1
-export PATH="$HOME/.local/bin:$PATH"   # uv (setup_env installs it there); batch jobs lack it (job 2588703)
+export PATH="$HOME/.local/bin:$PATH"   # uv (setup_env installs it there); batch jobs lack it
 mkdir -p logs
 
 echo "host: $(hostname)  job: ${SLURM_JOB_ID:-none}"

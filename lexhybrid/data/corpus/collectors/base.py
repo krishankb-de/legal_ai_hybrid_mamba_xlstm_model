@@ -1,4 +1,4 @@
-"""What every collector shares (plan P3-E): the protocol, polite HTTP, and the CLI.
+"""What every collector shares: the protocol, polite HTTP, and the CLI.
 
 A collector turns one public source into ``Document`` records. Each is split in two so the tests
 never need the network: a pure ``parse_*`` function from raw bytes (XML, JSON, HTML) to documents,
@@ -10,7 +10,7 @@ fetches and parses, exercised by a ``network``-marked live smoke (``--limit 2``)
 writes ``data/raw/gii/gii.jsonl`` (full documents, git-ignored) and ``data/manifests/gii.jsonl``
 (every field but the text; versioned).
 
-At scale (P4-K) a collection runs for hours to days at one request per second, on a preemptible
+At scale a collection runs for hours to days at one request per second, on a preemptible
 partition: ``--limit all`` collects everything, both files are streamed to ``*.partial`` and renamed
 only when the collection completes (a killed run never leaves a complete-looking file), and
 ``--http-cache DIR`` keeps every successful response on disk, so a requeued run replays what it
@@ -91,8 +91,8 @@ class FetchError(RuntimeError):
 
 class SkipFailedDocuments:
     """Fetch one document, or skip it (logged) when its fetch fails after every retry, so a crawl of
-    days does not die on one dropped connection (job 2589358_1: RII, 13,000 documents and 3.8 h in,
-    one RemoteDisconnected). ``max_consecutive`` failures in a row still raise: that is an outage,
+    days does not die on one dropped connection (RII once failed 13,000 documents and 3.8 h in,
+    on one RemoteDisconnected). ``max_consecutive`` failures in a row still raise: that is an outage,
     not a flaky document. Listing and index requests are not wrapped: without them nothing follows.
     """
 
@@ -318,7 +318,7 @@ def cli(collector: Collector, argv=None) -> int:
     parser.add_argument("--out", type=Path, default=REPO_ROOT / "data" / "raw" / collector.name)
     parser.add_argument("--manifest-dir", type=Path, default=REPO_ROOT / "data" / "manifests")
     parser.add_argument(
-        "--http-cache", type=Path, default=None, help="keep responses here; a rerun replays them (P4-K)"
+        "--http-cache", type=Path, default=None, help="keep responses here; a rerun replays them"
     )
     args = parser.parse_args(argv)
     set_http_cache(args.http_cache)

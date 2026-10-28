@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# validate.sh -- the local gate (plan §8.3). A code box is ticked only after this exits 0.
+# validate.sh -- the local validation script: environment, static checks, tests, smoke, hygiene.
 #
-#   bash scripts/validate.sh            # every code box: fast selection (no slow/cuda/multigpu/network)
-#   bash scripts/validate.sh --full     # every Pn-Z gate: adds the slow tests
+#   bash scripts/validate.sh            # fast selection (no slow/cuda/multigpu/network)
+#   bash scripts/validate.sh --full     # adds the slow tests
 #   bash scripts/validate.sh --ci       # what the GitHub Actions `test` job runs: --full + coverage
 #                                       # floor + JUnit output, shellcheck mandatory
-#   bash scripts/validate.sh --full --coverage   # --full plus a coverage report (P1-W5)
+#   bash scripts/validate.sh --full --coverage   # --full plus a coverage report
 #
 # Gates:
-#   0  plan/state consistent        python3 scripts/plan_state.py check
+#   0  optional local pre-checks    scripts/validate.local.sh, when present (or $VALIDATE_PRE_HOOK)
 #   1  environment == lock          uv lock --check (also envs/scrub); scripts/check_env.py
 #   2  static                       ruff check; ruff format --check; bash -n and shellcheck on *.sh
 #   3  model configs                scripts/check_configs.py (Hydra compose, operator pins, vocab)
@@ -28,7 +28,7 @@ for arg in "$@"; do
     --full) MODE=full ;;
     --ci) MODE=ci; COVERAGE=1 ;;
     --coverage) COVERAGE=1 ;;
-    -h|--help) sed -n '2,24p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "unknown argument: $arg" >&2; exit 2 ;;
   esac
 done
@@ -62,8 +62,14 @@ echo " repo:   $REPO_ROOT"
 echo " python: $PYTHON ($("$PYTHON" -c 'import sys; print(sys.version.split()[0])'))"
 echo "================================================================"
 
-echo; echo "-- Gate 0: plan and state --"
-run_gate "plan/state consistent" "$PYTHON" scripts/plan_state.py check
+echo; echo "-- Gate 0: optional local pre-checks --"
+PRE_HOOK="${VALIDATE_PRE_HOOK:-$REPO_ROOT/scripts/validate.local.sh}"
+if [[ -f "$PRE_HOOK" ]]; then
+  export PYTHON
+  run_gate "local pre-checks" bash "$PRE_HOOK"
+else
+  echo "no local pre-checks (scripts/validate.local.sh)"
+fi
 
 echo; echo "-- Gate 1: environment --"
 if [[ -n "$UV" ]]; then

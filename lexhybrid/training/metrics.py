@@ -13,7 +13,7 @@ def compute_perplexity(loss: torch.Tensor) -> torch.Tensor:
 def compute_bits_per_token(loss: torch.Tensor) -> torch.Tensor:
     """Cross-entropy in bits per token (``loss / ln 2``).
 
-    The reference named this "bits per byte", but nothing divides by bytes per token (defect 13).
+    The reference named this "bits per byte", but nothing divides by bytes per token.
     """
     return loss / math.log(2)
 

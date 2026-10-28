@@ -1,4 +1,4 @@
-"""Checkpoint utilities and run metadata (plan P1-Q)."""
+"""Checkpoint utilities and run metadata."""
 
 import json
 

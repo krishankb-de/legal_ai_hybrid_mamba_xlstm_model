@@ -1,13 +1,13 @@
-"""The one document record every collector emits and every later stage reads (plan P3-A).
+"""The one document record every collector emits and every later stage reads.
 
 A ``Document`` is a whole statute provision, decision, parliamentary paper or general-web page, with
 its provenance (source, licence, URL, retrieval time, content hash), its legal coordinates
 (jurisdiction, type, validity window, citation id) and its text split into ``Section``s -- the
-units the retriever chunks (P7) and the renderer quotes (``BGB §573 Abs. 2 Nr. 1``).
+units the retriever chunks and the renderer quotes (``BGB §573 Abs. 2 Nr. 1``).
 
-Licence discipline (R9) starts here: ``licence`` is required, ``commercial_safe`` is explicit, and
-``research_only`` marks the non-commercial research-exception arm (decision 2), which can never be
-commercial-safe. ``Docs/DOCUMENT_SCHEMA.md`` documents every field and the ``citation_id`` grammar.
+Licence discipline starts here: ``licence`` is required, ``commercial_safe`` is explicit, and
+``research_only`` marks the non-commercial research-exception arm, which can never be
+commercial-safe. ``docs/DOCUMENT_SCHEMA.md`` documents every field and the ``citation_id`` grammar.
 """
 
 import hashlib
@@ -38,7 +38,7 @@ class Section:
         text: the section's exact text (what a quote is checked against).
         part: the part of a decision the section belongs to -- ``"Leitsatz"``, ``"Tenor"``,
             ``"Tatbestand"``, ``"Entscheidungsgründe"``, ``"Gründe"``, ``"Sachverhalt"``,
-            ``"Erwägungen"``, ``"Spruch"``, ``"Begründung"`` -- when the source marks it (P7-B chunks a
+            ``"Erwägungen"``, ``"Spruch"``, ``"Begründung"`` -- when the source marks it (the retriever chunks a
             decision part by part); None for statutes and sources without parts.
     """
 
@@ -69,8 +69,8 @@ class Document:
     sha256: str = ""  # filled from ``text`` when empty
     research_only: bool = False
     sections: list[Section] = field(default_factory=list)
-    # The act's structural headings above this provision, outermost first, when the source has them
-    # (P7-A): ["Buch 2 Recht der Schuldverhältnisse", "Abschnitt 8 Einzelne Schuldverhältnisse", ...].
+    # The act's structural headings above this provision, outermost first, when the source has them:
+    # ["Buch 2 Recht der Schuldverhältnisse", "Abschnitt 8 Einzelne Schuldverhältnisse", ...].
     hierarchy: list[str] = field(default_factory=list)
 
     def __post_init__(self):
@@ -134,13 +134,13 @@ class Document:
 
 
 # ---------------------------------------------------------------------------------------------
-# citation ids (Docs/DOCUMENT_SCHEMA.md)
+# citation ids (docs/DOCUMENT_SCHEMA.md)
 # ---------------------------------------------------------------------------------------------
 
 _NUM = r"\d+[a-z]*"  # 573, 573a, 334bis
 # The act's code is whatever precedes the provision, matched lazily so the earliest split that
 # leaves a whole provision wins. gii's official abbreviations are not one capitalised token: 12.7% of
-# its 90,255 provisions (job 2663318, 2026-10-15) have codes such as "SGB 5", "13. BImSchV",
+# its 90,255 provisions have codes such as "SGB 5", "13. BImSchV",
 # "1-DM-GoldmünzG", "eIDKG", "II. BV" or "V zu § 180 Abs. 2 AO". The old one-token rule rejected them,
 # and 111 more ("DBAbkG ARM Art. 3") fell through to the decision grammar, whose court pattern
 # accepts any word ending in G.

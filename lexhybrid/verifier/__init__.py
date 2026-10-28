@@ -1,1 +1,1 @@
-"""verifier (built in P7)."""
+"""Answer verification: pointers, quotes, entailment and scrub leaks."""

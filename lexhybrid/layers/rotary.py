@@ -1,4 +1,4 @@
-"""Data-dependent rotary embeddings for the complex-valued SSM (reference M4).
+"""Data-dependent rotary embeddings for the complex-valued SSM.
 
 Mamba-3 Sec 3.2 makes the state transition complex. Proposition 2 shows a complex SSM of state
 size N/2 is equivalent to a real one of size N whose transition is a scalar decay times a
@@ -48,7 +48,7 @@ def cumulative_angles_fp64(
 ) -> torch.Tensor:
     """``cumulative_angles`` before the final cast: float64, wrapped to [0, 2pi).
 
-    Exposed for the decode cache (P2-F): ``Mamba3Block.step`` continues the accumulation in float64
+    Exposed for the decode cache: ``Mamba3Block.step`` continues the accumulation in float64
     from the last position's angle, exactly as the chunked path accumulates.
     """
     step = dt.double() * theta.double()

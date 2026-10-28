@@ -1,4 +1,4 @@
-"""Pretraining data over packed shards (plan P3-V): the split, the mixture and the arms.
+"""Pretraining data over packed shards: the split, the mixture and the arms.
 
 **Split by document.** ``split_by_document`` puts a document in validation by a seeded hash of its
 id: 0.1% of the documents, at least 2,000 (asserted; a corpus too small for that is an error, not a
@@ -8,13 +8,13 @@ writes ``meta.json`` (documents, rows, tokens, licences, and whether every row i
 any is research-only).
 
 **Mixture.** A source belongs to a group (``legal``, ``general``) with a weight; the groups take
-their token shares (70 / 30, decision 13), each split among its sources by weight. Rows are fixed
+their token shares (70 / 30), each split among its sources by weight. Rows are fixed
 length, so drawing rows in those proportions draws tokens in them. The training order is a seeded,
 precomputed schedule: sample ``i`` is always the same row, so a run is reproducible and can resume
 by starting at a sample offset. Validation reads every validation row of every admitted source once,
 in order.
 
-**Arms** (decision 2). ``commercial_safe`` admits only sources whose shards are commercial-safe and
+**Arms.** ``commercial_safe`` admits only sources whose shards are commercial-safe and
 free of research-only rows, and checks every row it serves; ``research`` admits everything. A
 research-only source listed for the commercial-safe arm is an error, never a silent drop.
 """
@@ -92,7 +92,7 @@ def build_source_shards_stream(
     seed: int = 0,
     extra: dict | None = None,
 ) -> dict[int, dict]:
-    """``build_source_shards`` for a source that does not fit in memory (P4-L): ONE pass over its
+    """``build_source_shards`` for a source that does not fit in memory: ONE pass over its
     documents, each tokenised once and packed at every row length, rows written to their shards as
     they complete. ``val_ids`` is ``split_by_document`` over the source's ids (a first pass, ids
     only). The shards and ``meta.json`` of each row length are exactly ``build_source_shards``'."""
@@ -174,9 +174,9 @@ def shard_directory(root: Path, row_len: int, source: str) -> tuple[Path, int]:
 
     Shards packed at exactly ``row_len`` are read as they are (factor 1). Otherwise the smallest
     packed length that is a multiple of ``row_len`` serves each stored row as ``factor`` consecutive
-    sub-rows: the P5 screen trains on 2,048-token rows cut from the 4,096-token shards (P4-L packs
-    4,096 and 8,192 only). A cut is a stretch of the same packed stream; a sub-row that starts inside
-    a document is an ordinary packed row (no position predicts into position 0).
+    sub-rows: a screening run can train on 2,048-token rows cut from 4,096-token shards (the
+    at-scale build packs 4,096 and 8,192 only). A cut is a stretch of the same packed
+    stream; a sub-row that starts inside a document is an ordinary packed row (no position predicts into position 0).
     """
     root = Path(root)
     exact = root / str(row_len) / source
@@ -335,7 +335,7 @@ def _rank_world() -> tuple[int, int]:
 
 
 class ScheduleSampler(Sampler[int]):
-    """A training mixture's rows for one rank, from where the run stands (``decisions.resume_data``).
+    """A training mixture's rows for one rank, from where the run stands.
 
     Sample ``i`` of the schedule is always the same row. Under DDP, rank ``r`` of ``w`` reads samples
     ``r, r + w, r + 2w, ...``, the order ``DistributedSampler(shuffle=False)`` gives, but every rank
@@ -346,7 +346,7 @@ class ScheduleSampler(Sampler[int]):
     from the checkpoint before iteration). That is exactly what Lightning expects a resumable loader
     to skip, so the two never disagree.
     - **A requeue** reads on where it stopped.
-    - **A stage that resumes onto a new, shorter schedule** (P6 stage B) has already used up its first
+    - **A stage that resumes onto a new, shorter schedule** (a later training stage) has already used up its first
       epoch by that count, so it starts the new schedule at row 0.
 
     ``__len__`` stays the rank's whole share. Rank and world are read when needed, after the process

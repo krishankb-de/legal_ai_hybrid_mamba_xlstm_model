@@ -33,7 +33,7 @@ def pad_segments(seg: torch.Tensor, pad: int) -> torch.Tensor:
     Padding carries forget gates of 1 (or zero decay) and zero inputs, so it leaves the state
     untouched. Giving it the last real segment's id means the state that reaches the end of the
     padded row is the state after the last real token; a fresh id (the reference's choice, which
-    also cost a host sync) would have discarded it (defect 7).
+    also cost a host sync) would have discarded it.
     """
     if pad <= 0:
         return seg

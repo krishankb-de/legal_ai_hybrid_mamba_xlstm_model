@@ -1,13 +1,13 @@
-"""GerLeRB, the German Legislative Retrieval Benchmark (plan P3-P): questions over federal statutes.
+"""GerLeRB, the German Legislative Retrieval Benchmark: questions over federal statutes.
 
 Source: Zenodo record 15745124 (2025-06-26, CC BY 4.0): ``topics.txt`` (``qid<TAB>query``, 367
 questions), ``qrels.txt`` (``qid<TAB>iteration<TAB>docno<TAB>label``) and ``corpus.trec.gz``
 (90,798 paragraphs as TREC ``<DOC><DOCNO>..</DOCNO><TEXT>..</TEXT></DOC>``). A ``docno`` is
 ``<paragraph>_<GII slug>`` (``812_bgb``), so ``gii_id`` maps it onto the GII collector's ids
-(``gii:bgb:812``) and P7 can score GerLeRB against the project's own statute index.
+(``gii:bgb:812``) and retrieval can score GerLeRB against the project's own statute index.
 
 The questions were generated with GPT-4.1 from court-decision contexts and checked by legal experts:
-evaluation only, never training data (R10).
+evaluation only, never training data.
 """
 
 import gzip
@@ -24,7 +24,7 @@ INFO = EvalSetInfo(
     task="retrieval",
     licence="CC-BY-4.0",
     source=f"https://zenodo.org/records/{RECORD}",
-    note="queries generated with GPT-4.1 and verified by legal experts: evaluation only (R10)",
+    note="queries generated with GPT-4.1 and verified by legal experts: evaluation only",
 )
 _DOC = re.compile(r"<DOC>\s*<DOCNO>(?P<docno>[^<]+)</DOCNO>\s*<TEXT>(?P<text>.*?)</TEXT>\s*</DOC>", re.S)
 _DOCNO = re.compile(r"^(?P<n>\d+[a-z]*)_(?P<slug>[\w-]+)$")

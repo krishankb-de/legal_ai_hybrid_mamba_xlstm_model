@@ -3,8 +3,8 @@
 
 Builds a 4-layer model with ``[mamba3, mlstm, attention, mamba]``, exact operators and HybridNorm,
 runs a packed batch with ``doc_ids`` and labels, and asserts a finite loss and that EVERY trainable
-parameter receives a gradient -- the check that catches a mixer wired up halfway. (The reference
-harness built this model with ``use_tfla=False``, i.e. a different mLSTM operator than the one that
+parameter receives a gradient -- the check that catches a mixer wired up halfway. (The upstream reference
+implementation's harness built this model with ``use_tfla=False``, i.e. a different mLSTM operator than the one that
 trains; this one runs the shipping path.)
 """
 

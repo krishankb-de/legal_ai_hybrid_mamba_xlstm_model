@@ -1,11 +1,11 @@
-"""The answer verifier (plan P7-J): claim by claim, pointer -> quote -> NLI, behind a party-identity rule.
+"""The answer verifier: claim by claim, pointer -> quote -> NLI, behind a party-identity rule.
 
 ``verify(question, answer, chunks, nli, ner)`` takes the model's raw pointer answer and the retrieved
 passages in prompt order (passage ``K`` is ``chunks[K - 1]``) and returns what the reader sees:
 
 1. **Parse** (``segments.parse_answer``): a malformed answer is refused; ``<|unanswerable|>`` is the
    model's own refusal.
-2. **Party identity** (decisions 13 and 22: no person is named): a question asking who a party was
+2. **Party identity** (no person is ever named): a question asking who a party was
    (``Wer war der Kläger?``, ``Wie heißt die Beklagte?``, ``Name des Antragstellers``; see
    ``asks_for_party``) is refused, and so is an answer whose text or quoted sentences hold a ``[PER_n]``
    placeholder or a name the LER model finds (``ner(text) -> [person names]``, optional). Refusal
@@ -24,7 +24,7 @@ passages in prompt order (passage ``K`` is ``chunks[K - 1]``) and returns what t
    resolves (``pointers.check_pointers``), every quote rendered by ``render_quote`` equals its source
    (``quotes.check_quote``: this guards against renderer drift), and the NLI model gives the
    hypothesis -- the claim's text with each quote inline as ``„<source>“``, citations left out --
-   an entailment probability of at least ``threshold`` (``ENTAILMENT_THRESHOLD``, pre-registered)
+   an entailment probability of at least ``threshold`` (``ENTAILMENT_THRESHOLD``)
    given the premise: the quoted and cited sentences, or the whole chunk text (``Chunk.text``) for a
    citation of a passage without sentences.
 5. **Result**: failing claims are removed. If the first claim (the main claim) fails, the answer is

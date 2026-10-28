@@ -1,4 +1,4 @@
-"""Licence register in code (plan P3-B, rule R9). ``Docs/CORPUS_LICENCE_REGISTER.md`` is its prose twin.
+"""Licence register in code. ``docs/CORPUS_LICENCE_REGISTER.md`` is its prose twin.
 
 Every ``Document.licence`` must be an id of ``LICENCES``. ``require_known`` refuses ``unknown`` and
 unregistered ids; ``check_document`` refuses a record that claims more than its licence allows (a
@@ -97,7 +97,7 @@ class LicenceError(ValueError):
 def require_known(licence_id: str) -> Licence:
     """The registered licence, or ``LicenceError`` for ``unknown`` and unregistered ids."""
     if licence_id == "unknown":
-        raise LicenceError("licence 'unknown' is refused: establish the licence and register it first (R9)")
+        raise LicenceError("licence 'unknown' is refused: establish the licence and register it first")
     if licence_id not in LICENCES:
         raise LicenceError(f"licence {licence_id!r} is not in the register ({sorted(LICENCES)})")
     return LICENCES[licence_id]

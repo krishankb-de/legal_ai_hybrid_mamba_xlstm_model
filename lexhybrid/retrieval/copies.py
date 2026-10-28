@@ -1,6 +1,6 @@
-"""Cross-source copies of a document, from the pack's dedup log (``decisions.cite_every_copy``).
+"""Cross-source copies of a document, from the pack's dedup log.
 
-Decision 13 as amended (user, 2026-09-29): a document whose text another source also holds is kept,
+A document whose text another source also holds is kept,
 not dropped. Examples are one decision in rii and oldp, or an oldp decision in the research arm's
 Multi Legal Pile. The pack's ``dedup.jsonl`` links each such copy to the document it matches
 (``dropped: false``). Here those links become groups: linked copies are grouped transitively, so A–B
