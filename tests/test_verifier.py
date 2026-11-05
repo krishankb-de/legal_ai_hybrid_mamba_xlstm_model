@@ -587,3 +587,72 @@ def test_nli_truncates_the_premise_never_the_claim(monkeypatch):
     assert seen.pairs[-1][2]["truncation"] == "only_first" and seen.forwards == 1
     assert nli("Prämisse", "fünf Wörter sind hier zuviel") == 0.0  # 5 + 3 >= 8: nothing left for it
     assert seen.forwards == 1 and len(seen.pairs) == 1
+
+
+def test_nli_calibration_set_is_balanced_and_well_formed(script):
+    """The hand-built calibration set: 100 pairs, half entailed, every kind's label matching its
+    name, the verifier's quote style („…“) in the quote kinds, unique ids."""
+    from tests.conftest import REPO_ROOT
+
+    info, pairs = script("calibrate_nli").read_pairs(
+        REPO_ROOT / "data" / "manifests" / "nli_calibration.jsonl"
+    )
+    assert info["name"] == "nli_calibration" and info["review"] in ("pending", "done")
+    assert len(pairs) == 100 and sum(p["label"] for p in pairs) == 50
+    assert all(p["label"] == int(p["kind"].startswith("entail")) for p in pairs)
+    assert all("„" in p["hypothesis"] for p in pairs if p["kind"] in ("entail_quote", "contradict_framing"))
+    assert len({(p["premise"], p["hypothesis"]) for p in pairs}) == 100
+
+
+def test_calibrate_nli_reports_fixed_and_best_thresholds_and_refuses_unreviewed(
+    tmp_path, script, monkeypatch
+):
+    import json
+
+    cal = script("calibrate_nli")
+    rows = [{"info": {"name": "t", "review": "pending"}}] + [
+        {"id": f"p{i}", "kind": k, "premise": "P", "hypothesis": f"H{i}", "label": y}
+        for i, (k, y) in enumerate([("entail_a", 1), ("entail_a", 1), ("neutral_b", 0), ("neutral_b", 0)])
+    ]
+    pairs = tmp_path / "pairs.jsonl"
+    pairs.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    probs = {"H0": 0.9, "H1": 0.4, "H2": 0.6, "H3": 0.1}  # at 0.5: tp 1, fp 1, fn 1
+    monkeypatch.setattr(cal, "MDebertaNLI", lambda *a, **k: lambda premise, hypothesis: probs[hypothesis])
+    out = tmp_path / "report.json"
+    with pytest.raises(SystemExit, match="review is 'pending'"):
+        cal.main(["--pairs", str(pairs), "--out", str(out)])
+    rows[0]["info"]["review"] = "done"
+    pairs.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    assert cal.main(["--pairs", str(pairs), "--out", str(out)]) == 0
+    report = json.loads(out.read_text())
+    assert report["fixed"] == {
+        "threshold": 0.5,
+        "precision": 0.5,
+        "recall": 0.5,
+        "f1": 0.5,
+        "tp": 1,
+        "fp": 1,
+        "fn": 1,
+    }
+    assert report["best"]["threshold"] == 0.4 and report["best"]["recall"] == 1.0  # F1 0.8 at 0.4
+    assert report["ships"] is None, "precision 0.5 < 0.85: not shipped"
+    assert report["accuracy_by_kind"] == {"entail_a": 0.5, "neutral_b": 0.5}
+    rows.append({"id": "p0", "kind": "x", "premise": "P", "hypothesis": "H", "label": 1})
+    pairs.write_text("".join(json.dumps(r) + "\n" for r in rows))
+    with pytest.raises(SystemExit, match="duplicate"):
+        cal.main(["--pairs", str(pairs), "--out", str(out)])
+
+
+def test_a_claim_of_verbatim_quotes_alone_needs_no_nli():
+    """A long passage quoted whole would overflow the NLI window and be refused for its length; the
+    quote check has already proved it. A claim with words of its own still goes to NLI."""
+    chunk = next(c for d in _fixture_corpus() for c in chunk_document(d) if len(c.sentences) >= 1)
+    pointer = "<|q|><|c1|>" + "".join(f"<|s{j}|>" for j in range(1, len(chunk.sentences) + 1))
+
+    def never(premise, hypothesis):
+        raise AssertionError("NLI was asked about a bare quote")
+
+    r = verify("Welche Regel gilt?", pointer + "<|endoftext|>", [chunk], never)
+    assert not r.refused and r.citation_precision == 1.0 and r.claims[0].entailment is None
+    framed = verify("Welche Regel gilt?", "Es gilt: " + pointer, [chunk], lambda p, h: 0.0)
+    assert framed.refused and framed.claims[0].entailment == 0.0

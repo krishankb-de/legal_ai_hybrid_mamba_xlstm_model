@@ -39,5 +39,5 @@ def copy_groups(rows: Iterable[dict]) -> dict[str, tuple[str, ...]]:
 
 def read_dedup_logs(paths: Iterable[Path]) -> list[dict]:
     return [
-        json.loads(line) for p in paths for line in Path(p).read_text(encoding="utf-8").splitlines() if line
+        json.loads(line) for p in paths for line in Path(p).read_text(encoding="utf-8").split("\n") if line
     ]

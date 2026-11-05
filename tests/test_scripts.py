@@ -290,8 +290,29 @@ def test_screen_arms_verify_reduced(script):
     """Every arm builds through HybridConfig.from_hydra at reduced width, runs a packed
     forward/backward, and shows its expected ARCH tokens (and none of its forbidden ones)."""
     arms = script("screen_arms")
-    assert set(arms.ARMS) == {"S0", "S1", "S2", "S3", "S4", "S5", "S6"}
+    lr_arms = {f"{b}-{t}" for b in ("S0", "S1") for t in ("lr2", "lr8")}
+    assert set(arms.ARMS) == {"S0", "S1", "S2", "S3", "S4", "S5", "S6"} | lr_arms
     assert arms.main(["verify", "--reduced"]) == 0
+
+
+def test_screen_arms_lr_arms_differ_only_in_lr(script):
+    """The learning-rate arms are S0 and S1 with only `model.learning_rate` changed, and the
+    override reaches the wrapper's environment."""
+    arms = script("screen_arms")
+    for base in ("S0", "S1"):
+        ref = arms.ARMS[base]
+        for tag, lr in (("lr2", 0.0002), ("lr8", 0.0008)):
+            arm = arms.ARMS[f"{base}-{tag}"]
+            assert (arm.config, arm.overrides, arm.expect, arm.forbid) == (
+                ref.config, ref.overrides, ref.expect, ref.forbid
+            )  # fmt: skip
+            assert arm.extra == {"model.learning_rate": lr}
+            env = dict(
+                line.removeprefix("export ").split("=", 1) for line in arms.env_lines(f"{base}-{tag}-s42")
+            )
+            assert env["EXTRA_OVERRIDES"].count("model.learning_rate=") == 1
+            assert f"model.learning_rate={lr}" in env["EXTRA_OVERRIDES"]
+            assert env["EXPERIMENT"] == f"screen2_{base}-{tag}_s42" and env["SEED"] == "42"
 
 
 def test_screen_arms_verify_full_passes_with_the_decided_s5_band(script, capsys):
@@ -518,3 +539,41 @@ def test_screen_table_never_decides_without_the_control(tmp_path, script, capsys
     assert (
         "RULE incomplete: S1 lacks two seeds of val_ppl, statute_em, multihop_em" in capsys.readouterr().out
     )
+
+
+def test_bootstrap_compares_sparse_metrics_on_the_items_both_systems_scored(script, tmp_path):
+    """A per-question metric present on some items only is compared on the items where BOTH systems
+    have it (paired), never crashes a resample that misses them, and reports its own n."""
+    import json
+
+    mod = script("bootstrap_compare")
+    a = [{"acc": 1.0, "recall": 1.0}, {"acc": 1.0}, {"acc": 0.0, "recall": 0.0}, {"acc": 1.0}]
+    b = [{"acc": 0.0, "recall": 0.5}, {"acc": 1.0, "recall": 0.0}, {"acc": 0.0}, {"acc": 0.0}]
+    results, _ = mod.paired_bootstrap(mod.build_cache(None, None, a), mod.build_cache(None, None, b), 200, 0)
+    assert results["recall"]["n"] == 1 and results["recall"]["a"] == 1.0 and results["recall"]["b"] == 0.5
+    assert results["acc"]["n"] == 4 and results["acc"]["diff"] == 0.5
+    fa, fb = tmp_path / "a.jsonl", tmp_path / "b.jsonl"
+    fa.write_text("".join(json.dumps(r) + "\n" for r in a))
+    fb.write_text("".join(json.dumps(r) + "\n" for r in b))
+    assert mod.main(["--metrics-a", str(fa), "--metrics-b", str(fb), "--bootstrap-samples", "50"]) == 0
+    (tmp_path / "e.jsonl").write_text("")
+    with pytest.raises(SystemExit, match="no items"):
+        mod.main(["--metrics-a", str(tmp_path / "e.jsonl"), "--metrics-b", str(tmp_path / "e.jsonl")])
+
+
+def test_bootstrap_pairs_by_id_and_refuses_files_that_do_not_pair(script, tmp_path):
+    """Rows are joined on id, whatever their order; other items, repeated ids or a missing id are
+    refused, since pairing by line would compare different questions without a sign."""
+    mod = script("bootstrap_compare")
+    a = [{"id": "q1", "m": 1.0}, {"id": "q2", "m": 0.0}]
+    _, b = mod.align(a, [{"id": "q2", "m": 0.5}, {"id": "q1", "m": 0.25}])
+    assert [r["id"] for r in b] == ["q1", "q2"] and b[0]["m"] == 0.25
+    results, _ = mod.paired_bootstrap(mod.build_cache(None, None, a), mod.build_cache(None, None, b), 20, 0)
+    assert set(results) == {"m"} and results["m"]["diff"] == 0.125
+    for other, reason in [
+        ([{"id": "q1", "m": 1.0}, {"id": "q3", "m": 1.0}], "different items"),
+        ([{"id": "q1", "m": 1.0}, {"id": "q1", "m": 1.0}], "repeated ids"),
+        ([{"id": "q1", "m": 1.0}, {"m": 1.0}], "no id"),
+    ]:
+        with pytest.raises(SystemExit, match=reason):
+            mod.align(a, other)

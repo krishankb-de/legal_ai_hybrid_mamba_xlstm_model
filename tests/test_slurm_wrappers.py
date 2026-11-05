@@ -104,7 +104,8 @@ def test_the_array_and_multi_gpu_wrappers_are_found():
         "screen_array.sh", "build_corpus_array.sh", "scrub_array.sh", "eval_probes.sh",
     }  # fmt: skip
     assert {p.name for p in MULTI_GPU_WRAPPERS} == {
-        "multigpu_tests.sh", "train_pretrain_4gpu.sh", "kd_memory_probe.sh",
+        "multigpu_tests.sh", "train_pretrain_4gpu.sh", "kd_memory_probe.sh", "train_sft_4gpu.sh",
+        "train_dpo_4gpu.sh", "synth_qa.sh",
     }  # fmt: skip
 
 
@@ -161,6 +162,19 @@ def test_fetch_hf_downloads_every_model_the_plan_names():
     assert "export HF_HUB_OFFLINE=0" in body and 'HF_HOME="${SCRATCH_ROOT}/.hf"' in body
     assert "gpus" not in directives(SLURM_DIR / "fetch_hf.sh"), "downloads are a CPU job"
     assert "echo $HF_TOKEN" not in body and 'echo "$HF_TOKEN' not in body, "never print the token"
+
+
+def test_fetch_hf_models_override_fetches_only_those_at_main_unless_pinned(sandbox):
+    _executable(
+        sandbox.repo / ".venv" / "bin" / "hf",
+        '#!/usr/bin/env bash\nprintf \'hf\\x1f%s\\n\' "$*" >> "$CALLS"\n',
+    )
+    (sandbox.scratch / ".hf" / "hub").mkdir(parents=True)
+    res, calls = sandbox("fetch_hf.sh", MODELS="Qwen/Qwen3-32B org/pinned|abc123")
+    assert res.returncode == 0, res.stdout + res.stderr
+    assert "FETCH_HF DONE" in res.stdout
+    downloads = [c[1].split() for c in calls if c[0] == "hf"]
+    assert [(d[1], d[3]) for d in downloads] == [("Qwen/Qwen3-32B", "main"), ("org/pinned", "abc123")]
 
 
 def test_fetch_hf_revision_lookups_return_the_pinned_revisions():
@@ -295,6 +309,14 @@ case "$1" in
     exit 0 ;;
   scripts/corpus_counts.py | scripts/screen_metrics.py | scripts/inspect_checkpoint.py | scripts/evaluate_val_ppl.py | scripts/evaluate_probes.py)
     record "$@"; exit 0 ;;
+  scripts/build_index.py)  # a bm25 build leaves index.json, as the real one does last
+    record "$@"
+    out=""; prev=""; kind=""
+    for a in "$@"; do [[ "$prev" == --out ]] && out="$a"; [[ "$prev" == --kind ]] && kind="$a"; prev="$a"; done
+    if [[ "$kind" == bm25 ]]; then mkdir -p "$out" && echo '{}' > "$out/index.json"; fi
+    exit 0 ;;
+  scripts/eval_retrieval.py | scripts/build_sft_data.py)
+    record "OFFLINE=${HF_HUB_OFFLINE:-}" "$@"; exit 0 ;;
   scripts/verify_handoff.py)  # fails a checkpoint path containing "fail"
     record "$@"; [[ "$2" != *fail* ]]; exit $? ;;
   scripts/performance_profile.py | scripts/check_operator_equivalence.py | scripts/check_env.py)
@@ -313,6 +335,15 @@ case "$1" in
         [[ "$prev" == --out ]] && out="$a"; [[ "$prev" == --log ]] && log="$a"; prev="$a"
       done
       printf '{"id": 1}\n{"id": 2}\n' > "$out"; printf '{"doc_id": 1}\n' > "$log"
+      exit 0
+    fi
+    if [[ "$2" == lexhybrid.data.evalsets.* ]]; then
+      record "OFFLINE=${HF_HUB_OFFLINE:-}" "$@"
+      out=""; man=""; prev=""
+      for a in "$@"; do [[ "$prev" == --out ]] && out="$a"; [[ "$prev" == --manifest-dir ]] && man="$a"; prev="$a"; done
+      mkdir -p "$out" "$man" && echo '{}' > "$out/qrels.jsonl"
+      [[ "${FAKE_FETCH_FAIL:-}" == "${2##*.}" ]] && exit 3
+      echo '{}' > "$man/evalset_${2##*.}.jsonl"
       exit 0
     fi
     if [[ "$2" == lexhybrid.data.corpus.collectors.* ]]; then
@@ -364,6 +395,10 @@ def sandbox(tmp_path):
     _executable(repo / ".venv" / "bin" / "python", FAKE_PYTHON)
     bin_dir.mkdir()
     _executable(bin_dir / "nvidia-smi", "#!/usr/bin/env bash\necho fake-gpu\n")
+    _executable(
+        bin_dir / "timeout",
+        '#!/usr/bin/env bash\necho "$1" >> "$CALLS.timeout"\nshift\nif [[ -n "${TIMES_OUT:-}" ]]; then exit 124; fi\nexec "$@"\n',
+    )
     _executable(bin_dir / "squeue", "#!/usr/bin/env bash\necho '  JOBID PARTITION NODELIST ST TIME NAME'\n")
     _executable(
         bin_dir / "sacct",
@@ -978,3 +1013,114 @@ def test_verify_handoff_checks_every_run_and_fails_if_one_does(sandbox):
     assert (
         res.returncode == 1 and "HANDOFF p6_fail_B FAIL" in res.stdout and "VERIFY HANDOFF DONE" in res.stdout
     )
+
+
+def test_build_dense_index_builds_bm25_then_the_vectors_and_keeps_a_finished_bm25(sandbox):
+    """The default sources' scrubbed parts go to the bm25 build with the pack's dedup log, then
+    the dense build runs on the GPU; a requeue with index.json present redoes only the vectors."""
+    scrubbed = sandbox.scratch / "data" / "scrubbed"
+    scrubbed.mkdir(parents=True)
+    names = [
+        "gii.part-0-of-2",
+        "gii.part-1-of-2",
+        "rii.part-0-of-1",
+        "eurlex.part-0-of-1",
+        "oldp.part-0-of-1",
+    ]
+    for name in names:
+        (scrubbed / f"{name}.jsonl").write_text("{}\n")
+    res, _ = sandbox("build_dense_index.sh", SLURM_JOB_ID=5)
+    assert res.returncode == 1 and "FATAL: no dedup log" in res.stdout
+    dedup = sandbox.scratch / "data" / "shards" / "4096" / "dedup.jsonl"
+    dedup.parent.mkdir(parents=True)
+    dedup.write_text("{}\n")
+    res, calls = sandbox("build_dense_index.sh", SLURM_JOB_ID=4, BM25_ONLY=1, INDEX_VERSION="cpu")
+    assert res.returncode == 0 and "BUILD BM25 INDEX DONE" in res.stdout, res.stdout + res.stderr
+    kinds = [c[c.index("--kind") + 1] for c in calls if c[0] == "scripts/build_index.py"]
+    assert kinds == ["bm25"], "the vectors wait for the GPU job"
+    res, calls = sandbox("build_dense_index.sh", SLURM_JOB_ID=5)
+    assert res.returncode == 0 and "BUILD DENSE INDEX DONE" in res.stdout, res.stdout + res.stderr
+    out = str(sandbox.scratch / "data" / "index" / "v1")
+    bm25, dense = [c for c in calls if c[0] == "scripts/build_index.py"]
+    assert bm25[bm25.index("--kind") + 1] == "bm25" and bm25[bm25.index("--out") + 1] == out
+    assert bm25[bm25.index("--dedup") + 1] == str(dedup)
+    docs = bm25[bm25.index("--docs") + 1 : bm25.index("--dedup")]
+    assert [Path(d).stem for d in docs] == names[:4], "oldp is not a default source"
+    assert dense[1:] == ["--kind", "dense", "--out", out, "--device", "cuda"]
+    res, calls = sandbox("build_dense_index.sh", SLURM_JOB_ID=6)
+    assert res.returncode == 0 and [c[2] for c in calls if c[0] == "scripts/build_index.py"] == ["dense"]
+    res, _ = sandbox("build_dense_index.sh", SOURCES="gii ris", INDEX_VERSION="v2")
+    assert res.returncode == 1 and "FATAL: no scrubbed parts for ris" in res.stdout
+    # out of time: exit 0 while a later array task can resume, fail on the last, so afterok holds
+    task = {"MINUTES": 40, "TIMES_OUT": 1, "SLURM_ARRAY_TASK_MAX": 3}
+    res, _ = sandbox("build_dense_index.sh", SLURM_ARRAY_TASK_ID=2, **task)
+    assert res.returncode == 0 and "PARTIAL" in res.stdout and "DONE" not in res.stdout
+    res, _ = sandbox("build_dense_index.sh", SLURM_ARRAY_TASK_ID=3, **task)
+    assert res.returncode == 124 and "DONE" not in res.stdout
+    (Path(out) / "dense").mkdir(parents=True)
+    (Path(out) / "dense" / "config.json").write_text("{}")
+    res, calls = sandbox("build_dense_index.sh", SLURM_ARRAY_TASK_ID=3, **task)
+    assert res.returncode == 0 and "BUILD DENSE INDEX DONE" in res.stdout
+    assert not [c for c in calls if c[0] == "scripts/build_index.py"], "a finished index is not rebuilt"
+
+
+def test_eval_retrieval_fetch_only_stops_before_scoring(sandbox):
+    res, calls = sandbox("eval_retrieval.sh", SLURM_JOB_ID=8, FETCH_ONLY=1, SETS="gerlerb")
+    assert res.returncode == 0 and "FETCH EVALSETS DONE" in res.stdout, res.stdout + res.stderr
+    assert [c[2] for c in calls] == ["lexhybrid.data.evalsets.gerlerb"]
+
+
+def test_eval_retrieval_fetches_missing_sets_online_once_then_scores_offline(sandbox):
+    res, calls = sandbox("eval_retrieval.sh", SLURM_JOB_ID=9)
+    assert res.returncode == 0 and "EVAL RETRIEVAL DONE" in res.stdout, res.stdout + res.stderr
+    fetches = [c for c in calls if c[1] == "-m"]
+    assert [c[2] for c in fetches] == ["lexhybrid.data.evalsets.gerlerb", "lexhybrid.data.evalsets.gerdalir"]
+    sets = sandbox.scratch / "data" / "evalsets"
+    for c, name in zip(fetches, ("gerlerb", "gerdalir"), strict=True):
+        assert c[0] == "OFFLINE=0" and c[c.index("--limit") + 1] == "0"
+        assert (
+            c[c.index("--out") + 1] == str(sets / name)
+            and c[c.index("--manifest-dir") + 1] == "logs/evalsets_9"
+        )
+    ev = next(c for c in calls if c[1] == "scripts/eval_retrieval.py")
+    assert ev[0] == "OFFLINE=1" and ev[2:6] == [
+        "--set-dir",
+        str(sets / "gerlerb"),
+        "--set-dir",
+        str(sets / "gerdalir"),
+    ]
+    assert ev[ev.index("--out") + 1] == "logs/eval_retrieval_9/results.json"
+    res, calls = sandbox("eval_retrieval.sh", SLURM_JOB_ID=10, SETS="gerlerb")
+    assert res.returncode == 0 and [c[1] for c in calls] == ["scripts/eval_retrieval.py"], (
+        "fetched sets are reused"
+    )
+
+
+def test_build_sft_data_guards_with_complete_manifests_fetched_once(sandbox):
+    """The eval guard reads manifests of the full sets, fetched online into a temporary directory and
+    moved whole; a failed fetch leaves no manifest and stops before any data is built; later runs reuse them."""
+    res, _ = sandbox("build_sft_data.sh")
+    assert res.returncode == 1 and "is not a file" in res.stdout
+    rows = sandbox.scratch / "rows.jsonl"
+    rows.parent.mkdir(parents=True, exist_ok=True)
+    rows.write_text("{}\n")
+    (sandbox.scratch / "data" / "evalsets").mkdir(parents=True)
+    manifests = sandbox.scratch / "data" / "evalsets" / "manifests"
+    res, calls = sandbox("build_sft_data.sh", SYNTHETIC=rows, FAKE_FETCH_FAIL="gerlayqa")
+    assert res.returncode != 0 and not (manifests / "evalset_gerlayqa.jsonl").exists()
+    assert (manifests / "evalset_gerdalir.jsonl").exists(), "sets fetched before the failure are kept"
+    assert not [c for c in calls if c[1] == "scripts/build_sft_data.py"], "no data without the whole guard"
+    res, calls = sandbox("build_sft_data.sh", SYNTHETIC=rows)
+    assert res.returncode == 0 and "BUILD SFT DATA DONE" in res.stdout, res.stdout + res.stderr
+    fetches = [c for c in calls if c[1] == "-m"]
+    assert [c[2].rsplit(".", 1)[1] for c in fetches] == ["gerlayqa", "legalquad"], "only what is missing"
+    assert all(c[0] == "OFFLINE=0" and c[c.index("--limit") + 1] == "0" for c in fetches)
+    build = next(c for c in calls if c[1] == "scripts/build_sft_data.py")
+    assert build[0] == "OFFLINE=1" and build[build.index("--manifest-dir") + 1] == str(manifests)
+    assert build[build.index("--out") + 1] == str(sandbox.scratch / "data" / "sft") and "--qa" not in build
+    assert sorted(p.name for p in manifests.iterdir()) == [f"evalset_{n}.jsonl" for n in sorted(
+        ("gerlerb", "gerdalir", "gerlayqa", "legalquad"))]  # fmt: skip
+    res, calls = sandbox("build_sft_data.sh", SYNTHETIC=rows, QA=rows)
+    assert res.returncode == 0 and not [c for c in calls if c[1] == "-m"], "manifests are reused"
+    build = next(c for c in calls if c[1] == "scripts/build_sft_data.py")
+    assert build[build.index("--qa") + 1] == str(rows)

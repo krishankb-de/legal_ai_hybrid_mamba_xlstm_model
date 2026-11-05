@@ -6,7 +6,7 @@ after ``<|answer|>``, optionally ending in the EOS token. Pointers:
 * ``<|q|><|cK|><|sJ|>…``: a quote of one or more sentences ``J`` of passage ``K``, as the SFT format
   writes it (one sentence) and the pointer FSM allows it (a span, ``lexhybrid/decoding/pointer_constraints.py``);
 * ``<|cite|><|cK|>`` optionally followed by ``<|sJ|>…``: a citation of passage ``K``, or of those of its
-  sentences. ``sft_format.Cite`` writes it without a sentence, and the FSM ends it after one;
+  sentences. ``sft_format.Cite`` writes it without a sentence; the FSM allows both;
 * ``<|unanswerable|>``: the whole answer, alone.
 
 ``K`` and ``J`` are 1-based. Any other ``<|…|>`` in the answer, a pointer cut short (``<|q|>`` without

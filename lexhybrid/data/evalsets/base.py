@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import unicodedata
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -9,6 +10,13 @@ from pathlib import Path
 from lexhybrid.data.schema import sha256_text
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def question_key(question: str) -> str:
+    """A hash of the question with its form normalised (NFC, case, whitespace, final ``?`` or ``.``), so
+    two typings of one question share it: the training guard against evaluation questions and the
+    train/dev split both rest on it."""
+    return sha256_text(" ".join(unicodedata.normalize("NFC", question).casefold().split()).rstrip("?. "))
 
 
 @dataclass
@@ -87,13 +95,26 @@ def write(evalset: RetrievalSet | QASet, out_dir: Path, manifest_dir: Path) -> i
             ),
         )
         manifest = [
-            {"id": q.id, "sha256": sha256_text(q.text), "relevant": sorted(evalset.qrels.get(q.id, {}))}
+            {
+                "id": q.id,
+                "sha256": sha256_text(q.text),
+                "question_key": question_key(q.text),
+                "relevant": sorted(evalset.qrels.get(q.id, {})),
+            }  # fmt: skip
             for q in evalset.queries
         ]
         n = len(evalset.queries)
     else:
         _write_jsonl(out_dir / "items.jsonl", (asdict(i) for i in evalset.items))
-        manifest = [{"id": i.id, "sha256": sha256_text(i.question), "gold": i.gold} for i in evalset.items]
+        manifest = [
+            {
+                "id": i.id,
+                "sha256": sha256_text(i.question),
+                "question_key": question_key(i.question),
+                "gold": i.gold,
+            }
+            for i in evalset.items
+        ]
         n = len(evalset.items)
     _write_jsonl(manifest_dir / f"evalset_{evalset.info.name}.jsonl", [{"info": info}, *manifest])
     return n

@@ -2677,3 +2677,282 @@ def test_gold_nll_is_the_teacher_forced_ce_of_the_answer_and_both_probes_report_
     assert (
         mh["items"] == 1 and math.isfinite(mh["gold_nll"]) and set(mh) == {"exact_match", "gold_nll", "items"}
     )
+
+
+def _sft_row(i, kind="answerable", question=None, question_id=None):
+    """A generator row over one passage; rows 2k and 2k + 1 share a question."""
+    from lexhybrid.data.sft_format import Cite, Example, Passage, Quote, Text, render
+
+    passages = (Passage("BGB §573", ("Der Vermieter kann nur kündigen.", "Die Kündigung zur Mieterhöhung ist ausgeschlossen.")),)  # fmt: skip
+    answer = (Text("Nur mit Grund: "), Quote(1, 1), Text(" "), Cite(1)) if kind == "answerable" else ()
+    text = "".join(render(Example(question or f"Frage {i // 2}?", passages, answer)))
+    return {"id": f"s{i}", "question_id": question_id or f"q{i // 2}", "source": "synthetic", "kind": kind,
+            "chunk_ids": ["gii:bgb:573#0"], "text": text}  # fmt: skip
+
+
+def _sft_rows(n, non_answerable):
+    return [_sft_row(i, "unanswerable" if i < non_answerable else "answerable") for i in range(n)]
+
+
+def _jsonl(path, rows):
+    import json
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
+    return path
+
+
+def _sft_manifests(tmp_path, *questions):
+    """One evaluation-only set's manifest: the raw questions' hashes, as the evaluation-set writer stores them."""
+    rows = [{"id": f"toyqa:{i}", "sha256": sha256_text(q)} for i, q in enumerate(questions)]
+    _jsonl(
+        tmp_path / "manifests" / "evalset_toyqa.jsonl",
+        [{"info": {"name": "toyqa", "eval_only": True}}, *rows],
+    )
+    return tmp_path / "manifests"
+
+
+def _qa_file(tmp_path, rows, name="qa", **info):
+    """QA rows with the writer's ``info.json`` beside them, free for training unless ``info`` says otherwise."""
+    import json
+
+    path = _jsonl(tmp_path / name / "items.jsonl", rows)
+    info = {"name": name, "licence": "CC0-1.0", "eval_only": False, "research_only": False, **info}
+    (tmp_path / name / "info.json").write_text(json.dumps(info))
+    return path
+
+
+def _qa_row(i, question=None, **kw):
+    context = "Der Vermieter kann nur kündigen. Die Kündigung zur Mieterhöhung ist  ausgeschlossen. Das gilt immer."  # fmt: skip
+    return {"id": f"otherqa:{i}", "question": question or f"Was gilt {i}?", "answers": ["Das gilt immer."],
+            "context": context, "context_id": "oldp:7", **kw}  # fmt: skip
+
+
+def test_sft_shards_end_with_eos_and_unanswerable_share(tmp_path, script):
+    """build_sft_data writes train and dev splits in which every target ends in exactly one EOS and
+    only the target is supervised; one question's items stay on one side; evaluation questions are
+    refused and counted (any NFC, NFD, whitespace or final-punctuation form of a hashed question, and
+    any item of an evaluation-only set by its name); the kept synthetic rows go to train.jsonl and
+    dev.jsonl in the generator's format, listed in the manifest; a QA answer becomes a quote of the
+    sentence holding it; a share outside [0.2, 0.3], or no manifests to check against, fails the build."""
+    import json
+    import unicodedata
+
+    import pyarrow.parquet as pq
+
+    from lexhybrid.data.tokenizer import EOS_ID
+    from tests.test_pipeline import ByteTokenizer
+
+    build, tok = script("build_sft_data"), ByteTokenizer()
+    leaked, bare = "Wann darf der Vermieter kündigen?", "Wie lange gilt die Frist"
+    decomposed = unicodedata.normalize("NFD", "Ist die Kündigung wirksam?")
+    manifests = _sft_manifests(tmp_path, leaked, bare, decomposed)
+    copies = [
+        leaked,
+        "Wann darf  der\tVermieter kündigen?",  # whitespace
+        unicodedata.normalize("NFD", leaked),  # the manifest hashed NFC, the copy is NFD
+        unicodedata.normalize("NFC", decomposed),  # the manifest hashed NFD, the copy is NFC
+        "Wann darf der Vermieter kündigen",  # final ? dropped
+        "Wann darf der Vermieter kündigen.",  # final ? replaced
+        bare + "?",  # final ? added to a question hashed without one
+        unicodedata.normalize("NFD", "Wann darf  der Vermieter kündigen"),  # all of it at once
+    ]
+    hashes, names = build.evalset_guard(manifests)
+    assert not [q for q in copies if not build.is_eval("synthetic", q, hashes, names)]
+    assert not build.is_eval("synthetic", "Wann darf der Mieter kündigen?", hashes, names)
+    assert build.is_eval("toyqa", "Irgendeine Frage?", hashes, names)
+
+    kinds = ("unanswerable", "false_premise", "party")
+    rows = [_sft_row(i, kinds[i // 4 % 3] if i % 4 == 0 else "answerable") for i in range(24)]
+    rows += [_sft_row(100 + i, question=q, question_id=f"leak{i}") for i, q in enumerate(copies)]
+    syn = _jsonl(tmp_path / "synthetic.jsonl", rows)
+    qa = _qa_file(tmp_path, [
+        _qa_row(1, "Was ist ausgeschlossen?", answers=["zur Mieterhöhung ist ausgeschlossen"]),
+        {**_qa_row(2), "id": "toyqa:2"},
+        _qa_row(3, answers=["nicht im Text"]),
+    ])  # fmt: skip
+
+    m = build.build([syn], [qa], tmp_path / "sft", tok, manifests, dev_fraction=0.3)
+    assert m["dropped"] == {"answer_not_in_context": 1, "eval_overlap": len(copies) + 1}
+    assert m["by_kind"] == {"answerable": 19, "false_premise": 2, "party": 2, "unanswerable": 2}
+    assert m["by_source"] == {"otherqa": 1, "synthetic": 24}
+    assert sum(m["items"].values()) == 25 and m["unanswerable_share"] == pytest.approx(6 / 25)
+    assert (
+        m["inputs"]["qa"] == [{"path": str(qa), "name": "qa", "licence": "CC0-1.0"}]
+        and all("train split" in w for w in m["warnings"])
+        and "train_unanswerable_share" in m
+    )
+    assert json.loads((tmp_path / "sft" / "manifest.json").read_text()) == m
+    split = {s: pq.read_table(tmp_path / "sft" / f"{s}.parquet").to_pylist() for s in ("train", "dev")}
+    assert split["train"] and split["dev"]
+    assert not {r["question_id"] for r in split["train"]} & {r["question_id"] for r in split["dev"]}
+    by_id = {r["id"]: r for r in rows}
+    for s, kept in split.items():
+        lines = (tmp_path / "sft" / f"{s}.jsonl").read_text(encoding="utf-8").split("\n")
+        assert [json.loads(ln) for ln in lines if ln] == [
+            by_id[r["id"]] | {"question_id": r["question_id"]} for r in kept if r["source"] == "synthetic"
+        ]
+        assert m["synthetic_rows"][f"{s}.jsonl"] == sum(r["source"] == "synthetic" for r in kept)
+    answer_id = tok.ids["<|answer|>"]
+    for r in split["train"] + split["dev"]:
+        ids, labels = r["input_ids"], r["labels"]
+        k = ids.index(answer_id) + 1  # the prompt ends at <|answer|>
+        assert ids[-1] == EOS_ID and ids.count(EOS_ID) == 1 and labels == [-100] * k + ids[k:]
+        if r["kind"] != "answerable":
+            assert ids[k:] == [tok.ids["<|unanswerable|>"], EOS_ID]
+    (row,) = [r for r in split["train"] + split["dev"] if r["source"] == "otherqa"]
+    k = row["input_ids"].index(answer_id) + 1
+    assert row["input_ids"][k:] == [tok.ids["<|q|>"], tok.ids["<|c1|>"], tok.ids["<|s2|>"], EOS_ID]
+
+    with pytest.raises(ValueError, match="share"):
+        build.build([], [qa], tmp_path / "bad", tok, manifests)
+    with pytest.raises(FileNotFoundError, match="evalset"):
+        build.build([syn], [], tmp_path / "bad", tok, tmp_path / "no_manifests")
+
+
+def test_sft_build_subsamples_qa_up_to_the_share_floor(tmp_path, script):
+    """QA items are all answerable: when they hold the share below 0.2, a seeded subset of them goes
+    (counted) until it is 0.2. With no QA left to drop a low share fails; a high one always does."""
+    import pyarrow.parquet as pq
+
+    from tests.test_pipeline import ByteTokenizer
+
+    build, tok = script("build_sft_data"), ByteTokenizer()
+    manifests = _sft_manifests(tmp_path, "Eine andere Frage?")
+    syn = _jsonl(tmp_path / "syn.jsonl", _sft_rows(8, 2))
+    qa = _qa_file(tmp_path, [_qa_row(i) for i in range(12)])
+
+    def qa_ids(out):
+        rows = [r for s in ("train", "dev") for r in pq.read_table(out / f"{s}.parquet").to_pylist()]
+        return sorted(r["id"] for r in rows if r["source"] == "otherqa")
+
+    m = build.build([syn], [qa], tmp_path / "a", tok, manifests, dev_fraction=0.0)
+    assert m["dropped"] == {"qa_subsampled": 10} and m["unanswerable_share"] == 0.2
+    assert m["by_source"] == {"otherqa": 2, "synthetic": 8} and len(qa_ids(tmp_path / "a")) == 2
+    build.build([syn], [qa], tmp_path / "b", tok, manifests, dev_fraction=0.0)
+    build.build([syn], [qa], tmp_path / "c", tok, manifests, dev_fraction=0.0, seed=1)
+    assert qa_ids(tmp_path / "a") == qa_ids(tmp_path / "b") != qa_ids(tmp_path / "c")
+
+    at_floor = _qa_file(tmp_path, [_qa_row(1), _qa_row(2)], name="few")  # 2 of 10
+    few = build.build([syn], [at_floor], tmp_path / "d", tok, manifests, dev_fraction=0.0)
+    assert "qa_subsampled" not in few["dropped"] and few["by_source"]["otherqa"] == 2
+    low, high = (
+        _jsonl(tmp_path / "low.jsonl", _sft_rows(8, 1)),
+        _jsonl(tmp_path / "high.jsonl", _sft_rows(8, 4)),
+    )
+    with pytest.raises(ValueError, match="share"):  # every QA item gone and still below the floor
+        build.build([low], [qa], tmp_path / "e", tok, manifests, dev_fraction=0.0)
+    with pytest.raises(ValueError, match="share"):
+        build.build([high], [], tmp_path / "e", tok, manifests, dev_fraction=0.0)
+
+
+def test_sft_build_refuses_unsafe_or_malformed_inputs(tmp_path, script):
+    """A QA file without info.json, or one that does not free its items for training; a duplicate row
+    id, within a file or across inputs; a row that does not parse, named by its id and line. Nothing
+    is written."""
+    from tests.test_pipeline import ByteTokenizer
+
+    build, tok = script("build_sft_data"), ByteTokenizer()
+    manifests = _sft_manifests(tmp_path, "Eine andere Frage?")
+    good = _sft_rows(8, 2)
+    syn = _jsonl(tmp_path / "syn.jsonl", good)
+    out = tmp_path / "out"
+
+    bare = _jsonl(tmp_path / "noinfo" / "items.jsonl", [_qa_row(1)])
+    with pytest.raises(FileNotFoundError, match="info.json"):
+        build.build([syn], [bare], out, tok, manifests)
+    for flag in ("eval_only", "research_only"):
+        with pytest.raises(ValueError, match=flag):
+            build.build(
+                [syn], [_qa_file(tmp_path, [_qa_row(1)], name=flag, **{flag: True})], out, tok, manifests
+            )
+    silent = _jsonl(tmp_path / "silent" / "items.jsonl", [_qa_row(1)])
+    (tmp_path / "silent" / "info.json").write_text("{}")
+    with pytest.raises(ValueError, match="eval_only"):  # unstated is not free
+        build.build([syn], [silent], out, tok, manifests)
+
+    with pytest.raises(ValueError, match=r"dup\.jsonl:9: duplicate row id 's0'"):
+        build.build([_jsonl(tmp_path / "dup.jsonl", [*good, good[0]])], [], out, tok, manifests)
+    with pytest.raises(ValueError, match="duplicate row id 'otherqa:1'"):
+        renamed = _jsonl(tmp_path / "ren.jsonl", [*good, {**_sft_row(20), "id": "otherqa:1"}])
+        build.build([renamed], [_qa_file(tmp_path, [_qa_row(1)], name="ok")], out, tok, manifests)
+    with pytest.raises(ValueError, match=r"broken\.jsonl:3: row 's2'"):
+        build.build([_jsonl(tmp_path / "broken.jsonl", [*good[:2], {**good[2], "text": "kein Beispiel"}])], [], out, tok, manifests)  # fmt: skip
+    no_key = {k: v for k, v in good[2].items() if k != "chunk_ids"}
+    with pytest.raises(ValueError, match=r"nokey\.jsonl:3: row 's2': no \['chunk_ids'\]"):
+        build.build([_jsonl(tmp_path / "nokey.jsonl", [*good[:2], no_key])], [], out, tok, manifests)
+    assert not out.exists()
+
+
+def test_sft_build_warns_on_an_empty_dev_split_and_groups_repeated_qa_questions(tmp_path, script):
+    """An empty dev split at dev_fraction > 0 warns and is recorded in the manifest (not at
+    dev_fraction 0); a question asked twice, whatever its whitespace, has one question id."""
+    import json
+
+    import pyarrow.parquet as pq
+
+    from tests.test_pipeline import ByteTokenizer
+
+    build, tok = script("build_sft_data"), ByteTokenizer()
+    manifests = _sft_manifests(tmp_path, "Eine andere Frage?")
+    syn = _jsonl(tmp_path / "syn.jsonl", _sft_rows(10, 3))
+    with pytest.warns(RuntimeWarning, match="dev split is empty"):
+        m = build.build([syn], [], tmp_path / "a", tok, manifests, dev_fraction=1e-9)
+    assert m["items"]["dev"] == 0 and "dev split is empty" in m["warnings"][0]
+    assert json.loads((tmp_path / "a" / "manifest.json").read_text())["warnings"] == m["warnings"]
+    assert build.build([syn], [], tmp_path / "b", tok, manifests, dev_fraction=0.0)["warnings"] == []
+
+    qa = _qa_file(tmp_path, [_qa_row(1, "Was gilt hier?"), _qa_row(2, " Was  gilt\thier? "), _qa_row(3, "Was gilt dort?")])  # fmt: skip
+    build.build([syn], [qa], tmp_path / "c", tok, manifests, dev_fraction=0.0)
+    ids = {r["id"]: r["question_id"] for r in pq.read_table(tmp_path / "c" / "train.parquet").to_pylist()}
+    assert ids["otherqa:1"] == ids["otherqa:2"] != ids["otherqa:3"]
+
+
+def test_sft_build_cap_is_the_trained_length_and_a_dropped_row_stays_out(tmp_path, script):
+    """A prompt carries up to about 4,096 tokens of passages, so such an item passes the default cap
+    of 8,192 tokens, the model's trained length; a longer one is dropped, counted, and stays out of
+    the guarded rows."""
+    import json
+
+    from lexhybrid.data.sft_format import Example, Passage, Quote, render
+    from tests.test_pipeline import ByteTokenizer
+
+    build = script("build_sft_data")
+
+    def long_row(i, n):
+        ex = Example(f"Lang {i}?", (Passage("BGB §573", ("x" * n,)),), (Quote(1, 1),))
+        return {**_sft_row(i), "question_id": f"long{i}", "text": "".join(render(ex))}
+
+    syn = _jsonl(tmp_path / "syn.jsonl", [*_sft_rows(8, 2), long_row(8, 5000), long_row(9, 9000)])
+    m = build.build(
+        [syn], [], tmp_path / "a", ByteTokenizer(), _sft_manifests(tmp_path, "Eine andere Frage?"), 0.0
+    )
+    assert m["max_len"] == 8192 and m["dropped"] == {"too_long": 1}
+    lines = (tmp_path / "a" / "train.jsonl").read_text(encoding="utf-8").split("\n")
+    assert {json.loads(ln)["id"] for ln in lines if ln} == {f"s{i}" for i in range(9)}
+
+
+def test_one_question_however_typed_has_one_key(tmp_path, script):
+    """Case, Unicode form, whitespace and final punctuation do not separate a question: it keeps one
+    question id across inputs, so it stays on one side of the split, and the evaluation guard
+    recognises a lower-cased copy through the manifest's key."""
+    import json
+    import unicodedata
+
+    from lexhybrid.data.evalsets.base import question_key
+
+    sft = script("build_sft_data")
+    q = "Wann verjährt ein Anspruch auf Mängelbeseitigung?"
+    forms = [q, q.lower(), unicodedata.normalize("NFD", q), "  " + q.replace(" ", "  "), q[:-1], q[:-1] + "."]
+    assert len({question_key(f) for f in forms}) == 1 and len({sft.question_id(f) for f in forms}) == 1
+    assert question_key("Wann verjährt ein Anspruch?") != question_key("Wann verjährt eine Forderung?")
+    manifests = tmp_path / "m"
+    manifests.mkdir()
+    rows = [
+        {"info": {"name": "x", "eval_only": True}},
+        {"id": "1", "sha256": "raw", "question_key": question_key(q)},
+    ]
+    (manifests / "evalset_x.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    hashes, names = sft.evalset_guard(manifests)
+    assert sft.is_eval("synthetic", q.lower(), hashes, names), "a lower-cased copy is still that question"
+    assert not sft.is_eval("synthetic", "Eine ganz andere Frage?", hashes, names)
