@@ -851,6 +851,16 @@ def test_rebuilt_index_drops_stale_vectors_and_answer_ignores_partial_or_foreign
     assert calls == [], "a partial dense/ is not used"
 
 
+def test_eval_retrieval_keeps_every_text_of_a_repeated_passage_id(script):
+    from types import SimpleNamespace as P
+
+    ev = script("eval_retrieval")
+    rows = [P(id="a", text="x"), P(id="b", text="y"), P(id="a", text="x"), P(id="a", text="z")]
+    assert [(p.id, p.text) for p in ev.unique_passages(rows, {"b"})] == [("a", "x"), ("b", "y"), ("a#1", "z")]
+    with pytest.raises(SystemExit, match="more than one text"):
+        ev.unique_passages(rows, {"a"})
+
+
 def test_eval_retrieval_refuses_qrels_for_queries_it_cannot_rank(tmp_path, script):
     from lexhybrid.data.evalsets.base import EvalSetInfo, Passage, Query, RetrievalSet, write
 

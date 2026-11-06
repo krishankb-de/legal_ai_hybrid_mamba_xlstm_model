@@ -47,7 +47,29 @@ def load_set(directory: Path):
         SimpleNamespace(id=str(p["id"]), text=f"{p['title']}\n{p['text']}" if p.get("title") else p["text"])
         for p in read_jsonl(directory / "corpus.jsonl")
     ]
-    return queries, passages, qrels
+    return queries, unique_passages(passages, {pid for r in qrels.values() for pid in r}), qrels
+
+
+def unique_passages(passages: list, judged: set[str]) -> list:
+    """One row per id. A published corpus can repeat ids (GerLeRB's repeats 460 docnos, none judged):
+    an exact repeat is dropped, other text stays searchable as ``<id>#<k>``. A judged id with two
+    texts has no defined gold passage, so it stops the run."""
+    texts: dict[str, set[str]] = {}
+    out = []
+    for p in passages:
+        seen = texts.setdefault(p.id, set())
+        if p.text in seen:
+            continue
+        if seen and p.id in judged:
+            raise SystemExit(f"judged passage {p.id} has more than one text")
+        out.append(SimpleNamespace(id=f"{p.id}#{len(seen)}", text=p.text) if seen else p)
+        seen.add(p.text)
+    if len(out) != len(passages):
+        print(
+            f"corpus: {len(passages)} rows -> {len(out)} passages, {len(texts)} distinct source ids",
+            flush=True,
+        )
+    return out
 
 
 def dense_index(directory: Path, passages, encode, model: str) -> DenseIndex:
