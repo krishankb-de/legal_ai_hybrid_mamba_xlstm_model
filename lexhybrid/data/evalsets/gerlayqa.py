@@ -10,6 +10,7 @@ The repository's notice restricts the data to non-commercial scientific research
 excluded from training explicitly: evaluation only, ``research_only``.
 """
 
+import html
 import re
 
 from lexhybrid.data.corpus.collectors.base import http_get
@@ -26,6 +27,17 @@ INFO = EvalSetInfo(
     research_only=True,
 )
 _PARAGRAPH = re.compile(r"^§\s*(\d+[a-z]*)$")
+_TAG = r"(?:a|b|i|u|p|br|div|span|strong|em|blockquote|ul|ol|li|sup|sub)"
+# The texts carry the forum's HTML, mostly with every "<" lost (a href="..." title="§ 573b BGB: ...">§ 573b BGB/a>)
+_MARKUP = re.compile(
+    rf"<{_TAG}\b[^>]*>|(?<![\w]){_TAG}(?:\s+[\w-]+=(?:\"[^\"]*\"|'[^']*'))*\s*/?>|<?/{_TAG}>|<?!--.*?-->",
+    re.IGNORECASE,
+)
+
+
+def plain_text(text: str) -> str:
+    """What a reader of the page sees: entities decoded, then tags and comments dropped."""
+    return " ".join(_MARKUP.sub(" ", html.unescape(text)).split())
 
 
 def bgb_citation(paragraph: str) -> str | None:
@@ -41,8 +53,8 @@ def parse_gerlayqa(rows: list[dict]) -> list[QAItem]:
         items.append(
             QAItem(
                 id=f"gerlayqa:bgb_eval:{i}",
-                question=" ".join(row["Question_text"].split()),
-                answers=[" ".join(row["Answer_text"].split())],
+                question=plain_text(row["Question_text"]),
+                answers=[plain_text(row["Answer_text"])],
                 gold=gold,
             )
         )

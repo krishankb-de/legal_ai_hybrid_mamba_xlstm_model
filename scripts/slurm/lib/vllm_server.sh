@@ -26,6 +26,11 @@ vllm_start() {
   if curl -s -o /dev/null --max-time 5 "${VLLM_URL}/health"; then
     echo "FATAL: port ${VLLM_PORT} already answers: another server on this node"; exit 1
   fi
+  # vLLM's compile cache outlives the job and points at inductor files by absolute path. Inductor's
+  # default dir is the job's node-local $TMPDIR (/scratch/<job>), gone and not writable in the next
+  # job, so both live on $SCRATCH_ROOT.
+  export VLLM_CACHE_ROOT="${VLLM_CACHE_ROOT:-${SCRATCH_ROOT}/.cache/vllm}"
+  export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-${SCRATCH_ROOT}/.torchinductor/vllm}"
   echo "vllm serve $* on ${VLLM_URL} (log: ${VLLM_LOG})"
   .venv-vllm/bin/vllm serve "$@" --host 127.0.0.1 --port "$VLLM_PORT" > "$VLLM_LOG" 2>&1 &
   VLLM_PID=$!

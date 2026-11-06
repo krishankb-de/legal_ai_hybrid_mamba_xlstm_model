@@ -430,7 +430,8 @@ import json, os, sys, threading, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 args = sys.argv[1:]
-record = {"pid": os.getpid(), "args": args, **{k: os.environ.get(k) for k in ("HF_HOME", "HF_HUB_OFFLINE")}}
+record = {"pid": os.getpid(), "args": args,
+          **{k: os.environ.get(k) for k in ("HF_HOME", "HF_HUB_OFFLINE", "VLLM_CACHE_ROOT", "TORCHINDUCTOR_CACHE_DIR")}}
 with open(os.environ["FAKE_VLLM_RECORD"], "w") as f:
     json.dump(record, f)
 if os.environ.get("FAKE_VLLM") == "crash":
@@ -533,6 +534,11 @@ def test_vllm_smoke_serves_one_completion_and_always_stops_the_server(jobs):
     assert server["args"][:2] == ["serve", "Qwen/Qwen3-0.6B-Base"]
     assert server["args"][server["args"].index("--port") + 1] == str(jobs.port), "the port follows the job id"
     assert (server["HF_HOME"], server["HF_HUB_OFFLINE"]) == (str(jobs.scratch / ".hf"), "1")
+    # the compile cache outlives the job, so the inductor files it points at must too
+    assert (server["VLLM_CACHE_ROOT"], server["TORCHINDUCTOR_CACHE_DIR"]) == (
+        str(jobs.scratch / ".cache" / "vllm"),
+        str(jobs.scratch / ".torchinductor" / "vllm"),
+    )
     _stopped(server["pid"])
     for mode, message in (
         ("crash", "FATAL: vllm exited before /health"),

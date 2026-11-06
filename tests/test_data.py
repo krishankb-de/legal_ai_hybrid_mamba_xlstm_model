@@ -1429,6 +1429,17 @@ def test_legalquad_and_gerlayqa_parsers_on_fixtures():
     ]
     assert all(parse_citation(c)["code"] == "BGB" for i in gl for c in i.gold)
     assert gl[0].question.startswith("Sachverhalt: wir wohnen in einer Mietwohnung") and gl[0].answers[0]
+    texts = [t for i in gl for t in (i.question, *i.answers)]
+    assert not [t for t in texts if "href=" in t or "/a>" in t or "&uuml;" in t or "!--" in t], (
+        "the page's markup"
+    )
+    assert "§ 573b BGB" in gl[0].answers[0]  # a link keeps its visible text
+    assert (  # entities decoded, tags with and without their "<" dropped
+        gerlayqa.plain_text(
+            'nach a href="u" title="§ 1 X">§ 573b BGB/a> b>Teilk&uuml;ndigung/b> &lt;a href=\'v\'&gt;'
+        )
+        == "nach § 573b BGB Teilkündigung"
+    )
     assert (
         gerlayqa.INFO.research_only and gerlayqa.INFO.eval_only and "non-commercial" in gerlayqa.INFO.licence
     )

@@ -10,8 +10,8 @@ from lexhybrid.eval.judge import METRICS, Judge, OpenAICompatible, judge_from_ar
 
 
 class FakeResponse:
-    def __init__(self, content="", status_code=200):
-        self.content, self.status_code = content, status_code
+    def __init__(self, content="", status_code=200, text=""):
+        self.content, self.status_code, self.text = content, status_code, text
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -41,12 +41,25 @@ def test_openai_compatible_client(monkeypatch):
     assert calls[0] == {
         "url": "http://localhost:8000/v1/chat/completions",
         "headers": {"Authorization": "Bearer k"},
-        "json": {"model": "m", "messages": [{"role": "user", "content": "hallo"}], "temperature": 0},
+        "json": {
+            "model": "m",
+            "messages": [{"role": "user", "content": "hallo"}],
+            "temperature": 0,
+            "max_tokens": 2048,
+        },
     }
     OpenAICompatible("http://h/v1", "m")("x")
     assert calls[1]["headers"] == {}
     monkeypatch.setattr(requests, "post", lambda *a, **k: FakeResponse(None))
     assert OpenAICompatible("http://h/v1", "m")("x") == ""
+    overflow = "litellm.ContextWindowExceededError: This model's maximum context length is 20480 tokens"
+    monkeypatch.setattr(requests, "post", lambda *a, **k: FakeResponse(status_code=400, text=overflow))
+    assert OpenAICompatible("http://h/v1", "m")("x") == "", (
+        "a prompt past the window is unjudged, not a crash"
+    )
+    monkeypatch.setattr(requests, "post", lambda *a, **k: FakeResponse(status_code=400, text="unknown model"))
+    with pytest.raises(requests.HTTPError):
+        OpenAICompatible("http://h/v1", "m")("x")
 
     import argparse
 
@@ -413,6 +426,27 @@ def test_agreement_on_a_hand_example(script):
     assert agreement([1, 1], [1, 1])["kappa"] is None
 
 
+def test_calibration_sample_takes_whole_groups_per_type_the_same_every_run(script):
+    sample = script("score_judge_calibration").sample
+    items = [
+        {"id": f"{t}:{g}:{k}", "type": t, "group": f"g{g}"}
+        for t in ("a", "b")
+        for g in range(40)
+        for k in range(2)
+    ]
+    items.append({"id": "c:x:0", "type": "c", "group": "gx"})
+    got = sample(items, 10)
+    assert {i["id"] for i in sample(list(reversed(items)), 10)} == {i["id"] for i in got}, "input order"
+    count = {t: sum(i["type"] == t for i in got) for t in "abc"}
+    assert count == {"a": 10, "b": 10, "c": 1}
+    groups = {(i["type"], i["group"]) for i in got}
+    assert all(sum((i["type"], i["group"]) == g for i in got) == 2 for g in groups if g[0] != "c"), (
+        "whole groups"
+    )
+    assert {i["group"] for i in got if i["type"] == "a"} == {i["group"] for i in got if i["type"] == "b"}
+    assert sample(items, None) is items
+
+
 def test_score_judge_calibration_cli(tmp_path, monkeypatch, script):
     """Each type goes through the prompt its metric uses in production, on the chosen split, predicted by
     its threshold; an unparsed reply counts as wrong and is asked again next time; the exit code says
@@ -480,17 +514,19 @@ def test_score_judge_calibration_cli(tmp_path, monkeypatch, script):
 
 
 def test_a_judge_scores_only_after_its_own_validation_passed(tmp_path, script):
-    """No report, a failed bar, the calibration split, another model or endpoint, older prompts or an
-    unvalidated metric: scoring is refused, naming the reason."""
+    """No report, the calibration split, another model or endpoint, older prompts or a metric without
+    items: scoring is refused, naming the reason. A type below the bar is returned as unvalidated."""
     from lexhybrid.eval.judge import METRICS, PROMPT_VERSION
 
     ja = script("judge_answers")
     report = tmp_path / "r.json"
     report.write_text(json.dumps(_validated_report()))
-    ja.check_validated(report, "m", "http://h/v1")
+    assert ja.check_validated(report, "m", "http://h/v1") == []
+    below = {m: {"meets": m != METRICS[0]} for m in METRICS}
+    report.write_text(json.dumps(_validated_report(meets=False, types=below)))
+    assert ja.check_validated(report, "m", "http://h/v1") == [METRICS[0]], "scores, that metric unvalidated"
     partial = {m: {"meets": True} for m in METRICS[:-1]}
     for changes, reason in [
-        ({"meets": False}, "bar was not met"),
         ({"split": "calibration"}, "not validation"),
         ({"judge": {"model": "other", "base_url": "http://h/v1"}}, "model 'other'"),
         ({"judge": {"model": "m", "base_url": "http://x/v1"}}, "endpoint"),

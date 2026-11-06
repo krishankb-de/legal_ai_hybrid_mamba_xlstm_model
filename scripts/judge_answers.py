@@ -56,13 +56,13 @@ def summarize(records, results) -> list[dict]:
     return out
 
 
-def check_validated(path: Path, model: str, base_url: str) -> None:
+def check_validated(path: Path, model: str, base_url: str) -> list[str]:
     """Refuse to score with a judge whose validation report (``score_judge_calibration.py``) is not this
-    judge's or did not pass: its scores would license claims nobody checked."""
+    judge's, or did not cover every metric. Returns the item types that missed the bar: the judge still
+    scores, but those types are unvalidated and license no claim."""
     report = json.loads(path.read_text(encoding="utf-8"))
     judge = report.get("judge", {})
     problems = [
-        *([] if report.get("meets") else ["the bar was not met"]),
         *([] if report.get("split") == "validation" else [f"split {report.get('split')!r}, not validation"]),
         *([] if judge.get("model") == model else [f"model {judge.get('model')!r}, not {model!r}"]),
         *([] if str(judge.get("base_url", "")).rstrip("/") == base_url.rstrip("/") else [f"endpoint {judge.get('base_url')!r}, not {base_url!r}"]),
@@ -71,6 +71,7 @@ def check_validated(path: Path, model: str, base_url: str) -> None:
     ]  # fmt: skip
     if problems:
         raise SystemExit(f"{path}: this judge is not validated: " + "; ".join(problems))
+    return sorted(kind for kind, m in report["types"].items() if not m.get("meets"))
 
 
 def main(argv=None) -> int:
@@ -88,7 +89,9 @@ def main(argv=None) -> int:
         return 0
     if args.calibration is None:
         p.error("--calibration is required: score_judge_calibration.py validates a judge before it scores")
-    check_validated(args.calibration, args.model, args.base_url)
+    unvalidated = check_validated(args.calibration, args.model, args.base_url)
+    if unvalidated:
+        print(f"JUDGE unvalidated (below the bar, license no claim): {', '.join(unvalidated)}")
     judge = judge_from_args(args)
     results = [judge_record(judge, r) for r in records]
     args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -109,7 +112,7 @@ def main(argv=None) -> int:
             f.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
     groups = summarize(records, results)
     summary = {"judge": {"model": args.model, "base_url": args.base_url}, "records": str(args.records),
-               "new_calls": judge.calls, "groups": groups}  # fmt: skip
+               "unvalidated": unvalidated, "new_calls": judge.calls, "groups": groups}  # fmt: skip
     args.out.with_suffix(".summary.json").write_text(json.dumps(summary, indent=1) + "\n")
     for g in groups:
         means = " ".join(f"{m}={g[m]['mean']:.4f}" if g[m]["mean"] is not None else f"{m}=-" for m in METRICS)

@@ -1,0 +1,36 @@
+# Inference-only environment for the cluster's ARM GPU node (aarch64, 2x L40), which the main
+# environment does not cover (its lock is linux-x86_64 and macOS only). Enough for
+# scripts/eval_retrieval.py: BM25, bge-m3 and the reranker, at the main lock's versions so scores
+# match. Built on that node by scripts/slurm/setup_arm_env.sh
+# (`UV_PROJECT_ENVIRONMENT=.venv-arm uv sync --locked --project envs/arm`). lexhybrid itself is not
+# installed: jobs put the repository on PYTHONPATH.
+[project]
+name = "lexhybrid-arm"
+version = "0.1.0"
+description = "Inference-only environment for the ARM GPU node"
+requires-python = "==3.11.*"
+dependencies = [
+    "torch==2.11.0",
+    "transformers==5.17.0",
+    "tokenizers==0.23.2",
+    "huggingface-hub==1.33.0",
+    "safetensors==0.8.0",
+    "accelerate==1.15.0",
+    "numpy==2.4.6",
+    "scipy==1.17.1",
+    "bm25s[stem]==0.3.11",
+    "pystemmer==3.1.0",
+    "pyyaml==6.0.3",
+]
+
+[tool.uv]
+package = false
+environments = ["sys_platform == 'linux' and platform_machine == 'aarch64'"]
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cu128" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

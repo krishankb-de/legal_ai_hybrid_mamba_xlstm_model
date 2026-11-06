@@ -55,6 +55,8 @@ jobs:
         run: uv lock --check
       - name: the scrub environment's lock is up to date
         run: uv lock --check --project envs/scrub
+      - name: the ARM node environment's lock is up to date
+        run: uv lock --check --project envs/arm
       - name: Install the locked dev tools only
         run: uv sync --locked --only-group dev
       - name: ruff check

@@ -20,6 +20,7 @@ when every type meets it.
 """
 
 import argparse
+import hashlib
 import json
 from collections import defaultdict
 from pathlib import Path
@@ -80,6 +81,26 @@ def agreement(labels: list[int], preds: list[int]) -> dict:
     }
 
 
+def sample(items: list[dict], cap: int | None) -> list[dict]:
+    """At most ``cap`` items per type, taken a whole group at a time (an item with its negatives) in
+    the order of a hash of the group, so every run takes the same sample."""
+    if not cap:
+        return items
+    groups = defaultdict(list)
+    for item in items:
+        groups[item["type"], item["group"]].append(item)
+    out, taken = [], defaultdict(int)
+    for (kind, _group), rows in sorted(groups.items(), key=lambda kv: (kv[0][0], _sample_rank(kv[0][1]))):
+        if taken[kind] + len(rows) <= cap:
+            out += rows
+            taken[kind] += len(rows)
+    return out
+
+
+def _sample_rank(group: str) -> str:
+    return hashlib.sha256(f"sample:{group}".encode()).hexdigest()  # salted: the split uses the plain hash
+
+
 def score(items: list[dict], judge, min_kappa: float, min_accuracy: float) -> dict:
     per_item, by_type = [], defaultdict(list)
     for item in items:
@@ -110,12 +131,14 @@ def main(argv=None) -> int:
     p.add_argument("--split", choices=("validation", "calibration"), default="validation")
     p.add_argument("--min-kappa", type=float, required=True)
     p.add_argument("--min-accuracy", type=float, required=True)
+    p.add_argument("--max-per-type", type=int, default=None, help="sample at most this many items per type")
     args = p.parse_args(argv)
     lines = args.items.read_text(encoding="utf-8").split("\n")
     items = [i for i in map(json.loads, filter(str.strip, lines)) if i["split"] == args.split]
+    items = sample(items, args.max_per_type)
     judge = judge_from_args(args)
     report = {"judge": {"model": args.model, "base_url": args.base_url}, "split": args.split,
-              "prompt_version": PROMPT_VERSION,
+              "prompt_version": PROMPT_VERSION, "max_per_type": args.max_per_type,
               "bar": {"min_kappa": args.min_kappa, "min_accuracy": args.min_accuracy},
               **score(items, judge, args.min_kappa, args.min_accuracy)}  # fmt: skip
     args.out.parent.mkdir(parents=True, exist_ok=True)

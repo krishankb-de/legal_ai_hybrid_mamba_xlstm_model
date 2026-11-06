@@ -778,21 +778,27 @@ def test_build_index_dense_and_answer_retrieve_fuse_both_rankings(tmp_path, scri
     ) == 1  # no encoder: BM25 only
 
 
-def test_eval_retrieval_scores_four_arms_and_reuses_the_corpus_vectors(tmp_path, script, monkeypatch, capsys):
-    """scripts/eval_retrieval.py on a small set in the evalsets layout: bm25, dense, fused and reranked
-    rankings scored against the qrels; the reranker's order decides its arm; a second run embeds only
-    the queries (the corpus vectors in <set>/dense/ are reused)."""
+def _tiny_eval_set(tmp_path, extra_queries=()):
+    """A set in the evalsets layout: q1 has the planted BGB §568 passage, q2 the first chunk."""
     from lexhybrid.data.evalsets.base import EvalSetInfo, Passage, Query, RetrievalSet, write
 
     chunks = [c for d in _fixture_corpus() for c in chunk_document(d)]
     planted = next(c for c in chunks if c.citation_id == "BGB §568")
     corpus = [Passage(c.id, "\n".join(c.sentences), c.citation_id) for c in chunks]
     queries = [Query("q1", "Schriftform der Kündigung eines Mietverhältnisses"), Query("q2", "Wetter heute")]
-    qrels = {"q1": {planted.id: 1}, "q2": {chunks[0].id: 1}}
+    queries += [Query(f"q{i}", text) for i, text in enumerate(extra_queries, start=3)]
+    qrels = {"q1": {planted.id: 1}} | {q.id: {chunks[0].id: 1} for q in queries[1:]}
     info = EvalSetInfo(name="tiny", task="retrieval", licence="test", source="test")
     set_dir = tmp_path / "tiny"
     write(RetrievalSet(info, queries, qrels, corpus), set_dir, tmp_path / "manifests")
+    return set_dir, corpus, queries
 
+
+def test_eval_retrieval_scores_four_arms_and_reuses_the_corpus_vectors(tmp_path, script, monkeypatch, capsys):
+    """scripts/eval_retrieval.py on a small set in the evalsets layout: bm25, dense, fused and reranked
+    rankings scored against the qrels; the reranker's order decides its arm; a second run embeds only
+    the queries (the corpus vectors in <set>/dense/ are reused)."""
+    set_dir, corpus, queries = _tiny_eval_set(tmp_path)
     ev = script("eval_retrieval")
     embedded = []
     encode = lambda texts: embedded.append(len(texts)) or _bag_of_words(texts)  # noqa: E731
@@ -811,6 +817,58 @@ def test_eval_retrieval_scores_four_arms_and_reuses_the_corpus_vectors(tmp_path,
     embedded.clear()
     assert ev.main(["--set-dir", str(set_dir), "--out", str(out)]) == 0
     assert embedded == [len(queries)], "the corpus vectors are reused"
+
+
+def test_eval_retrieval_rerank_shards_and_a_killed_run_leave_only_the_missing_queries(tmp_path, script):
+    """Reranked lists are saved per query: after one shard and a killed shard, the scoring run reranks
+    only the query left over, and its metrics equal those of one uninterrupted run."""
+    import shutil
+
+    set_dir, _, queries = _tiny_eval_set(tmp_path, ["Kündigung Mietverhältnis Form"])
+    fresh = shutil.copytree(set_dir, tmp_path / "fresh")
+    ev = script("eval_retrieval")
+    asked = []
+
+    def scorer(q, texts, limit=None):
+        if limit is not None and len(asked) >= limit:
+            raise TimeoutError("killed at the time limit")
+        asked.append(q)
+        return [float("schriftlichen Form" in t) for t in texts]
+
+    assert ev.rank_set(set_dir, _bag_of_words, scorer, "bow", shard=(1, 2)) is None
+    assert asked == [queries[1].text]
+    asked.clear()
+    with pytest.raises(TimeoutError):  # shard 0 owns q1 and q3; dies after q1
+        ev.rank_set(set_dir, _bag_of_words, lambda q, t: scorer(q, t, limit=1), "bow", shard=(0, 2))
+    asked.clear()
+    resumed = ev.rank_set(set_dir, _bag_of_words, scorer, "bow")
+    assert asked == [queries[2].text], "only the query the killed shard did not reach"
+    assert resumed == ev.rank_set(fresh, _bag_of_words, scorer, "bow")
+    shard_file = next((set_dir / "rerank").glob("*/shard_1_of_2.jsonl"))
+    row = json.loads(shard_file.read_text())
+    assert row["cand"][::-1] != row["cand"]
+    shard_file.write_text(json.dumps(row | {"cand": row["cand"][::-1]}) + "\n")
+    asked.clear()
+    assert ev.rank_set(set_dir, _bag_of_words, scorer, "bow") == resumed
+    assert asked == [], "the same candidates in another order (query vectors from another GPU) are reused"
+    shard_file.write_text(json.dumps(row | {"cand": row["cand"][:-1] + ["elsewhere"]}) + "\n")
+    for _ in range(2):
+        assert ev.rank_set(set_dir, _bag_of_words, scorer, "bow") == resumed
+    assert asked == [queries[1].text], (
+        "another candidate set is reranked once; the stale row does not shadow it"
+    )
+    with pytest.raises(SystemExit):
+        ev.main(["--set-dir", str(set_dir), "--out", str(tmp_path / "r.json"), "--shard", "2/2"])
+    out = tmp_path / "saved.json"  # each saved file scored on its own, no model
+    assert ev.main(["--set-dir", str(set_dir), "--out", str(out), "--saved-only"]) == 0
+    saved = json.loads(out.read_text())[set_dir.name]
+    assert sorted(k.split("/")[1] for k in saved) == [
+        "rest.jsonl",
+        "shard_0_of_2.jsonl",
+        "shard_1_of_2.jsonl",
+    ]
+    shard0 = next(m for k, m in saved.items() if k.endswith("shard_0_of_2.jsonl"))
+    assert shard0["queries"] == 1 and shard0["mrr"] == 1.0, "q1: the reranker puts the planted passage first"
 
 
 def test_dense_ties_go_to_the_earlier_chunk_whatever_the_block_size(tmp_path):

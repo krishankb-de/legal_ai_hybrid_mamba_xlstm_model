@@ -26,6 +26,7 @@ from tests.conftest import REPO_ROOT
 SLURM_DIR = REPO_ROOT / "scripts" / "slurm"
 WRAPPERS = sorted(SLURM_DIR.glob("*.sh"))
 EXCLUDED_NODES = {"ga03", "gx17v1", "gx13v1"}
+ARM_WRAPPERS = {"setup_arm_env.sh"}  # built for the ARM node, so pinned to it instead
 # `set -uo pipefail` without -e: a status report whose every section must run
 REPORTS = {"watch.sh"}
 
@@ -69,9 +70,14 @@ def test_header(path):
     d = directives(path)
     assert d.get("partition") == "pot-hpi-aisc-batch"
     assert d.get("account") == "aisc"
-    assert EXCLUDED_NODES <= set(d.get("exclude", "").split(",")), (
-        "ga03 is an ARM node (the x86 .venv cannot run there); gx13v1 has a faulty GPU"
-    )
+    if path.name in ARM_WRAPPERS:
+        assert d.get("nodelist") == "ga03" and EXCLUDED_NODES - {"ga03"} <= set(
+            d.get("exclude", "").split(",")
+        )
+    else:
+        assert EXCLUDED_NODES <= set(d.get("exclude", "").split(",")), (
+            "ga03 is an ARM node (the x86 .venv cannot run there); gx13v1 has a faulty GPU"
+        )
     assert d.get("constraint") == "GLB_SCRATCH", "/sc/scratch is mounted only on GLB_SCRATCH nodes"
     assert "gres" not in d, "use --gpus, never --gres"
     assert d.get("output", "").startswith("logs/") and d.get("error") == d.get("output")
@@ -1068,6 +1074,37 @@ def test_eval_retrieval_fetch_only_stops_before_scoring(sandbox):
     res, calls = sandbox("eval_retrieval.sh", SLURM_JOB_ID=8, FETCH_ONLY=1, SETS="gerlerb")
     assert res.returncode == 0 and "FETCH EVALSETS DONE" in res.stdout, res.stdout + res.stderr
     assert [c[2] for c in calls] == ["lexhybrid.data.evalsets.gerlerb"]
+
+
+def test_eval_retrieval_shards_rerank_by_array_task_and_score_nothing(sandbox):
+    res, calls = sandbox(
+        "eval_retrieval.sh", SLURM_JOB_ID=10, SLURM_ARRAY_TASK_ID=3, SHARDS=16, SETS="gerlerb"
+    )
+    assert res.returncode == 0 and "EVAL RETRIEVAL DONE" not in res.stdout, res.stdout + res.stderr
+    ev = next(c for c in calls if c[1] == "scripts/eval_retrieval.py")
+    assert ev[ev.index("--shard") + 1] == "3/16"
+
+
+def test_eval_retrieval_saved_only_scores_the_saved_reranks_without_a_device(sandbox):
+    res, calls = sandbox("eval_retrieval.sh", SLURM_JOB_ID=12, SAVED_ONLY=1, SETS="gerlerb")
+    assert res.returncode == 0 and "EVAL RETRIEVAL SAVED DONE" in res.stdout, res.stdout + res.stderr
+    ev = next(c for c in calls if c[1] == "scripts/eval_retrieval.py")
+    assert "--saved-only" in ev and "--device" not in ev and ev[-1] == "logs/eval_retrieval_12/saved.json"
+
+
+def test_eval_retrieval_on_the_arm_node_runs_from_its_own_environment(sandbox, tmp_path):
+    _executable(tmp_path / "bin" / "uname", "#!/usr/bin/env bash\necho aarch64\n")
+    (sandbox.repo / ".venv-arm" / "bin").mkdir(parents=True)
+    _executable(
+        sandbox.repo / ".venv-arm" / "bin" / "python",
+        "#!/usr/bin/env bash\nIFS=$'\\x1f'; printf '%s\\n' \"arm:${PYTHONPATH:-}$IFS$*\" >> \"$CALLS\"\n",
+    )
+    for name in ("gerlerb", "gerdalir"):  # fetched already: the ARM environment does not fetch
+        (sandbox.scratch / "data" / "evalsets" / name).mkdir(parents=True)
+        (sandbox.scratch / "data" / "evalsets" / name / "qrels.jsonl").write_text("{}\n")
+    res, calls = sandbox("eval_retrieval.sh", SLURM_JOB_ID=11)
+    assert res.returncode == 0 and "EVAL RETRIEVAL DONE" in res.stdout, res.stdout + res.stderr
+    assert [c[:2] for c in calls] == [[f"arm:{sandbox.repo}", "scripts/eval_retrieval.py"]]
 
 
 def test_eval_retrieval_fetches_missing_sets_online_once_then_scores_offline(sandbox):

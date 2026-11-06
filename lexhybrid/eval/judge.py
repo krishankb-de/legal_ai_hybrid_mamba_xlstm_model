@@ -58,8 +58,10 @@ Complete = Callable[[str], str]
 Read = Callable[[dict], float]  # raises KeyError, TypeError or ValueError on a bad reply
 
 DEFAULT_CACHE_DIR = Path(__file__).resolve().parents[2] / "data" / "cache" / "judge"
-PROMPT_VERSION = 1  # part of the cache key: bump it whenever a prompt below changes
+PROMPT_VERSION = 2  # part of the cache key: bump it whenever a prompt below changes
 TRIES, BACKOFF_S = 5, 2.0  # HTTP attempts; waits 2, 4, 8, 16 s between them
+MAX_REPLY_TOKENS = 2048  # a verdict is short; without a cap one runaway reply holds a call past the timeout
+_OVERFLOW = re.compile(r"ContextWindowExceeded|maximum context length", re.IGNORECASE)
 METRICS = ("correctness", "faithfulness", "answer_relevancy", "context_precision", "context_recall")
 VERDICTS = {"correct": 1.0, "partial": 0.5, "incorrect": 0.0}
 RETRY = "\n\nYour previous reply could not be parsed. Reply with the JSON object only, nothing else."
@@ -81,9 +83,11 @@ class OpenAICompatible:
                     self.url,
                     headers={"Authorization": f"Bearer {self.api_key}"} if self.api_key else {},
                     json={"model": self.model, "messages": [{"role": "user", "content": prompt}],
-                          "temperature": 0},
+                          "temperature": 0, "max_tokens": MAX_REPLY_TOKENS},
                     timeout=self.timeout,
                 )  # fmt: skip
+                if r.status_code == 400 and _OVERFLOW.search(r.text):
+                    return ""  # the prompt is longer than the judge's window: unjudged, like a bad reply
                 if r.status_code == 429 or r.status_code >= 500:
                     r.raise_for_status()
             except (requests.ConnectionError, requests.Timeout, requests.HTTPError):
@@ -160,7 +164,10 @@ class Judge:
 
 
 def _numbered(texts: Sequence[str]) -> str:
-    return "\n\n".join(f"[{i}] {t}" for i, t in enumerate(texts, start=1)) or "(none)"
+    """Tagged, since a decision's own numbering ("[2]", Randnummern) read as passage numbers."""
+    return (
+        "\n\n".join(f"<passage {i}>\n{t}\n</passage {i}>" for i, t in enumerate(texts, start=1)) or "(none)"
+    )
 
 
 def _listed(texts: Sequence[str]) -> str:
@@ -255,7 +262,7 @@ Question:
 {given}Passages:
 {_numbered(contexts)}
 
-For each passage, in order, decide whether it is useful for {goal}: it holds information the answer rests on, not merely the same topic.
+There {"is 1 passage" if len(contexts) == 1 else f"are {len(contexts)} passages"}, each between its <passage k> and </passage k> tags. For each passage, in order, decide whether it is useful for {goal}: it holds information the answer rests on, not merely the same topic.
 
 {_JSON_ONLY}
 {{"useful": [true | false, ...]}} with exactly {len(contexts)} entries, one per passage."""

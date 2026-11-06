@@ -133,7 +133,7 @@ def test_judge_parses_scores_and_caches(tmp_path):
     assert details["context_recall"] == {"raw": "still no json"}
     assert judge.calls == len(sent) == 8  # five prompts, three of them retried
     assert "Welche Form?" in sent[0] and gold[0] in sent[0] and NOTICE not in sent[0]
-    assert "[2] BGB §568\n" in sent[2] and sent[0].endswith('"reason": "<one sentence>"}')
+    assert "<passage 2>\nBGB §568\n" in sent[2] and sent[0].endswith('"reason": "<one sentence>"}')
     files = sorted(cache.glob("*.json"))
     assert len(files) == 4  # the unparsed recall reply is not cached
     entry = json.loads(files[0].read_text())
