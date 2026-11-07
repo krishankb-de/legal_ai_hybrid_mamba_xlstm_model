@@ -552,6 +552,32 @@ def test_train_pretrain_script_runs_and_resumes(tmp_path, script):
         tp.run(_compose(*overrides, f"+resume_from_checkpoint={tmp_path / 'missing.ckpt'}"))
 
 
+def test_pretrain_best_checkpoint_holds_the_weights_of_the_best_val_loss(tmp_path, script, monkeypatch):
+    """A scripted val/loss of 3, 1, 2, 2.5 over 4 steps, validating after each: the best checkpoint is
+    step 2's (a step-interval monitored save would keep step 3's); the step checkpoint writes last.ckpt."""
+    from pytorch_lightning.callbacks import ModelCheckpoint
+
+    tp = script("train_pretrain")
+    losses = {1: 3.0, 2: 1.0, 3: 2.0, 4: 2.5}
+
+    def scripted(self, batch, batch_idx):
+        self.log("val/loss", losses[self.global_step], batch_size=1)
+
+    monkeypatch.setattr(tp.PretrainLightningModule, "validation_step", scripted)
+    cfg = _compose("model.vocab_size=64", *_SFT_TINY, "model.max_position_embeddings=64", "trainer=cpu_debug",
+                   "trainer.max_steps=4", "trainer.enable_checkpointing=true",
+                   "callbacks.checkpoint.every_n_train_steps=1", "callbacks.checkpoint.save_top_k=1",
+                   "dataset.row_len=24", "dataset.num_rows=8", "dataset.batch_size=2", f"output_dir={tmp_path}",
+                   "+logger=false")  # fmt: skip
+    trainer = tp.run(cfg)
+    (best,) = [c for c in trainer.callbacks if isinstance(c, ModelCheckpoint) and c.best_model_path]
+    assert float(best.best_model_score) == 1.0
+    assert torch.load(best.best_model_path, map_location="cpu", weights_only=False)["global_step"] == 2
+    ckpts = tmp_path / "checkpoints"
+    assert sorted(p.name for p in ckpts.iterdir()) == ["best-step000002.ckpt", "last.ckpt"]
+    assert torch.load(ckpts / "last.ckpt", map_location="cpu", weights_only=False)["global_step"] == 4
+
+
 def test_train_pretrain_runs_on_packed_shards(tmp_path, script):
     """The entry point trains on the packed-shard mixture (dataset=legal_smoke retargeted at
     shards built here with a toy one-id-per-character tokenizer)."""
