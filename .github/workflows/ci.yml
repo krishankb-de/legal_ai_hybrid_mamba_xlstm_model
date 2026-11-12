@@ -31,10 +31,12 @@ env:
   HF_HUB_OFFLINE: "1"
   HF_DATASETS_OFFLINE: "1"
 
+# Linux jobs pin ubuntu-24.04: on ubuntu-26.04 one fp32 Mamba-3 step parity case lands at 1.01e-6 against
+# the 1e-6 tolerance (same torch and lock; only the runner image differs). Move only after checking that case.
 jobs:
   hygiene:
     name: hygiene (the pushed tree)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
@@ -44,7 +46,7 @@ jobs:
 
   lint:
     name: lint (lock, ruff, shell, workflow)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
@@ -76,7 +78,7 @@ jobs:
 
   test:
     name: test (Linux, Python ${{ matrix.python-version }})
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
       fail-fast: false
@@ -112,7 +114,7 @@ jobs:
 
   package:
     name: package (wheel builds and imports without the source tree)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
@@ -167,7 +169,7 @@ jobs:
   network:
     name: live-source smoke (weekly)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     env:
       LEXHYBRID_NETWORK_TESTS: "1"
