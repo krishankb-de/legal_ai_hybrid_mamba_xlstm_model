@@ -6,13 +6,14 @@
 
 The config is ``configs/sft/default.yaml``: the pretraining model, trainer and callbacks groups with
 the SFT keys. The pretraining entry point's machinery is reused: the trainer kwargs
-(``val_every_opt_steps`` and the explicit DDP strategy), the callbacks (``last.ckpt``, the signal
-checkpoint, ``STEPSTATS``), and ``run_metadata.json`` from the launcher rank. Three things differ:
+(``val_every_opt_steps`` and the explicit DDP strategy), the callbacks (the final ``last.ckpt``, the
+signal checkpoint, ``STEPSTATS``), and ``run_metadata.json`` from the launcher rank. Three things differ:
 
 * ``lm_checkpoint`` loads strictly: weights only (the SFT schedule starts at step 0), and any missing
   or unexpected key stops the run, because fine-tuning a partly loaded model fails without a word.
-* The step-based ``ModelCheckpoint`` writes ``last.ckpt`` only; ``best_val_checkpoint`` keeps the
-  ``callbacks.checkpoint.save_top_k`` best-dev-loss checkpoints, saved at validation end.
+* ``best_val_checkpoint`` keeps the ``callbacks.checkpoint.save_top_k`` best-dev-loss checkpoints and
+  ``last.ckpt`` follows it, both saved at validation end (``callbacks.checkpoint.every_n_train_steps``
+  is unused): a requeued run resumes after its last validation, with that validation ranked.
 * ``resume_from_checkpoint`` resumes an SFT run, the requeue path.
 
 ``trainer.max_steps`` counts global optimizer steps: the training schedule holds
@@ -28,12 +29,14 @@ import hydra
 import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig, OmegaConf
+from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader
 
 from lexhybrid.config import HybridConfig
 from lexhybrid.data.datasets import ScheduleSampler, ShardSampler
 from lexhybrid.models.hybrid_lm import HybridLanguageModel
+from lexhybrid.training.callbacks import ValidationEndCheckpoint
 from lexhybrid.training.sft_module import SFTLightningModule, SFTSplit, best_val_checkpoint, collate
 from lexhybrid.utils.checkpoint import check_run_settings, strip_prefixes
 from lexhybrid.utils.run_metadata import write_run_metadata
@@ -63,14 +66,18 @@ def build_model(cfg: DictConfig) -> HybridLanguageModel:
 
 
 def build_callbacks(cfg: DictConfig, enable_checkpointing: bool) -> list:
-    """Pretraining's callbacks with its step-based checkpoint writing ``last.ckpt`` only, plus the
-    best-dev-loss checkpoint saved at validation end."""
+    """Pretraining's callbacks without its step-based checkpoint, plus the best-dev-loss checkpoint
+    and then ``last.ckpt``, both saved at validation end. A ``last.ckpt`` saved at the step, before
+    its validation, would resume past that validation with the ranking of the one before."""
     top_k = int(cfg.callbacks.checkpoint.save_top_k)
-    # no monitor: Lightning defers a monitored step save until the metric exists, so a kill would lose it
-    last_only = OmegaConf.merge(cfg, {"callbacks": {"checkpoint": {"save_top_k": 0, "monitor": None}}})
-    callbacks = tp.build_callbacks(last_only, enable_checkpointing)
-    if enable_checkpointing and top_k:
-        callbacks.append(best_val_checkpoint(cfg.checkpoint_dir, top_k))
+    no_step = OmegaConf.merge(cfg, {"callbacks": {"checkpoint": {"save_top_k": 0, "monitor": None}}})
+    callbacks = [
+        c for c in tp.build_callbacks(no_step, enable_checkpointing) if not isinstance(c, ModelCheckpoint)
+    ]
+    if enable_checkpointing:
+        if top_k:
+            callbacks.append(best_val_checkpoint(cfg.checkpoint_dir, top_k))
+        callbacks.append(ValidationEndCheckpoint(cfg.checkpoint_dir))  # after the ranking above
     return callbacks
 
 

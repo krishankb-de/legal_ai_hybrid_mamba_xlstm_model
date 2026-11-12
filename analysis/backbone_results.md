@@ -53,6 +53,24 @@ MQAR has 256 items (1,024 queries) and statute recall 100, at both lengths. Mult
 
 All stage-B checkpoints load into the model their config builds with 0 missing and 0 unexpected keys.
 
+### Learning-rate sensitivity at screen scale
+
+Every run above used LR 4e-4. To see how much that choice matters, the hybrid (`hybrid_legal_base`) and its no-attention variant (`hybrid_legal_attn0`) were retrained at 2e-4 and 8e-4, with the architecture screen's recipe otherwise unchanged: 12,000 steps of 2,048-token rows on one H100 each, AdamW β2 0.95, seed 42, the same data order. The 4e-4 rows are the screen's seed-42 runs. Val PPL is exp of the final `val/loss`. Late-25% PPL uses the screen's definition at 2,048 tokens (at least 1,536 tokens of the token's own document before it; the row-position variant is in brackets).
+
+| arm | LR | val PPL | late-25% PPL | s/step | peak GB |
+|---|---|---|---|---|---|
+| hybrid | 2e-4 | 5.4840 | 5.1068 (5.1088) | 2.8117 | 41.46 |
+| hybrid | **4e-4** | **5.3634** | **5.0056 (4.9936)** | 2.8101 | 41.46 |
+| hybrid | 8e-4 | 5.6989 | 5.3273 (5.3219) | 2.9744 | 41.46 |
+| no attention | 2e-4 | 6.4192 | 6.2966 (6.2212) | 2.9475 | 41.50 |
+| no attention | **4e-4** | **6.0241** | **5.8771 (5.8005)** | 2.9254 | 41.50 |
+| no attention | 8e-4 | 1,181.75 (diverged) | 1,211.69 (1,203.11) | 2.9891 | 41.50 |
+
+- **4e-4 is the best of the three for both architectures**, on val PPL and on late-25% PPL. On the hybrid, half the LR costs 0.121 val PPL and twice the LR 0.336. Without attention, half the LR costs 0.395.
+- **The hybrid leads at every learning rate.** The no-attention variant at its best LR (6.0241) trails the hybrid at its best (5.3634) by 0.661 PPL, more than six times the 0.10 bar the screen used. The choice of the hybrid does not rest on the LR.
+- **The no-attention variant diverged at 8e-4.** The gradient norm spiked to 14.5 between steps 1,250 and 1,500. Between steps 1,750 and 2,250 the training loss rose from about 2.6 to 9.3, and it never recovered (training CE about 7.2 to the end). The hybrid at 8e-4 trained through gradient-norm spikes of up to 29 (steps 6,500 to 6,750) and finished 0.336 PPL behind its 4e-4 run.
+- **Each LR has one seed.** At 4e-4 the two-seed SD is 0.0074 for the hybrid and 0.0134 without attention. Every difference above is many times that, but these are single runs.
+
 ## Discussion
 
 Statute gold NLL roughly triples between 2,048 and 8,192 on all three checkpoints. The probe places the provision at the start of the prompt and fills the remainder with other law, so at 8,192 the answer sits about four times further back. Both architectures got worse by a similar amount. Stage B was short (1,037 steps), so this does not show what a longer stage at 8,192 would reach.
@@ -67,10 +85,11 @@ Recall does not separate the architectures at 8,192: the hybrid seeds differ by 
 - **Exact match is near its floor,** so the statute comparison rests on char-F1 and gold NLL.
 - **The document-position late-25% is the pre-stated definition.** On the row-position variant, seed 42 misses 3% (−2.85%).
 - **The research-corpus arm** is evaluated on the commercial-safe validation rows and has no probes. It is descriptive only.
-- **Learning-rate sensitivity is not here.** Every run used LR 4e-4.
+- **Learning-rate sensitivity was measured at screen scale only** (2,048-token rows, 12,000 steps, one seed per LR). The full backbone runs used LR 4e-4 throughout.
 
 ## Reproduction
 
 - **Training:** `scripts/slurm/train_pretrain_4gpu.sh` with `configs/model/hybrid_legal_base.yaml` and `configs/model/transformer_legal_base.yaml`.
 - **Metrics:** validation and late-25% PPL via `scripts/evaluate_val_ppl.py`; probes via `scripts/slurm/eval_probes.sh`, with `CONTEXT=2048` and `CONTEXT=8192`.
+- **Learning-rate sensitivity:** `scripts/slurm/screen_array.sh` with the arms `S0-lr2-s42 S0-lr8-s42 S1-lr2-s42 S1-lr8-s42` (`scripts/screen_arms.py`); val PPL via `scripts/slurm/screen_metrics.sh`, late-25% PPL via `scripts/slurm/eval_probes.sh` with `PROBES=0`.
 - **Checkpoints (cluster-only):** `$SCRATCH_ROOT/outputs/<run>/checkpoints/last.ckpt`, one run per row of the validation table.

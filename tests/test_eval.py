@@ -455,6 +455,152 @@ def _decode_argv(root, sets, out, *extra):
             "--out", str(out), "--summary", str(out.with_suffix(".summary.json")), *extra]  # fmt: skip
 
 
+def _sft_row(id, chunk_ids, answer=(), question="Welche Form braucht die Kündigung?", passages=None):
+    """An SFT row as scripts/build_sft_data.py writes dev.jsonl: one passage per chunk id, in order."""
+    from lexhybrid.data.sft_format import Example, Passage, render
+
+    passages = tuple(
+        passages or (Passage(f"BGB §{560 + k}", ("Ein Satz.", "Noch einer.")) for k in range(len(chunk_ids)))
+    )
+    return {"id": id, "question_id": "h", "source": "synthetic", "kind": "answerable" if answer else "unanswerable",
+            "chunk_ids": list(chunk_ids), "text": "".join(render(Example(question, passages, tuple(answer))))}  # fmt: skip
+
+
+def test_gold_items_from_sft_rows():
+    """An SFT row's gold is the chunks its answer quotes or cites, each once in order of citation, never
+    the passage pointers of its prompt; a refusal has none, and a pointer past its chunk ids is an error."""
+    from lexhybrid.data.sft_format import Cite, Quote, Text
+    from lexhybrid.eval.gold_passages import sft_item
+
+    ids = ["a#1", "b#1", "c#1"]
+    answer = (Text("Schriftlich "), Cite(3), Text(", denn "), Quote(1, 2), Cite(3), Text("."))
+    row = _sft_row("r1", ids, answer, question="  Welche Form?  ")
+    assert row["text"].count("<|c2|>") == 1  # only the prompt points at passage 2
+    item = {"id": "r1", "question": "Welche Form?", "answers": [], "gold_chunk_ids": ["c#1", "a#1"]}
+    assert sft_item(row) == item
+    assert sft_item(_sft_row("r2", ids))["gold_chunk_ids"] == []
+    with pytest.raises(ValueError, match="cites past its 2 chunk ids"):
+        sft_item({**row, "chunk_ids": ids[:2]})
+
+
+def test_eval_gold_passages_sft_rows_and_limited_decode(tiny_setup, script, monkeypatch, tmp_path, capsys):  # noqa: F811
+    """build takes SFT rows (their answers' citations are the gold, a refusal is skipped); decode --limit N
+    decodes only N sets and writes no summary, so a job does not skip the run as scored, and a run without
+    it resumes the rest."""
+    import json
+
+    from lexhybrid.data.sft_format import Cite, Quote
+    from lexhybrid.eval.gold_passages import read_chunks
+    from lexhybrid.eval.records import read_records
+
+    root, index = tiny_setup
+    gold_passages = script("eval_gold_passages")
+    chunks = read_chunks(index)
+    notar = next(c for c in chunks if c.citation_id == "BeurkG §3")
+    form = next(c for c in chunks if c.citation_id == "BGB §568")
+    rows = [
+        _sft_row("s1", [form.id, notar.id], (Quote(2, 1),), "Wann ist die Mitwirkung des Notars ausgeschlossen?"),
+        _sft_row("s2", [notar.id, form.id], (Cite(2),), "Welche Form braucht die Kündigung des Mietverhältnisses?"),
+        _sft_row("s3", [form.id]),
+    ]  # fmt: skip
+    sft = tmp_path / "sft" / "dev.jsonl"
+    sft.parent.mkdir()
+    sft.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
+    sets = tmp_path / "sets.jsonl"
+    build = ["build", "--items", str(sft), "--index", str(index), "--k", "1", "2", "--set-name", "sft_dev"]
+    assert gold_passages.main([*build, "--out", str(sets)]) == 0
+    built = read_records(sets)
+    assert {r.id for r in built} == {"s1", "s2"} and {r.set for r in built} == {"sft_dev"} and len(built) > 2
+    for r in built:
+        assert r.gold_chunk_ids == [notar.id if r.id == "s1" else form.id]
+
+    monkeypatch.setattr(gold_passages, "load_tokenizer", ByteTokenizer)
+    monkeypatch.setattr(gold_passages, "MDebertaNLI", lambda *a, **k: lambda premise, hypothesis: 1.0)
+    out, summary = tmp_path / "run.jsonl", tmp_path / "run.summary.json"
+    capsys.readouterr()
+    assert gold_passages.main(_decode_argv(root, sets, out, "--limit", "2")) == 0
+    assert [(r.id, r.arm) for r in read_records(out)] == [(r.id, r.arm) for r in built[:2]]
+    assert f"0 resumed, 2 decoded, {len(built) - 2} left" in capsys.readouterr().out and not summary.exists()
+    assert gold_passages.main(_decode_argv(root, sets, out)) == 0
+    assert [(r.id, r.arm) for r in read_records(out)] == [(r.id, r.arm) for r in built]
+    assert f"2 resumed, {len(built) - 2} decoded, 0 left" in capsys.readouterr().out and summary.exists()
+
+
+def test_as_is_sets_decode_each_sft_rows_own_prompt(tiny_setup, script, monkeypatch, tmp_path):  # noqa: F811
+    """build --as-is writes one set per SFT row: its own question and passages in chunk_ids order, its
+    kind, as gold the chunks its answer cites, loading no encoder and no retriever and writing no
+    counts; a chunk id the index lacks, or a passage the index does not hold as the prompt shows it,
+    stops the build. decode answers each set, its summary scores no gold position for them, and the
+    citation metrics and the truncation audit read the records."""
+    import json
+
+    from lexhybrid.data.sft_format import Cite, Quote
+    from lexhybrid.eval.gold_passages import read_chunks
+    from lexhybrid.eval.records import read_records
+
+    root, index = tiny_setup
+    gold_passages = script("eval_gold_passages")
+    chunks = read_chunks(index)
+    notar = next(c for c in chunks if c.citation_id == "BeurkG §3")
+    form = next(c for c in chunks if c.citation_id == "BGB §568")
+
+    def row(id, prompt, answer=(), **kw):
+        kind = kw.pop("kind", None)
+        r = _sft_row(id, [c.id for c in prompt], answer, passages=[c.passage() for c in prompt], **kw)
+        return {**r, "kind": kind or r["kind"]}
+
+    rows = [row("s1", [form, notar], (Quote(2, 1),)), row("s2", [notar, form], (Cite(2), Cite(1))),
+            row("s3", [form], question="  Gilt das?  ", kind="false_premise")]  # fmt: skip
+    sft = tmp_path / "sft" / "dev.jsonl"
+    sft.parent.mkdir()
+    sft.write_text("".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows))
+
+    def no_retrieval(*args, **kwargs):
+        raise AssertionError("an as-is set retrieves nothing")
+
+    monkeypatch.setattr(gold_passages, "BgeM3Encoder", no_retrieval)
+    monkeypatch.setattr(gold_passages, "fused_retriever", no_retrieval)
+    sets = tmp_path / "sets.jsonl"
+    build = ["build", "--items", str(sft), "--index", str(index), "--as-is", "--set-name", "sft_dev"]
+    assert gold_passages.main([*build, "--out", str(sets)]) == 0
+    built = read_records(sets)
+    assert [(r.id, r.arm, r.set, r.kind, r.gold_chunk_ids, [c["id"] for c in r.chunks]) for r in built] == [
+        ("s1", "as_is", "sft_dev", "answerable", [notar.id], [form.id, notar.id]),
+        ("s2", "as_is", "sft_dev", "answerable", [form.id, notar.id], [notar.id, form.id]),
+        ("s3", "as_is", "sft_dev", "false_premise", [], [form.id]),
+    ]
+    assert [r.question for r in built] == ["Welche Form braucht die Kündigung?"] * 2 + ["  Gilt das?  "]
+    assert (
+        all(r.system == "" and not r.raw_answer for r in built)
+        and not (tmp_path / "sets.counts.json").exists()
+    )
+    for bad, match in (
+        ({**rows[0], "chunk_ids": [form.id, "gii:missing#1"]}, "not in the index"),
+        ({**rows[0], "chunk_ids": [notar.id, form.id]}, "passages are not the index's"),
+    ):
+        sft.write_text(json.dumps(bad, ensure_ascii=False) + "\n")
+        with pytest.raises(ValueError, match=match):
+            gold_passages.main([*build, "--out", str(tmp_path / "bad.jsonl")])
+
+    monkeypatch.setattr(gold_passages, "load_tokenizer", ByteTokenizer)
+    monkeypatch.setattr(gold_passages, "MDebertaNLI", lambda *a, **k: lambda premise, hypothesis: 1.0)
+    out, summary = tmp_path / "run.jsonl", tmp_path / "run.summary.json"
+    assert gold_passages.main(_decode_argv(root, sets, out)) == 0
+    decoded = read_records(out)
+    assert [(r.id, r.kind, r.chunks, r.gold_chunk_ids) for r in decoded] == [
+        (r.id, r.kind, r.chunks, r.gold_chunk_ids) for r in built
+    ]
+    assert (
+        all(r.system == "hybrid" and r.raw_answer for r in decoded) and json.loads(summary.read_text()) == []
+    )
+    citation = tmp_path / "run.citation.summary.json"
+    metrics = ["--metrics-out", str(tmp_path / "run.citation.metrics.jsonl"), "--summary-out", str(citation)]
+    assert script("evaluate_citation").main([str(out), *metrics]) == 0
+    [s] = json.loads(citation.read_text())
+    assert (s["arm"], s["records"], s["should_refuse"], s["recall_records"]) == ("as_is", 3, 1, 2)
+    assert script("audit_truncation").main([str(out)]) in (0, 1)
+
+
 def test_eval_gold_passages_end_to_end_tiny(tiny_setup, script, monkeypatch, tmp_path, capsys):  # noqa: F811
     """build writes the prompt sets from a real index (BM25 ranks the hard tier), counts per tier and k
     the items it skipped for too few distractors and warns about them; decode answers each set greedily
@@ -635,10 +781,108 @@ def test_eval_gold_passages_decode_appends_and_resumes(tiny_setup, script, monke
     assert out.read_bytes() == before
 
 
+def test_eval_gold_passages_decodes_in_the_requested_dtype(script, monkeypatch):
+    """--dtype bfloat16 casts the loaded model's parameters (a large model's longest prompts then fit the GPU)
+    but not its fp32 buffers such as RoPE's inv_freq; the default keeps fp32, and decode passes the flag
+    through to the loader."""
+    import pytest
+    import torch
+
+    gold_passages = script("eval_gold_passages")
+
+    def stub(*args):
+        model = torch.nn.Linear(2, 2).train()
+        model.register_buffer("inv_freq", torch.full((2,), 1 / 3), persistent=False)  # as RoPE's
+        return model
+
+    monkeypatch.setattr(gold_passages, "load_sft_model", stub)
+    assert gold_passages.load_model(None, "x.ckpt", "cpu", "Qwen/x").weight.dtype == torch.float32
+    model = gold_passages.load_model(None, "x.ckpt", "cpu", "Qwen/x", dtype="bfloat16")
+    assert model.weight.dtype == torch.bfloat16 and not model.training
+    assert model.inv_freq.dtype == torch.float32  # a buffer rounded to bf16 garbles long-range positions
+    seen = []
+
+    def loader(*args):
+        seen.append(args[-1])
+        raise RuntimeError("stop after loading")
+
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        gold_passages, "read_records", lambda path: [SimpleNamespace(id="q", arm="gold_easy_k1")]
+    )
+    monkeypatch.setattr(gold_passages, "resumed", lambda args, sets: [])
+    monkeypatch.setattr(gold_passages, "load_model", loader)
+    argv = ["decode", "--sets", "s.jsonl", "--system", "lora", "--hf-model", "Qwen/x", "--checkpoint", "c",
+            "--out", "o.jsonl", "--summary", "s.json"]  # fmt: skip
+    for extra, dtype in (([], "float32"), (["--dtype", "bfloat16"], "bfloat16")):
+        with pytest.raises(RuntimeError, match="stop after loading"):
+            gold_passages.main([*argv, *extra])
+        assert seen[-1] == dtype
+    with pytest.raises(SystemExit):
+        gold_passages.main([*argv, "--dtype", "float16"])
+
+
+def test_eval_gold_passages_on_the_arm_node_runs_from_its_own_environment(tmp_path):
+    """On aarch64 every Python step (decode and both scorers) runs from .venv-arm with the repository on
+    PYTHONPATH, since the x86 .venv cannot run there."""
+    import os
+    import shutil
+    import subprocess
+
+    from tests.conftest import REPO_ROOT
+
+    repo, scratch, calls, bin_dir = (
+        tmp_path / "repo",
+        tmp_path / "scratch",
+        tmp_path / "calls.log",
+        tmp_path / "bin",
+    )
+    (repo / "scripts" / "slurm").mkdir(parents=True)
+    wrapper = repo / "scripts" / "slurm" / "eval_gold_passages.sh"
+    shutil.copy(REPO_ROOT / "scripts" / "slurm" / "eval_gold_passages.sh", wrapper)
+    bin_dir.mkdir()
+    (bin_dir / "uname").write_text("#!/usr/bin/env bash\necho aarch64\n")
+    arm = repo / ".venv-arm" / "bin" / "python"
+    arm.parent.mkdir(parents=True)
+    arm.write_text(
+        '#!/usr/bin/env bash\necho "arm:$PYTHONPATH $1" >> "$CALLS"\necho "$*" >> "$CALLS.args"\n'
+        "while [[ $# -gt 0 ]]; do\n"
+        '  if [[ "$1" == --summary ]]; then echo "{}" > "$2"; fi\n  shift\ndone\n'
+    )
+    for exe in (bin_dir / "uname", arm):
+        exe.chmod(0o755)
+    ckpt = scratch / "outputs" / "sft_hybrid_s42" / "checkpoints" / "last.ckpt"
+    ckpt.parent.mkdir(parents=True)
+    ckpt.touch()
+    sets = repo / "logs" / "shared" / "sets.jsonl"
+    sets.parent.mkdir(parents=True)
+    sets.touch()
+    result = subprocess.run(
+        ["bash", str(wrapper)], cwd=repo, capture_output=True, text=True,
+        env={"PATH": f"{bin_dir}:{os.environ['PATH']}", "HOME": str(tmp_path), "USER": "tester",
+             "SLURM_SUBMIT_DIR": str(repo), "SLURM_JOB_ID": "5", "SCRATCH_ROOT": str(scratch), "CALLS": str(calls),
+             "RUNS": "hybrid:42:sft_hybrid_s42:hybrid_legal_base", "SETS": str(sets), "DTYPE": "bfloat16"},
+    )  # fmt: skip
+    assert result.returncode == 0 and result.stdout.endswith("EVAL GOLD PASSAGES DONE\n"), (
+        result.stdout + result.stderr
+    )
+    assert calls.read_text().splitlines() == [
+        f"arm:{repo} scripts/{s}.py" for s in ("eval_gold_passages", "evaluate_citation", "audit_truncation")
+    ]
+    decode = calls.with_name("calls.log.args").read_text().splitlines()[0].split()
+    assert decode[decode.index("--dtype") + 1] == "bfloat16"
+
+
 def test_eval_gold_passages_wrapper_keeps_runs_apart_and_reuses_sets(tmp_path):
     """Two runs of one system and seed (SFT and DPO) get their own outputs, so the second is not skipped as
     already scored; a requeue skips the runs that have a summary and does not rebuild the sets; SETS makes
-    another job decode those sets, without needing the items or the index, and a missing SETS is built."""
+    another job decode those sets, without needing the items or the index, and a missing SETS is built.
+    Missing GerLayQA items are fetched (online for that command only) and moved into place; other missing
+    items are fatal. SET=sft_dev builds from the SFT dev split; LIMIT reaches every decode. Every run decoded
+    whole, and only such a run, gets its citation metrics beside its records and a truncation audit, also on
+    a requeue; truncated decodes are a finding, a failed audit fails the job. AS_IS=1 builds the SFT rows'
+    own prompts and needs SET=sft_dev."""
     import os
     import shutil
     import subprocess
@@ -652,8 +896,12 @@ def test_eval_gold_passages_wrapper_keeps_runs_apart_and_reuses_sets(tmp_path):
     fake = repo / ".venv" / "bin" / "python"
     fake.parent.mkdir(parents=True)
     fake.write_text(
-        '#!/usr/bin/env bash\necho "$*" >> "$CALLS"\nwhile [[ $# -gt 0 ]]; do\n'
-        '  if [[ "$1" == --out || "$1" == --summary ]]; then mkdir -p "$(dirname "$2")"; echo "{}" > "$2"; fi\n'
+        '#!/usr/bin/env bash\necho "$* offline=$HF_HUB_OFFLINE" >> "$CALLS"\nfetch="$1"\n'
+        'if [[ "$1" == scripts/audit_truncation.py ]]; then exit "${AUDIT_EXIT:-0}"; fi\nwhile [[ $# -gt 0 ]]; do\n'
+        '  if [[ "$1" == --out && "$fetch" == -m ]]; then mkdir -p "$2"; touch "$2/items.jsonl" "$2/info.json"\n'
+        '  elif [[ "$1" == --limit ]]; then limited=1\n'  # sets are left: no summary
+        '  elif [[ "$1" == --out || ( "$1" == --summary && -z "${limited:-}" ) ]]; then\n'
+        '    mkdir -p "$(dirname "$2")"; echo "{}" > "$2"\n  fi\n'
         "  shift\ndone\n"
     )
     fake.chmod(0o755)
@@ -668,16 +916,28 @@ def test_eval_gold_passages_wrapper_keeps_runs_apart_and_reuses_sets(tmp_path):
         path.touch()
     runs = "hybrid:42:sft_hybrid_s42:hybrid_legal_base hybrid:42:dpo_hybrid_s42:hybrid_legal_base"
 
-    def run(job, **env):
+    def call(job, **env):
         calls.unlink(missing_ok=True)
-        result = subprocess.run(
+        return subprocess.run(
             ["bash", str(wrapper)], cwd=repo, capture_output=True, text=True,
             env={"PATH": os.environ["PATH"], "HOME": str(tmp_path), "USER": "tester", "SLURM_SUBMIT_DIR": str(repo),
                  "SLURM_JOB_ID": job, "SCRATCH_ROOT": str(scratch), "CALLS": str(calls), "RUNS": runs, **env},
         )  # fmt: skip
+
+    def called(*scripts):
+        """The arguments of each call of these scripts (default: the gold-passage script and the fetch)."""
+        lines = [line.split() for line in calls.read_text().splitlines()] if calls.exists() else []
+        return [line[1:] for line in lines if line[0] in (scripts or ("scripts/eval_gold_passages.py", "-m"))]
+
+    def scored():
+        """The records each scorer read, in call order."""
+        return [[c[0] for c in called(f"scripts/{s}.py")] for s in ("evaluate_citation", "audit_truncation")]
+
+    def run(job, **env):
+        result = call(job, **env)
         assert result.returncode == 0, result.stdout + result.stderr
         assert result.stdout.endswith("EVAL GOLD PASSAGES DONE\n")
-        return [line.split()[1:] for line in calls.read_text().splitlines()] if calls.exists() else []
+        return called()
 
     def value(call, flag):
         return call[call.index(flag) + 1]
@@ -687,11 +947,18 @@ def test_eval_gold_passages_wrapper_keeps_runs_apart_and_reuses_sets(tmp_path):
     first = run("7")
     assert [c[0] for c in first] == ["build", "decode", "decode"]
     assert value(first[0], "--out") == "logs/eval_gold_passages_7/sets.jsonl"
-    assert [value(c, "--out") for c in first[1:]] == [
-        "logs/eval_gold_passages_7/hybrid_s42_sft_hybrid_s42.jsonl",
-        "logs/eval_gold_passages_7/hybrid_s42_dpo_hybrid_s42.jsonl",
+    records = [
+        f"logs/eval_gold_passages_7/hybrid_s42_{e}.jsonl" for e in ("sft_hybrid_s42", "dpo_hybrid_s42")
     ]
-    assert run("7") == [], "a requeue skips what is scored and keeps the sets"
+    assert [value(c, "--out") for c in first[1:]] == records
+    assert scored() == [records, records]
+    citation = called("scripts/evaluate_citation.py")[0]
+    assert (value(citation, "--metrics-out"), value(citation, "--summary-out")) == (
+        "logs/eval_gold_passages_7/hybrid_s42_sft_hybrid_s42.citation.metrics.jsonl",
+        "logs/eval_gold_passages_7/hybrid_s42_sft_hybrid_s42.citation.summary.json",
+    )
+    assert run("7") == [], "a requeue decodes nothing and keeps the sets"
+    assert scored() == [records, records], "and scores every decoded run"
 
     items.unlink()
     index.unlink()
@@ -701,18 +968,50 @@ def test_eval_gold_passages_wrapper_keeps_runs_apart_and_reuses_sets(tmp_path):
     assert {value(c, "--sets") for c in reused} == {shared}
     assert value(reused[0], "--out") == "logs/eval_gold_passages_8/hybrid_s42_sft_hybrid_s42.jsonl"
 
-    failed = subprocess.run(
-        ["bash", str(wrapper)], cwd=repo, capture_output=True, text=True,
-        env={"PATH": os.environ["PATH"], "HOME": str(tmp_path), "USER": "tester", "SLURM_SUBMIT_DIR": str(repo),
-             "SLURM_JOB_ID": "9", "SCRATCH_ROOT": str(scratch), "CALLS": str(calls), "RUNS": runs,
-             "SETS": "logs/shared/sets.jsonl"},
-    )  # fmt: skip
-    assert failed.returncode == 1 and "FATAL: no items" in failed.stdout
-    items.touch()
+    failed = call("9", SETS="logs/shared/sets.jsonl")
+    assert failed.returncode == 1 and "FATAL: no index" in failed.stdout
+    [fetch] = called()
+    assert fetch[0] == "lexhybrid.data.evalsets.gerlayqa" and value(fetch, "--limit") == "0"
+    assert fetch[-1] == "offline=0"
+    assert items.is_file() and (items.parent / "info.json").is_file()
+    assert not list(items.parent.parent.glob(".fetch.*")), "the temporary directory is removed"
     index.touch()
-    built = run("9", SETS="logs/shared/sets.jsonl")
-    assert built[0][0] == "build" and value(built[0], "--out") == "logs/shared/sets.jsonl"
+    built = run("9", SETS="logs/shared/sets.jsonl", LIMIT="2")
+    assert [c[0] for c in built] == ["build", "decode", "decode"]
+    assert value(built[0], "--out") == "logs/shared/sets.jsonl"
+    assert value(built[0], "--set-name") == "gerlayqa" and {c[-1] for c in built} == {"offline=1"}
     assert {value(c, "--sets") for c in built[1:]} == {"logs/shared/sets.jsonl"}
+    assert {value(c, "--limit") for c in built[1:]} == {"2"}
+    assert scored() == [[], []], "nothing is scored while sets are left"
+    assert all("--limit" not in c for c in first), "no LIMIT, no limit"
+
+    failed = call("10", SET="gerlerb")
+    assert failed.returncode == 1 and "FATAL: no items" in failed.stdout and called() == []
+    dev = scratch / "data" / "sft" / "dev.jsonl"
+    dev.parent.mkdir(parents=True)
+    dev.touch()
+    sft = run("11", SET="sft_dev")
+    assert value(sft[0], "--items") == str(dev) and value(sft[0], "--set-name") == "sft_dev"
+    assert value(sft[0], "--k") == "1" and "--as-is" not in sft[0]
+
+    failed = call("12", AS_IS="1")
+    assert failed.returncode == 1 and "FATAL: AS_IS=1" in failed.stdout and called() == []
+    as_is = run("12", SET="sft_dev", AS_IS="1")
+    assert [c[0] for c in as_is] == ["build", "decode", "decode"] and "--k" not in as_is[0]
+    assert (
+        "--as-is" in as_is[0]
+        and value(as_is[0], "--items") == str(dev)
+        and value(as_is[0], "--set-name") == "sft_dev"
+    )
+    assert scored() == [[value(c, "--out") for c in as_is[1:]]] * 2
+    finding = call("13", SET="sft_dev", AS_IS="1", AUDIT_EXIT="1")
+    assert finding.returncode == 0 and finding.stdout.endswith("EVAL GOLD PASSAGES DONE\n")
+    assert finding.stdout.count("FINDING: hybrid_s42_") == 2 and len(scored()[1]) == 2, (
+        "a finding stops nothing"
+    )
+    failed = call("14", SET="sft_dev", AS_IS="1", AUDIT_EXIT="2")
+    assert failed.returncode == 2 and "FATAL: the truncation audit of hybrid_s42_sft" in failed.stdout
+    assert len(scored()[1]) == 1, "the job stops at the failed audit"
 
 
 def test_answer_records_keep_unicode_line_separators_and_string_ids(tmp_path):

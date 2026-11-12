@@ -597,7 +597,7 @@ def test_the_best_checkpoint_holds_the_weights_its_val_loss_scored(sft_run, scri
         "callbacks.checkpoint.every_n_train_steps=1", "callbacks.checkpoint.save_top_k=1", f"output_dir={out}",
         "dpo.learning_rate=1e-2",
     )))  # fmt: skip
-    (best,) = [c for c in trainer.checkpoint_callbacks if c.save_top_k > 0]
+    (best,) = [c for c in trainer.checkpoint_callbacks if getattr(c, "save_top_k", 0) > 0]
     assert best.monitor == "val/loss"
     files = sorted(p.name for p in (out / "checkpoints").glob("*.ckpt"))
     assert files == [p for p in files if p == "last.ckpt" or p.startswith("best-step")] and len(files) == 2
@@ -610,6 +610,53 @@ def test_the_best_checkpoint_holds_the_weights_its_val_loss_scored(sft_run, scri
             "loss"
         ]
     assert rescored.item() == pytest.approx(best.best_model_score.item(), abs=1e-5)
+
+
+@pytest.mark.parametrize("crash_in", ["train", "val"])
+def test_a_requeue_resumes_with_every_validation_ranked(sft_run, script, monkeypatch, crash_in):
+    """A 6-step run validating every 2 steps with a scripted val/loss of 2, 1, 3 is killed after its
+    step-4 validation (in step 5) or during it, then resumed from last.ckpt as a requeue does. Every
+    step is validated once its run gets there, and the ranking keeps step 4 as the only best file. A
+    last.ckpt saved at step 4 before its validation would skip that validation on resume and restore
+    the ranking of step 2's."""
+    from pytorch_lightning.callbacks import ModelCheckpoint
+
+    train = script("train_dpo")
+    losses, seen, crash = {2: 2.0, 4: 1.0, 6: 3.0}, [], {"on": True}
+
+    def scripted(self, batch, batch_idx):
+        if crash["on"] and crash_in == "val" and self.global_step == 4:
+            raise RuntimeError("preempted")
+        if batch_idx == 0:
+            seen.append(self.global_step)
+        self.log("val/loss", losses[self.global_step], batch_size=1)
+
+    real = DPOLightningModule.training_step
+
+    def training_step(self, batch, batch_idx):
+        if crash["on"] and crash_in == "train" and self.global_step == 4:
+            raise RuntimeError("preempted")
+        return real(self, batch, batch_idx)
+
+    monkeypatch.setattr(DPOLightningModule, "validation_step", scripted)
+    monkeypatch.setattr(DPOLightningModule, "training_step", training_step)
+    out = sft_run / "requeue"
+    ov = _dpo_overrides(sft_run, "dpo", f"dpo.pairs={_pair_rows(sft_run / 'p.jsonl', 6)}",
+                        f"dpo.val_pairs={_pair_rows(sft_run / 'd.jsonl', 2)}", "trainer.max_steps=6",
+                        "trainer.val_every_opt_steps=2", "callbacks.checkpoint.every_n_train_steps=2",
+                        "trainer.enable_checkpointing=true", "callbacks.checkpoint.save_top_k=1", f"output_dir={out}")  # fmt: skip
+    with pytest.raises(RuntimeError, match="preempted"):
+        train.run(_compose(*ov))
+    ckpts = out / "checkpoints"
+    first = seen.copy()
+    seen.clear()
+    crash["on"] = False
+    trainer = train.run(_compose(*ov, f"+resume_from_checkpoint={ckpts / 'last.ckpt'}"))
+    assert (first, seen) == (([2, 4], [6]) if crash_in == "train" else ([2], [4, 6]))
+    (best,) = [c for c in trainer.callbacks if isinstance(c, ModelCheckpoint) and c.monitor == "val/loss"]
+    assert (best.best_model_path, float(best.best_model_score)) == (str(ckpts / "best-step000004.ckpt"), 1.0)
+    assert sorted(p.name for p in ckpts.glob("best-step*.ckpt")) == ["best-step000004.ckpt"]
+    assert torch.load(ckpts / "last.ckpt", map_location="cpu", weights_only=False)["global_step"] == 6
 
 
 # -- the Hugging Face baseline --------------------------------------------------------------------

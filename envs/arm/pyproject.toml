@@ -1,7 +1,8 @@
 # Inference-only environment for the cluster's ARM GPU node (aarch64, 2x L40), which the main
 # environment does not cover (its lock is linux-x86_64 and macOS only). Enough for
-# scripts/eval_retrieval.py: BM25, bge-m3 and the reranker, at the main lock's versions so scores
-# match. Built on that node by scripts/slurm/setup_arm_env.sh
+# scripts/eval_retrieval.py (BM25, bge-m3, the reranker) and for decoding fine-tuned checkpoints in
+# scripts/eval_gold_passages.py (pytorch-lightning, einops, peft), at the main lock's versions so
+# scores match. Built on that node by scripts/slurm/setup_arm_env.sh
 # (`UV_PROJECT_ENVIRONMENT=.venv-arm uv sync --locked --project envs/arm`). lexhybrid itself is not
 # installed: jobs put the repository on PYTHONPATH.
 [project]
@@ -21,6 +22,9 @@ dependencies = [
     "bm25s[stem]==0.3.11",
     "pystemmer==3.1.0",
     "pyyaml==6.0.3",
+    "pytorch-lightning==2.6.6",
+    "einops==0.8.2",
+    "peft==0.21.2",
 ]
 
 [tool.uv]

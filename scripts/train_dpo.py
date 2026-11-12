@@ -23,9 +23,10 @@ run, and so do validation pairs that leave a rank without a batch: KTO drops a s
 mismatched rows could be a single pair matched with itself.
 
 The trainer yaml, the DDP strategy (one SLURM task, ranks started by Lightning) and
-``val_every_opt_steps`` are ``train_pretrain.py``'s; the step-based ``ModelCheckpoint`` writes
-``last.ckpt`` only and ``best_val_checkpoint`` keeps the ``callbacks.checkpoint.save_top_k``
-best-``val/loss`` checkpoints at validation end, as for SFT.
+``val_every_opt_steps`` are ``train_pretrain.py``'s. With ``dpo.val_pairs``, as for SFT,
+``best_val_checkpoint`` keeps the ``callbacks.checkpoint.save_top_k`` best-``val/loss`` checkpoints and
+``last.ckpt`` follows it, both saved at validation end; without, the step-based ``ModelCheckpoint``
+writes ``last.ckpt``.
 """
 
 import copy
@@ -38,12 +39,14 @@ import hydra
 import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig, OmegaConf
+from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from torch import nn
 from torch.utils.data import DataLoader
 
 from lexhybrid.config import HybridConfig
 from lexhybrid.data.datasets import ScheduleSampler, ShardSampler
+from lexhybrid.training.callbacks import ValidationEndCheckpoint
 from lexhybrid.training.dpo_module import DPOLightningModule, PairSchedule, collate_pairs, load_sft_model
 from lexhybrid.training.sft_module import best_val_checkpoint
 from lexhybrid.utils.checkpoint import check_run_settings
@@ -82,16 +85,25 @@ def build_module(cfg: DictConfig, policy: nn.Module) -> DPOLightningModule:
 
 
 def build_callbacks(cfg: DictConfig, enable_checkpointing: bool) -> list:
-    """Pretraining's callbacks with its step-based checkpoint writing ``last.ckpt`` only, plus the
-    best-``val/loss`` checkpoints saved at validation end."""
+    """Pretraining's callbacks. With dev pairs its step-based checkpoint is replaced by the
+    best-``val/loss`` checkpoints and then ``last.ckpt``, both saved at validation end: a ``last.ckpt``
+    saved at the step, before its validation, would resume past that validation with the ranking of
+    the one before. Without dev pairs nothing validates and the step-based checkpoint writes
+    ``last.ckpt`` only."""
     top_k = int(cfg.callbacks.checkpoint.save_top_k)
-    if top_k and not cfg.dpo.get("val_pairs"):
+    validates = bool(cfg.dpo.get("val_pairs"))
+    if top_k and not validates:
         raise ValueError("callbacks.checkpoint.save_top_k ranks by val/loss: give dpo.val_pairs")
     # no monitor: Lightning defers a monitored step save until the metric exists, so a kill would lose it
     last_only = OmegaConf.merge(cfg, {"callbacks": {"checkpoint": {"save_top_k": 0, "monitor": None}}})
     callbacks = tp.build_callbacks(last_only, enable_checkpointing)
-    if enable_checkpointing and top_k:
-        callbacks.append(best_val_checkpoint(cfg.checkpoint_dir, top_k))
+    if not validates:
+        return callbacks
+    callbacks = [c for c in callbacks if not isinstance(c, ModelCheckpoint)]
+    if enable_checkpointing:
+        if top_k:
+            callbacks.append(best_val_checkpoint(cfg.checkpoint_dir, top_k))
+        callbacks.append(ValidationEndCheckpoint(cfg.checkpoint_dir))  # after the ranking above
     return callbacks
 
 

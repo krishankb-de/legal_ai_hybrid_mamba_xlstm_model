@@ -42,6 +42,7 @@ echo "uv: $("$UV_DIR/uv" --version)"
 
 "$UV_DIR/uv" sync --locked --project envs/arm
 PYTHONPATH="$PWD" .venv-arm/bin/python scripts/eval_retrieval.py --help > /dev/null
+PYTHONPATH="$PWD" .venv-arm/bin/python scripts/eval_gold_passages.py --help > /dev/null
 PYTHONPATH="$PWD" .venv-arm/bin/python -c 'import torch
 x = torch.ones(256, 256, device="cuda")
 print("torch", torch.__version__, "cuda", torch.version.cuda, torch.cuda.get_device_name(0), float((x @ x)[0, 0]))'

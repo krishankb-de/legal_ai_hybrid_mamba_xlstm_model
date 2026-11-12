@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 import hydra
+import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
 
@@ -52,6 +53,8 @@ def load_lm(cfg: DictConfig):
 
 def adapt(lm, lora_rank: int = 0) -> CausalLMAdapter:
     """The model with room for every pointer special, behind the hybrid's ``backbone``/``head``."""
+    # from_pretrained returns eval mode and Lightning keeps it; HF checkpoints layers only in train mode
+    lm.train()
     vocab = BASE_LEN + len(SPECIALS)
     if lm.get_input_embeddings().num_embeddings < vocab:
         lm.resize_token_embeddings(vocab)
@@ -69,6 +72,7 @@ def adapt(lm, lora_rank: int = 0) -> CausalLMAdapter:
 
 def run(cfg: DictConfig):
     print(f"HF {cfg.sft.hf_model}@{cfg.sft.hf_revision}", flush=True)
+    pl.seed_everything(cfg.seed, workers=True)  # the LoRA adapters are drawn here, before run() seeds
     return _script("train_sft").run(
         cfg, model=adapt(load_lm(cfg), cfg.sft.lora_rank), entrypoint="scripts/train_sft_hf.py"
     )

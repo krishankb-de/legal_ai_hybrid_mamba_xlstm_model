@@ -1225,6 +1225,24 @@ def _tiny_qwen3(tied: bool):
                                         tie_word_embeddings=tied))  # fmt: skip
 
 
+def test_lora_init_follows_the_seed(tmp_path, script, monkeypatch):
+    """Two LoRA runs with the same seed start from the same adapters, whatever the RNG held before."""
+    import copy
+    from types import SimpleNamespace
+
+    hf = script("train_sft_hf")
+    base = _tiny_qwen3(False)  # seeds the RNG itself, so built once, outside load_lm
+    monkeypatch.setattr(hf, "load_lm", lambda cfg: copy.deepcopy(base))
+    monkeypatch.setattr(hf, "_script", lambda name: SimpleNamespace(run=lambda cfg, model, entrypoint: model))
+    cfg = _compose_sft(*_sft_cpu_run(tmp_path, script), "sft.lora_rank=4")
+    starts = []
+    for rng in (1, 2):
+        torch.manual_seed(rng)
+        lm = hf.run(cfg).lm
+        starts.append({n: p.detach().clone() for n, p in lm.named_parameters() if ".lora_A." in n})
+    assert starts[0] and all(torch.equal(starts[0][n], starts[1][n]) for n in starts[0])
+
+
 @pytest.mark.parametrize("tied", [False, True])
 def test_lora_trains_only_adapters_and_pointer_rows(tmp_path, script, monkeypatch, tied):
     """Two steps of the LoRA run: every base projection and every base row of the embedding and the
@@ -1239,10 +1257,21 @@ def test_lora_trains_only_adapters_and_pointer_rows(tmp_path, script, monkeypatc
     lm = _tiny_qwen3(tied)
     lm.config.save_pretrained(tmp_path / "hf")
     hf = script("train_sft_hf")
-    monkeypatch.setattr(hf, "load_lm", lambda cfg: lm)
+    monkeypatch.setattr(hf, "load_lm", lambda cfg: lm.eval())  # as from_pretrained returns it
     common = _sft_cpu_run(tmp_path, script)
     vocab = BASE_LEN + len(SPECIALS)
     seen = {}
+    from lexhybrid.training.sft_module import SFTLightningModule
+
+    train_step = SFTLightningModule.training_step
+
+    def training_step(self, batch, batch_idx):
+        """Whether every decoder layer checkpoints in this step: HF layers do so only in train mode."""
+        layers = self.model.lm.get_decoder().layers
+        seen.setdefault("layers_checkpoint", all(l.training and l.gradient_checkpointing for l in layers))
+        return train_step(self, batch, batch_idx)
+
+    monkeypatch.setattr(SFTLightningModule, "training_step", training_step)
 
     def on_start(module):
         """The weights as training starts: the model is wrapped and resized by now."""
@@ -1257,7 +1286,7 @@ def test_lora_trains_only_adapters_and_pointer_rows(tmp_path, script, monkeypatc
     build = sft.build_module
     monkeypatch.setattr(sft, "build_module", lambda cfg, model: (m := build(cfg, model), on_start(m))[0])
     trainer = hf.run(_compose_sft(*common, f"output_dir={tmp_path / 'out'}", "sft.lora_rank=4"))
-    assert trainer.global_step == 2 and seen["checkpointing"] is True
+    assert trainer.global_step == 2 and seen["checkpointing"] is True and seen["layers_checkpoint"] is True
 
     adapter = trainer.lightning_module.model.eval()
     params = dict(adapter.lm.named_parameters())
@@ -1336,6 +1365,55 @@ def test_sft_best_checkpoint_holds_the_weights_of_the_best_dev_loss(tmp_path, sc
     ckpts = tmp_path / "out" / "checkpoints"
     assert sorted(p.name for p in ckpts.iterdir()) == ["best-step000002.ckpt", "last.ckpt"]
     assert torch.load(ckpts / "last.ckpt", map_location="cpu", weights_only=False)["global_step"] == 4
+
+
+@pytest.mark.parametrize("crash_in", ["train", "val"])
+def test_sft_requeue_resumes_with_every_validation_ranked(tmp_path, script, monkeypatch, crash_in):
+    """A 6-step run validating every 2 steps with a scripted val/loss of 2, 1, 3 is killed after its
+    step-4 validation (in step 5) or during it, then resumed from last.ckpt as a requeue does. Every
+    step is validated once its run gets there, and the ranking keeps step 4 as the only best file. A
+    last.ckpt saved at step 4 before its validation would skip that validation on resume and restore
+    the ranking of step 2's."""
+    from pytorch_lightning.callbacks import ModelCheckpoint
+
+    from lexhybrid.training.sft_module import SFTLightningModule
+
+    losses, seen, crash = {2: 2.0, 4: 1.0, 6: 3.0}, [], {"on": True}
+
+    def scripted(self, batch, batch_idx):
+        if crash["on"] and crash_in == "val" and self.global_step == 4:
+            raise RuntimeError("preempted")
+        if batch_idx == 0:
+            seen.append(self.global_step)
+        self.log("val/loss", losses[self.global_step], batch_size=1)
+
+    train_step = SFTLightningModule.training_step
+
+    def training_step(self, batch, batch_idx):
+        if crash["on"] and crash_in == "train" and self.global_step == 4:
+            raise RuntimeError("preempted")
+        return train_step(self, batch, batch_idx)
+
+    monkeypatch.setattr(SFTLightningModule, "validation_step", scripted)
+    monkeypatch.setattr(SFTLightningModule, "training_step", training_step)
+    ckpt = tmp_path / "pretrain_last.ckpt"
+    ov = [*_sft_cpu_run(tmp_path, script), *_SFT_TINY, f"lm_checkpoint={ckpt}", "trainer.max_steps=6",
+          "trainer.val_every_opt_steps=2", "callbacks.checkpoint.every_n_train_steps=2",
+          "trainer.enable_checkpointing=true", "callbacks.checkpoint.save_top_k=1", f"output_dir={tmp_path / 'out'}"]  # fmt: skip
+    torch.save({"state_dict": _pretrain_state(_compose_sft(*ov))}, ckpt)
+    sft = script("train_sft")
+    with pytest.raises(RuntimeError, match="preempted"):
+        sft.run(_compose_sft(*ov))
+    ckpts = tmp_path / "out" / "checkpoints"
+    first = seen.copy()
+    seen.clear()
+    crash["on"] = False
+    trainer = sft.run(_compose_sft(*ov, f"+resume_from_checkpoint={ckpts / 'last.ckpt'}"))
+    assert (first, seen) == (([2, 4], [6]) if crash_in == "train" else ([2], [4, 6]))
+    (best,) = [c for c in trainer.callbacks if isinstance(c, ModelCheckpoint) and c.monitor == "val/loss"]
+    assert (best.best_model_path, float(best.best_model_score)) == (str(ckpts / "best-step000004.ckpt"), 1.0)
+    assert sorted(p.name for p in ckpts.glob("best-step*.ckpt")) == ["best-step000004.ckpt"]
+    assert torch.load(ckpts / "last.ckpt", map_location="cpu", weights_only=False)["global_step"] == 6
 
 
 def test_sft_default_batch_fits_the_trained_length():

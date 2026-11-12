@@ -27,6 +27,10 @@ seed, arm): **selection accuracy** (the answer's first pointer cites the gold pa
 that does not resolve selects nothing), **any gold cited**, **refusal rate** (the model's own
 ``<|unanswerable|>``), **verifier pass rate** (the verifier kept an answer) and selection accuracy by
 gold position.
+
+``as_is_sets`` makes the same undecoded records from SFT rows without retrieval: each row's own prompt
+(arm ``as_is``), for the citation metrics and the truncation audit of the decoded records; ``score``
+leaves them out, as they have no gold position.
 """
 
 import random
@@ -36,7 +40,7 @@ from pathlib import Path
 
 import torch
 
-from lexhybrid.data.sft_format import decode_answer, prompt_ids
+from lexhybrid.data.sft_format import Cite, Quote, decode_answer, parse, prompt_ids
 from lexhybrid.data.tokenizer import EOS_ID, N_PASSAGES
 from lexhybrid.decoding.generate import generated_tokens, greedy_cached
 from lexhybrid.decoding.pointer_constraints import PointerFSM, SpecialTokens
@@ -138,6 +142,40 @@ def gold_chunk_ids(items: Sequence[dict], chunks: Iterable[Chunk]) -> list[list[
     return out
 
 
+def sft_item(row: dict) -> dict:
+    """A QA item from an SFT row (``id``, ``chunk_ids`` in prompt order, ``text`` as ``sft_format.render``
+    writes it): its question, and as ``gold_chunk_ids`` the chunks its answer quotes or cites, in order
+    of citation; a refusal cites none. The passage pointers of the prompt are no citations."""
+    ex = parse(row["text"])
+    cited = [seg.passage for seg in ex.answer if isinstance(seg, Quote | Cite)]
+    if any(k > len(row["chunk_ids"]) for k in cited):
+        raise ValueError(f"row {row['id']!r} cites past its {len(row['chunk_ids'])} chunk ids")
+    gold = dict.fromkeys(row["chunk_ids"][k - 1] for k in cited)
+    return {"id": row["id"], "question": ex.question.strip(), "answers": [], "gold_chunk_ids": list(gold)}
+
+
+def as_is_sets(rows: Iterable[dict], chunks: Iterable[Chunk], set_name: str = "") -> list[AnswerRecord]:
+    """Each SFT row's own prompt as a record without system or answer (arm ``as_is``): its question,
+    its passages in ``chunk_ids`` order as the index's ``chunks``, its ``kind``, and as gold the chunks
+    its answer cites (``sft_item``). A chunk id the index lacks, or a chunk that no longer reads as the
+    row's prompt passage, is an error: the prompt would not be the row's."""
+    by_id = {c.id: c for c in chunks}
+    out = []
+    for row in rows:
+        if missing := [i for i in row["chunk_ids"] if i not in by_id]:
+            raise ValueError(f"row {row['id']!r}: chunk ids not in the index: {missing}")
+        ex, prompt = parse(row["text"]), [by_id[i] for i in row["chunk_ids"]]
+        if [c.passage() for c in prompt] != list(ex.passages):
+            raise ValueError(
+                f"row {row['id']!r}: its prompt's passages are not the index's {row['chunk_ids']}"
+            )
+        out.append(AnswerRecord(
+            id=str(row["id"]), set=set_name, system="", arm="as_is", question=ex.question, kind=row["kind"],
+            gold_chunk_ids=sft_item(row)["gold_chunk_ids"], chunks=[chunk_dict(c) for c in prompt],
+        ))  # fmt: skip
+    return out
+
+
 def build_sets(items: Iterable[dict], chunks: Sequence[Chunk], retrieve: Retrieve,
                k_values: Sequence[int] = K_VALUES, seed: int = 0,
                set_name: str = "") -> tuple[list[AnswerRecord], dict]:  # fmt: skip
@@ -201,10 +239,11 @@ def _share(rows: list[dict], key: str) -> float:
 
 
 def score(records: Iterable[AnswerRecord]) -> list[dict]:
-    """One summary per (system, seed, arm), in order of first appearance (see the module docstring)."""
+    """One summary per (system, seed, gold arm), in order of first appearance (see the module docstring)."""
     groups: dict[tuple, list[AnswerRecord]] = {}
     for r in records:
-        groups.setdefault((r.system, r.seed, r.arm), []).append(r)
+        if r.arm.startswith("gold_"):  # an as-is prompt has no gold position
+            groups.setdefault((r.system, r.seed, r.arm), []).append(r)
     out = []
     for (system, seed, arm), rs in groups.items():
         rows = [outcome(r) for r in rs]
