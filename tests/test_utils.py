@@ -110,3 +110,15 @@ def test_tree_hash_changes_with_content(tmp_path):
     h1 = run_metadata.tree_hash(tmp_path)
     f.write_text("x = 2\n")
     assert run_metadata.tree_hash(tmp_path) != h1
+
+
+def test_read_complete_lines_cuts_a_partial_line_at_byte_level(tmp_path):
+    """A kill can cut a line inside a UTF-8 character; U+2028 and U+0085 are not line ends."""
+    from lexhybrid.utils.jsonl import read_complete_lines
+
+    path = tmp_path / "x.jsonl"
+    whole = '{"a": "ü\u2028b\u0085c"}\n{"a": 2}\n'
+    path.write_bytes(whole.encode("utf-8") + '{"a": "ü'.encode()[:-1])  # ends inside the ü
+    assert read_complete_lines(path) == ['{"a": "ü\u2028b\u0085c"}', '{"a": 2}']
+    assert path.read_bytes() == whole.encode("utf-8"), "the partial line is cut from the file"
+    assert read_complete_lines(path) == ['{"a": "ü\u2028b\u0085c"}', '{"a": 2}'], "idempotent"

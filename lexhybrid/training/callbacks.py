@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytorch_lightning as pl
 import torch
-from pytorch_lightning.callbacks import Callback
+from pytorch_lightning.callbacks import Callback, Checkpoint
 
 
 class SignalCheckpointCallback(Callback):
@@ -156,3 +156,17 @@ class FinalCheckpointCallback(Callback):
 
     def on_train_end(self, trainer, pl_module):
         trainer.save_checkpoint(str(self.path))
+
+
+class ValidationEndCheckpoint(Checkpoint):
+    """Write ``<checkpoint_dir>/last.ckpt`` at the end of each validation, after a ranked
+    ``ModelCheckpoint`` listed before it has scored that validation (Lightning runs ``Checkpoint``
+    callbacks last, in list order). A step-interval save comes before its step's validation: a run
+    resumed from it skips that validation and restores the ranking of the one before."""
+
+    def __init__(self, checkpoint_dir: str, filename: str = "last.ckpt"):
+        self.path = Path(checkpoint_dir) / filename
+
+    def on_validation_end(self, trainer, pl_module):
+        if not trainer.sanity_checking:
+            trainer.save_checkpoint(str(self.path))

@@ -552,6 +552,32 @@ def test_train_pretrain_script_runs_and_resumes(tmp_path, script):
         tp.run(_compose(*overrides, f"+resume_from_checkpoint={tmp_path / 'missing.ckpt'}"))
 
 
+def test_pretrain_best_checkpoint_holds_the_weights_of_the_best_val_loss(tmp_path, script, monkeypatch):
+    """A scripted val/loss of 3, 1, 2, 2.5 over 4 steps, validating after each: the best checkpoint is
+    step 2's (a step-interval monitored save would keep step 3's); the step checkpoint writes last.ckpt."""
+    from pytorch_lightning.callbacks import ModelCheckpoint
+
+    tp = script("train_pretrain")
+    losses = {1: 3.0, 2: 1.0, 3: 2.0, 4: 2.5}
+
+    def scripted(self, batch, batch_idx):
+        self.log("val/loss", losses[self.global_step], batch_size=1)
+
+    monkeypatch.setattr(tp.PretrainLightningModule, "validation_step", scripted)
+    cfg = _compose("model.vocab_size=64", *_SFT_TINY, "model.max_position_embeddings=64", "trainer=cpu_debug",
+                   "trainer.max_steps=4", "trainer.enable_checkpointing=true",
+                   "callbacks.checkpoint.every_n_train_steps=1", "callbacks.checkpoint.save_top_k=1",
+                   "dataset.row_len=24", "dataset.num_rows=8", "dataset.batch_size=2", f"output_dir={tmp_path}",
+                   "+logger=false")  # fmt: skip
+    trainer = tp.run(cfg)
+    (best,) = [c for c in trainer.callbacks if isinstance(c, ModelCheckpoint) and c.best_model_path]
+    assert float(best.best_model_score) == 1.0
+    assert torch.load(best.best_model_path, map_location="cpu", weights_only=False)["global_step"] == 2
+    ckpts = tmp_path / "checkpoints"
+    assert sorted(p.name for p in ckpts.iterdir()) == ["best-step000002.ckpt", "last.ckpt"]
+    assert torch.load(ckpts / "last.ckpt", map_location="cpu", weights_only=False)["global_step"] == 4
+
+
 def test_train_pretrain_runs_on_packed_shards(tmp_path, script):
     """The entry point trains on the packed-shard mixture (dataset=legal_smoke retargeted at
     shards built here with a toy one-id-per-character tokenizer)."""
@@ -1038,3 +1064,430 @@ def test_last_ckpt_holds_the_final_step_when_it_is_not_a_checkpoint_step(tmp_pat
         tmp_path, max_steps=5, limit_val_batches=0, callbacks=callbacks, enable_checkpointing=True
     ).fit(module, data)
     assert torch.load(ckpts / "last.ckpt", map_location="cpu", weights_only=False)["global_step"] == 5
+
+
+# -- supervised fine-tuning -----------------------------------------------------------------------
+
+
+def _sft_batch():
+    """Two encoded SFT items (an answer with text and a quote; an unanswerable one), collated."""
+    from lexhybrid.data.sft_format import Example, Passage, Quote, Text, encode
+    from lexhybrid.training.sft_module import collate
+    from tests.test_pipeline import ByteTokenizer
+
+    tok = ByteTokenizer()
+    p = (Passage("BGB §573", ("Der Vermieter kann kündigen.", "Nur mit Grund.")),)
+    items = [encode(Example("Wann?", p, (Text("So: "), Quote(1, 2))), tok), encode(Example("Ob?", p), tok)]
+    return items, collate([{k: torch.tensor(it[k]) for k in ("input_ids", "labels")} for it in items])
+
+
+def _sft_lm():
+    from lexhybrid.data.tokenizer import VOCAB_SIZE
+
+    return _tiny_student(vocab_size=VOCAB_SIZE)  # the pointer specials sit above Qwen3's 151,669 ids
+
+
+def test_sft_masks_prompt_tokens():
+    """collate right-pads (labels -100), and the SFT loss is the CE of the answer tokens alone --
+    text, pointer tokens and the EOS: their count, and a full forward's CE over exactly those positions."""
+    import torch.nn.functional as F
+
+    from lexhybrid.training.sft_module import SFTLightningModule
+
+    items, batch = _sft_batch()
+    width, short = max(len(it["input_ids"]) for it in items), len(items[1]["input_ids"])
+    assert batch["input_ids"].shape == batch["labels"].shape == (2, width) and short < width
+    assert (batch["labels"][1, short:] == -100).all() and (batch["input_ids"][1, short:] == 0).all()
+    model = _sft_lm().eval()
+    with torch.no_grad():
+        ce, n = SFTLightningModule(model).answer_loss(batch)
+        logits = model(batch["input_ids"]).logits
+    answer = [(r, t) for r, it in enumerate(items) for t, label in enumerate(it["labels"]) if label != -100]
+    assert int(n) == len(answer) == 4 + 3 + 1 + 2  # "So: ", <|q|><|c1|><|s2|>, EOS; <|unanswerable|>, EOS
+    want = torch.stack([F.cross_entropy(logits[r, t - 1], batch["labels"][r, t]) for r, t in answer]).mean()
+    assert torch.allclose(ce, want, atol=1e-5)
+
+
+def test_sft_steps_reduce_the_answer_loss():
+    """A few AdamW steps of the SFT module on a tiny hybrid lower the answer-token loss; a batch with
+    every label masked (a prompt and nothing to answer) gives loss 0 and no gradient."""
+    from lexhybrid.training.sft_module import SFTLightningModule
+
+    _, batch = _sft_batch()
+    module = SFTLightningModule(
+        _sft_lm(), learning_rate=1e-2, warmup_steps=0, max_steps=4, scheduler_name="constant"
+    )
+    opt = module.configure_optimizers()["optimizer"]
+    losses = []
+    for _ in range(4):
+        opt.zero_grad()
+        loss = module.answer_loss(batch)[0]
+        loss.backward()
+        opt.step()
+        losses.append(loss.item())
+    assert losses[-1] < losses[0], losses
+    opt.zero_grad(set_to_none=False)
+    ce, n = module.answer_loss({**batch, "labels": torch.full_like(batch["labels"], -100)})
+    ce.backward()
+    assert int(n) == 0 and ce.item() == 0.0
+    assert all(not p.grad.any() for p in module.parameters() if p.grad is not None)
+
+
+def _compose_sft(*overrides):
+    from hydra import compose, initialize_config_dir
+    from hydra.core.global_hydra import GlobalHydra
+
+    from tests.conftest import REPO_ROOT
+
+    GlobalHydra.instance().clear()
+    with initialize_config_dir(config_dir=str(REPO_ROOT / "configs"), version_base="1.3"):
+        return compose(config_name="sft/default", overrides=list(overrides))
+
+
+_SFT_TINY = ["model.dim=32", "model.num_layers=2", "model.layer_pattern=[mamba3,mlstm]", "model.num_heads=2",
+             "model.head_dim=16", "model.mamba3_head_dim=16", "model.mamba3_d_state=16", "model.tfla_impl=exact",
+             "model.mlstm_chunk_size=8"]  # fmt: skip
+
+
+def _sft_cpu_run(tmp_path, script):
+    """The overrides of a 2-step CPU run on splits build_sft_data.py wrote from byte tokens."""
+    import json
+
+    from lexhybrid.data.sft_format import Example, Passage, Quote, render
+    from tests.test_pipeline import ByteTokenizer
+
+    p = (Passage("BGB §573", ("Der Vermieter kann kündigen.", "Nur mit Grund.")),)
+    rows = [{"id": f"s{i}", "question_id": f"q{i}", "source": "synthetic", "chunk_ids": [],
+             "kind": "unanswerable" if i % 4 == 0 else "answerable",
+             "text": "".join(render(Example(f"Frage {i}?", p, () if i % 4 == 0 else (Quote(1, 2),))))}
+            for i in range(8)]  # fmt: skip
+    (tmp_path / "syn.jsonl").write_text("".join(json.dumps(r) + "\n" for r in rows))
+    (tmp_path / "manifests").mkdir()
+    (tmp_path / "manifests" / "evalset_x.jsonl").write_text(json.dumps({"info": {"name": "x"}}) + "\n")
+    data = tmp_path / "sft"
+    m = script("build_sft_data").build(
+        [tmp_path / "syn.jsonl"], [], data, ByteTokenizer(), tmp_path / "manifests", 0.5
+    )
+    assert m["items"]["train"] and m["items"]["dev"]
+    return ["trainer=cpu_debug", "trainer.max_steps=2", "trainer.val_every_opt_steps=1", f"sft.data_dir={data}",
+            "sft.batch_size=2", "sft.eval_batch_size=2", "sft.num_workers=0", "sft.warmup_steps=0", "+logger=false"]  # fmt: skip
+
+
+def _pretrain_state(cfg):
+    """What a pretraining run's checkpoint holds for the model of ``cfg``, keys as Lightning saves them."""
+    from lexhybrid.config import HybridConfig
+    from lexhybrid.training.pretrain_module import PretrainLightningModule
+
+    return PretrainLightningModule(HybridLanguageModel(HybridConfig.from_hydra(cfg.model))).state_dict()
+
+
+def test_train_sft_entry_points_run_on_cpu(tmp_path, script, monkeypatch):
+    """train_sft.py starts the hybrid from a pretraining checkpoint and trains on build_sft_data.py's
+    splits, 2 steps with a dev pass; without lm_checkpoint it refuses to start. train_sft_hf.py runs
+    the same loop on a tiny random Qwen3 whose embedding it resizes to hold the pointer specials."""
+    import json
+
+    from transformers import Qwen3Config, Qwen3ForCausalLM
+
+    from lexhybrid.data.tokenizer import BASE_LEN, SPECIALS
+
+    common = _sft_cpu_run(tmp_path, script)
+    sft = script("train_sft")
+    cfg = _compose_sft(*common, *_SFT_TINY, f"output_dir={tmp_path / 'out'}")
+    with pytest.raises(ValueError, match="lm_checkpoint"):
+        sft.run(cfg)
+    ckpt = tmp_path / "pretrain_last.ckpt"
+    torch.save({"state_dict": _pretrain_state(cfg)}, ckpt)
+    trainer = sft.run(
+        _compose_sft(*common, *_SFT_TINY, f"output_dir={tmp_path / 'out'}", f"lm_checkpoint={ckpt}")
+    )
+    assert trainer.global_step == 2 and torch.isfinite(trainer.callback_metrics["val/loss"])
+    metadata = json.loads((tmp_path / "out" / "run_metadata.json").read_text())
+    assert metadata["entrypoint"] == "scripts/train_sft.py"
+
+    hf = script("train_sft_hf")
+    lm = Qwen3ForCausalLM(Qwen3Config(vocab_size=BASE_LEN, hidden_size=16, intermediate_size=32, num_hidden_layers=1,
+                                      num_attention_heads=2, num_key_value_heads=1, head_dim=8))  # fmt: skip
+    monkeypatch.setattr(hf, "load_lm", lambda cfg: lm)
+    trainer = hf.run(_compose_sft(*common, f"output_dir={tmp_path / 'hf'}"))
+    assert trainer.global_step == 2 and torch.isfinite(trainer.callback_metrics["val/loss"])
+    assert lm.get_input_embeddings().num_embeddings == BASE_LEN + len(SPECIALS)
+
+
+def _tiny_qwen3(tied: bool):
+    from transformers import Qwen3Config, Qwen3ForCausalLM
+
+    from lexhybrid.data.tokenizer import BASE_LEN
+
+    torch.manual_seed(0)
+    return Qwen3ForCausalLM(Qwen3Config(vocab_size=BASE_LEN, hidden_size=16, intermediate_size=32, num_hidden_layers=1,
+                                        num_attention_heads=2, num_key_value_heads=1, head_dim=8,
+                                        tie_word_embeddings=tied))  # fmt: skip
+
+
+def test_lora_init_follows_the_seed(tmp_path, script, monkeypatch):
+    """Two LoRA runs with the same seed start from the same adapters, whatever the RNG held before."""
+    import copy
+    from types import SimpleNamespace
+
+    hf = script("train_sft_hf")
+    base = _tiny_qwen3(False)  # seeds the RNG itself, so built once, outside load_lm
+    monkeypatch.setattr(hf, "load_lm", lambda cfg: copy.deepcopy(base))
+    monkeypatch.setattr(hf, "_script", lambda name: SimpleNamespace(run=lambda cfg, model, entrypoint: model))
+    cfg = _compose_sft(*_sft_cpu_run(tmp_path, script), "sft.lora_rank=4")
+    starts = []
+    for rng in (1, 2):
+        torch.manual_seed(rng)
+        lm = hf.run(cfg).lm
+        starts.append({n: p.detach().clone() for n, p in lm.named_parameters() if ".lora_A." in n})
+    assert starts[0] and all(torch.equal(starts[0][n], starts[1][n]) for n in starts[0])
+
+
+@pytest.mark.parametrize("tied", [False, True])
+def test_lora_trains_only_adapters_and_pointer_rows(tmp_path, script, monkeypatch, tied):
+    """Two steps of the LoRA run: every base projection and every base row of the embedding and the
+    output layer are unchanged, the pointer rows the answers use moved in both, the adapters moved,
+    and gradient checkpointing is on. The checkpoint then loads with every key and decodes as the
+    trained model does, through the cached decode the evaluation uses."""
+    from lexhybrid.data.tokenizer import BASE_LEN, SPECIALS
+    from lexhybrid.decoding.generate import greedy_cached, sample, sample_cached
+    from lexhybrid.training.dpo_module import load_sft_model
+    from lexhybrid.training.sft_module import LORA_TARGETS
+
+    lm = _tiny_qwen3(tied)
+    lm.config.save_pretrained(tmp_path / "hf")
+    hf = script("train_sft_hf")
+    monkeypatch.setattr(hf, "load_lm", lambda cfg: lm.eval())  # as from_pretrained returns it
+    common = _sft_cpu_run(tmp_path, script)
+    vocab = BASE_LEN + len(SPECIALS)
+    seen = {}
+    from lexhybrid.training.sft_module import SFTLightningModule
+
+    train_step = SFTLightningModule.training_step
+
+    def training_step(self, batch, batch_idx):
+        """Whether every decoder layer checkpoints in this step: HF layers do so only in train mode."""
+        layers = self.model.lm.get_decoder().layers
+        seen.setdefault("layers_checkpoint", all(l.training and l.gradient_checkpointing for l in layers))
+        return train_step(self, batch, batch_idx)
+
+    monkeypatch.setattr(SFTLightningModule, "training_step", training_step)
+
+    def on_start(module):
+        """The weights as training starts: the model is wrapped and resized by now."""
+        inner = module.model
+        seen["embed"] = inner.embeddings(torch.arange(vocab)).detach().clone()
+        seen["head"] = inner.head(torch.eye(16)).detach().t().clone()
+        seen["params"] = {n: p.detach().clone() for n, p in inner.lm.named_parameters()}
+        seen["checkpointing"] = inner.lm.get_decoder().gradient_checkpointing
+
+    sft = script("train_sft")
+    monkeypatch.setattr(hf, "_script", lambda name: sft)
+    build = sft.build_module
+    monkeypatch.setattr(sft, "build_module", lambda cfg, model: (m := build(cfg, model), on_start(m))[0])
+    trainer = hf.run(_compose_sft(*common, f"output_dir={tmp_path / 'out'}", "sft.lora_rank=4"))
+    assert trainer.global_step == 2 and seen["checkpointing"] is True and seen["layers_checkpoint"] is True
+
+    adapter = trainer.lightning_module.model.eval()
+    params = dict(adapter.lm.named_parameters())
+    assert {n for n, p in params.items() if p.requires_grad} == {
+        n for n in params if ".lora_" in n or ".trainable_tokens_delta." in n
+    }
+    for name, p in params.items():
+        moved = not torch.equal(p, seen["params"][name])
+        if not p.requires_grad:
+            assert not moved, name
+    assert any(not torch.equal(params[n], seen["params"][n]) for n in params if ".lora_B." in n)
+    targets = {n.split(".lora_A.")[0].rsplit(".", 1)[-1] for n in params if ".lora_A." in n}
+    assert targets == set(LORA_TARGETS)
+
+    with torch.no_grad():
+        embed, head = adapter.embeddings(torch.arange(vocab)), adapter.head(torch.eye(16)).t()
+    for now, before in ((embed, seen["embed"]), (head, seen["head"])):
+        assert torch.equal(now[:BASE_LEN], before[:BASE_LEN])  # only the deltas of the pointer rows train
+        assert not torch.equal(now[BASE_LEN:], before[BASE_LEN:])
+
+    ckpt = tmp_path / "lora.ckpt"
+    trainer.save_checkpoint(ckpt)
+    loaded = load_sft_model(ckpt, hf_model=str(tmp_path / "hf")).eval()
+    assert loaded.config.vocab_size == vocab
+    ids = torch.randint(0, 200, (2, 5))
+    kw = dict(max_new_tokens=6, temperature=1.0, top_p=0.95, eos_token_id=5)
+    drawn = sample_cached(loaded, ids, generator=torch.Generator().manual_seed(1), **kw)
+    assert torch.equal(drawn, sample_cached(adapter, ids, generator=torch.Generator().manual_seed(1), **kw))
+    assert torch.equal(drawn, sample(adapter.lm, ids, generator=torch.Generator().manual_seed(1), **kw))
+    assert greedy_cached(loaded, ids[:1], 3).shape == (1, 8)
+
+
+def test_sft_init_needs_every_key_of_the_checkpoint(tmp_path, script):
+    """A pretraining checkpoint loads exactly; one missing or unexpected key stops the run instead of
+    fine-tuning a partly loaded model, which the guarded loader's tolerance would allow."""
+    sft = script("train_sft")
+    ckpt = tmp_path / "pretrain_last.ckpt"
+    cfg = _compose_sft(*_SFT_TINY, "model.vocab_size=128", f"lm_checkpoint={ckpt}")
+    state = _pretrain_state(cfg)
+    torch.save({"state_dict": state}, ckpt)
+    loaded = sft.build_model(cfg).state_dict()
+    assert set(loaded) == {k.removeprefix("model.") for k in state}
+    assert all(torch.equal(loaded[k.removeprefix("model.")], v) for k, v in state.items())
+    torch.save({"state_dict": {**state, "model.extra.weight": torch.zeros(1)}}, ckpt)
+    with pytest.raises(RuntimeError, match="Unexpected key"):
+        sft.build_model(cfg)
+    one = next(iter(state))
+    torch.save({"state_dict": {k: v for k, v in state.items() if k != one}}, ckpt)
+    with pytest.raises(RuntimeError, match="Missing key"):
+        sft.build_model(cfg)
+
+
+def test_sft_best_checkpoint_holds_the_weights_of_the_best_dev_loss(tmp_path, script, monkeypatch):
+    """A scripted val/loss of 3, 1, 2, 2.5 over 4 steps, validating after each: the best checkpoint is
+    step 2's. A step-interval ModelCheckpoint saves before its step's validation and would keep step
+    3's; here it writes last.ckpt only."""
+    from pytorch_lightning.callbacks import ModelCheckpoint
+
+    from lexhybrid.training.sft_module import SFTLightningModule
+
+    losses = {1: 3.0, 2: 1.0, 3: 2.0, 4: 2.5}
+
+    def scripted(self, batch, batch_idx):
+        self.log("val/loss", losses[self.global_step], batch_size=1)
+
+    monkeypatch.setattr(SFTLightningModule, "validation_step", scripted)
+    ckpt = tmp_path / "pretrain_last.ckpt"
+    cfg = _compose_sft(*_sft_cpu_run(tmp_path, script), *_SFT_TINY, f"lm_checkpoint={ckpt}", "trainer.max_steps=4",
+                       "trainer.enable_checkpointing=true", "callbacks.checkpoint.every_n_train_steps=1",
+                       "callbacks.checkpoint.save_top_k=1", f"output_dir={tmp_path / 'out'}")  # fmt: skip
+    torch.save({"state_dict": _pretrain_state(cfg)}, ckpt)
+    trainer = script("train_sft").run(cfg)
+    (best,) = [c for c in trainer.callbacks if isinstance(c, ModelCheckpoint) and c.best_model_path]
+    assert float(best.best_model_score) == 1.0
+    assert torch.load(best.best_model_path, map_location="cpu", weights_only=False)["global_step"] == 2
+    ckpts = tmp_path / "out" / "checkpoints"
+    assert sorted(p.name for p in ckpts.iterdir()) == ["best-step000002.ckpt", "last.ckpt"]
+    assert torch.load(ckpts / "last.ckpt", map_location="cpu", weights_only=False)["global_step"] == 4
+
+
+@pytest.mark.parametrize("crash_in", ["train", "val"])
+def test_sft_requeue_resumes_with_every_validation_ranked(tmp_path, script, monkeypatch, crash_in):
+    """A 6-step run validating every 2 steps with a scripted val/loss of 2, 1, 3 is killed after its
+    step-4 validation (in step 5) or during it, then resumed from last.ckpt as a requeue does. Every
+    step is validated once its run gets there, and the ranking keeps step 4 as the only best file. A
+    last.ckpt saved at step 4 before its validation would skip that validation on resume and restore
+    the ranking of step 2's."""
+    from pytorch_lightning.callbacks import ModelCheckpoint
+
+    from lexhybrid.training.sft_module import SFTLightningModule
+
+    losses, seen, crash = {2: 2.0, 4: 1.0, 6: 3.0}, [], {"on": True}
+
+    def scripted(self, batch, batch_idx):
+        if crash["on"] and crash_in == "val" and self.global_step == 4:
+            raise RuntimeError("preempted")
+        if batch_idx == 0:
+            seen.append(self.global_step)
+        self.log("val/loss", losses[self.global_step], batch_size=1)
+
+    train_step = SFTLightningModule.training_step
+
+    def training_step(self, batch, batch_idx):
+        if crash["on"] and crash_in == "train" and self.global_step == 4:
+            raise RuntimeError("preempted")
+        return train_step(self, batch, batch_idx)
+
+    monkeypatch.setattr(SFTLightningModule, "validation_step", scripted)
+    monkeypatch.setattr(SFTLightningModule, "training_step", training_step)
+    ckpt = tmp_path / "pretrain_last.ckpt"
+    ov = [*_sft_cpu_run(tmp_path, script), *_SFT_TINY, f"lm_checkpoint={ckpt}", "trainer.max_steps=6",
+          "trainer.val_every_opt_steps=2", "callbacks.checkpoint.every_n_train_steps=2",
+          "trainer.enable_checkpointing=true", "callbacks.checkpoint.save_top_k=1", f"output_dir={tmp_path / 'out'}"]  # fmt: skip
+    torch.save({"state_dict": _pretrain_state(_compose_sft(*ov))}, ckpt)
+    sft = script("train_sft")
+    with pytest.raises(RuntimeError, match="preempted"):
+        sft.run(_compose_sft(*ov))
+    ckpts = tmp_path / "out" / "checkpoints"
+    first = seen.copy()
+    seen.clear()
+    crash["on"] = False
+    trainer = sft.run(_compose_sft(*ov, f"+resume_from_checkpoint={ckpts / 'last.ckpt'}"))
+    assert (first, seen) == (([2, 4], [6]) if crash_in == "train" else ([2], [4, 6]))
+    (best,) = [c for c in trainer.callbacks if isinstance(c, ModelCheckpoint) and c.monitor == "val/loss"]
+    assert (best.best_model_path, float(best.best_model_score)) == (str(ckpts / "best-step000004.ckpt"), 1.0)
+    assert sorted(p.name for p in ckpts.glob("best-step*.ckpt")) == ["best-step000004.ckpt"]
+    assert torch.load(ckpts / "last.ckpt", map_location="cpu", weights_only=False)["global_step"] == 6
+
+
+def test_sft_default_batch_fits_the_trained_length():
+    """Rows reach 8,192 tokens, and stage-B pretraining ran micro-batch 4 at that length on one H100."""
+    s = _compose_sft().sft
+    assert s.batch_size <= 4 and s.eval_batch_size <= 4
+
+
+def test_dpo_loss_prefers_chosen():
+    """DPO is log 2 while the policy equals the reference and falls as the policy raises the chosen
+    answer over the rejected one relative to the reference (its gradient does exactly that). KTO is
+    0.5 at the reference, falls as desirable answers rise and undesirable ones fall, and its reference
+    point raises the bar for a desirable answer when positive and is clamped at 0 when negative."""
+    from lexhybrid.training.dpo_module import dpo_loss, kto_loss
+
+    ref_c, ref_r = torch.tensor([-12.0, -30.0]), torch.tensor([-10.0, -25.0])
+    at_ref = dpo_loss(ref_c, ref_r, ref_c, ref_r, beta=0.1)
+    assert at_ref.item() == pytest.approx(math.log(2))
+    falling = [dpo_loss(ref_c + d, ref_r - d, ref_c, ref_r, beta=0.1).item() for d in (0.0, 1.0, 5.0)]
+    assert falling[0] > falling[1] > falling[2]
+    assert dpo_loss(ref_c - 1, ref_r + 1, ref_c, ref_r, beta=0.1) > at_ref
+    assert dpo_loss(ref_c + 3, ref_r + 3, ref_c, ref_r, beta=0.1).item() == pytest.approx(math.log(2))
+    pc, pr = ref_c.clone().requires_grad_(), ref_r.clone().requires_grad_()
+    dpo_loss(pc, pr, ref_c, ref_r, beta=0.1).backward()
+    assert (pc.grad < 0).all() and (pr.grad > 0).all()
+
+    ref, desirable, zero = torch.tensor([-12.0, -10.0]), torch.tensor([True, False]), torch.tensor(0.0)
+    assert kto_loss(ref, ref, desirable, zero, beta=0.1).item() == pytest.approx(0.5)
+    up = torch.tensor([1.0, -1.0])
+    assert kto_loss(ref + up, ref, desirable, zero, 0.1) < 0.5 < kto_loss(ref - up, ref, desirable, zero, 0.1)
+    both = torch.tensor([True, True])
+    assert kto_loss(ref, ref, both, torch.tensor(2.0), 0.1) > kto_loss(ref, ref, both, zero, 0.1)
+    assert kto_loss(ref, ref, desirable, torch.tensor(-3.0), 0.1).item() == pytest.approx(0.5)
+
+
+def test_a_run_directory_holds_one_run(tmp_path):
+    """The saved settings guard a directory: same settings resume, other settings are refused by name,
+    a checkpoint without saved settings is refused, and a non-launcher rank never writes the file."""
+    from lexhybrid.utils.checkpoint import check_run_settings
+
+    settings = {"lm_checkpoint": "a.ckpt", "learning_rate": 4e-5, "data_dir": "d"}
+    check_run_settings(tmp_path, settings, resuming=False, write=False)
+    assert not (tmp_path / "run_settings.json").exists()
+    with pytest.raises(ValueError, match="no run_settings.json"):
+        check_run_settings(tmp_path, settings, resuming=True)
+    check_run_settings(tmp_path, settings, resuming=False)
+    check_run_settings(tmp_path, settings, resuming=True)
+    with pytest.raises(ValueError, match="other settings .*lm_checkpoint"):
+        check_run_settings(tmp_path, {**settings, "lm_checkpoint": "b.ckpt"}, resuming=True)
+    with pytest.raises(ValueError, match="other settings .*data_dir"):
+        check_run_settings(tmp_path, {**settings, "data_dir": "other"}, resuming=False)
+
+
+def test_sft_freezes_an_mtp_head_outside_its_loss():
+    """The answer loss never uses the MTP head; DDP would wait for gradients it never gets."""
+    from lexhybrid.training.sft_module import SFTLightningModule
+
+    class Lm(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.body, self.mtp_head = torch.nn.Linear(2, 2), torch.nn.Linear(2, 2)
+
+    lm = Lm()
+    SFTLightningModule(lm)
+    assert not any(p.requires_grad for p in lm.mtp_head.parameters())
+    assert all(p.requires_grad for p in lm.body.parameters())
+
+
+def test_load_every_key_refuses_a_partial_checkpoint():
+    from lexhybrid.utils.checkpoint import load_every_key
+
+    model = torch.nn.Sequential(torch.nn.Linear(2, 2), torch.nn.Linear(2, 2))
+    state = dict(model.state_dict())
+    load_every_key(model, state)
+    state.pop("1.bias")
+    with pytest.raises(RuntimeError, match="1 missing keys"):
+        load_every_key(model, state, "x.ckpt")

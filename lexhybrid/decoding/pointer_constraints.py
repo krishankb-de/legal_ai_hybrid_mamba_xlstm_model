@@ -5,16 +5,25 @@ context, ``<|q|><|c3|><|s2|>`` ("quote chunk 3, sentence 2") or ``<|cite|><|c3|>
 renderer replaces each pointer with the exact sentence or its label. ``PointerFSM`` makes an
 invalid pointer impossible to decode rather than something the verifier has to catch:
 
-    FREE --(<|q|> or <|cite|>)--> MARKER --(<|cK|>, K retrieved)--> CHUNK(K)
-    CHUNK(K) --(<|sJ|>, J a retrieved sentence of chunk K)--> SENTENCE(K)
-    SENTENCE(K) --(<|sJ'|> of chunk K)--> SENTENCE(K)       a span of sentences
-    SENTENCE(K) --(ordinary token, EOS, marker)--> as from FREE
+    START --(<|unanswerable|>)--> REFUSED --(EOS)             the refusal is the whole answer
+    START, FREE --(<|q|>)--> MARKER --(<|cK|>, K retrieved)--> CHUNK(K)
+    START, FREE --(<|cite|>)--> CITE --(<|cK|>, K retrieved)--> CITED(K, 0)   may stop here
+    CHUNK(K) --(<|sJ|>, J a retrieved sentence of K)--> QUOTED(K, J)
+    QUOTED(K, J) --(<|s(J+1)|>)--> QUOTED(K, J + 1)          a quote is a consecutive span
+    CITED(K, J) --(<|sJ'|>, J' > J)--> CITED(K, J')          a citation names each sentence once
+    QUOTED, CITED, START --(ordinary token, EOS, marker)--> as from FREE
 
 * a chunk id may only follow a marker, and only a retrieved chunk's id;
 * a sentence id may only follow its chunk id (or another sentence of that chunk);
-* inside a pointer (MARKER, CHUNK) nothing else is allowed, so a pointer is never left dangling;
-* prompt-structure tokens (``<|passage|>``, ``<|/passage|>``, ``<|question|>``, ``<|answer|>``)
-  are never generated; ``<|unanswerable|>`` is an ordinary answer token;
+* a quote needs a sentence and continues only with the next one; a citation ``<|cite|><|cK|>`` may
+  end after the chunk (as ``sft_format.Cite`` writes it) or name sentences in increasing order, so
+  nothing decodes that the verifier's pointer check rejects (a repeated or non-consecutive sentence);
+* ``<|unanswerable|>`` is allowed only as the first token and is followed by the EOS alone: the parser
+  accepts it only as the whole answer;
+* inside a pointer (MARKER, CITE, CHUNK) nothing else is allowed, so a pointer is never left dangling;
+* prompt-structure tokens (``<|passage|>``, ``<|/passage|>``, ``<|question|>``, ``<|answer|>``),
+  the base vocabulary's other added tokens and the unused rows above the specials are never generated,
+  since the answer parser would reject them;
 * with nothing retrieved, the markers themselves are masked.
 
 The machine is stateless across calls: ``mask_logits`` replays each row's generated tokens, so it
@@ -22,14 +31,16 @@ follows beam reordering without being told (a pointer is a handful of tokens).
 """
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import torch
 
 N_CHUNKS = 16
 N_SENTENCES = 64
 
-FREE, MARKER, CHUNK, SENTENCE = "free", "marker", "chunk", "sentence"
+START, FREE, REFUSED = "start", "free", "refused"
+MARKER, CITE, CHUNK, QUOTED, CITED = "marker", "cite", "chunk", "quoted", "cited"
+State = tuple  # (kind, chunk K or None[, last sentence J])
 
 
 @dataclass(frozen=True)
@@ -45,6 +56,9 @@ class SpecialTokens:
     passage_close: int
     question: int
     answer: int
+    reserved: tuple[
+        int, ...
+    ] = ()  # added tokens of the base vocabulary (<|im_end|>, ...): never in an answer
 
     @staticmethod
     def names() -> list[str]:
@@ -77,7 +91,8 @@ class SpecialTokens:
         unknown = [n for n, i in zip(cls.names(), ids) if i is None or i == tokenizer.unk_token_id]
         if unknown:
             raise ValueError(f"tokenizer lacks the pointer tokens {unknown[:3]}...")
-        return cls.from_ids(ids)
+        eos = getattr(tokenizer, "eos_token_id", None)  # the base vocabulary's added tokens follow its EOS
+        return replace(cls.from_ids(ids), reserved=() if eos is None else tuple(range(eos + 1, min(ids))))
 
     def all_ids(self) -> list[int]:
         return [
@@ -130,55 +145,74 @@ class PointerFSM:
         self.retrieved = {int(k): tuple(sorted(set(int(j) for j in v))) for k, v in retrieved.items() if v}
         self.vocab_size = vocab_size
         self.eos_token_id = eos_token_id
-        self._masks: dict[tuple[str, int | None], torch.Tensor] = {}
+        self._masks: dict[State, torch.Tensor] = {}
 
     # -- transitions ----------------------------------------------------------------------------
 
-    def step(self, state: tuple[str, int | None], token: int) -> tuple[str, int | None]:
+    def step(self, state: State, token: int) -> State:
         """The state after ``token``; raises ``ValueError`` if the grammar forbids it."""
         if not self.allowed(state)[token]:
             raise ValueError(f"token {token} is not allowed in state {state}")
-        kind, chunk = state
+        kind, chunk = state[0], state[1]
         sp = self.specials
-        if token in (sp.q, sp.cite):
+        j = sp.sentence_number(token)
+        if token == sp.unanswerable:
+            return (REFUSED, None)
+        if token == sp.q:
             return (MARKER, None)
+        if token == sp.cite:
+            return (CITE, None)
         if kind == MARKER:
             return (CHUNK, sp.chunk_number(token))
-        if kind in (CHUNK, SENTENCE) and sp.sentence_number(token) is not None:
-            return (SENTENCE, chunk)
+        if kind == CITE:
+            return (CITED, sp.chunk_number(token), 0)
+        if kind == CHUNK and j is not None:
+            return (QUOTED, chunk, j)
+        if kind in (QUOTED, CITED) and j is not None:
+            return (kind, chunk, j)
         return (FREE, None)
 
-    def replay(self, tokens: Sequence[int]) -> tuple[str, int | None]:
-        state: tuple[str, int | None] = (FREE, None)
+    def replay(self, tokens: Sequence[int]) -> State:
+        state: State = (START, None)
         for token in tokens:
             state = self.step(state, int(token))
         return state
 
     # -- masks ------------------------------------------------------------------------------------
 
-    def allowed(self, state: tuple[str, int | None]) -> torch.Tensor:
+    def allowed(self, state: State) -> torch.Tensor:
         """Boolean (vocab,) mask of the tokens the grammar allows next."""
         if state not in self._masks:
             self._masks[state] = self._build(state)
         return self._masks[state]
 
-    def _build(self, state: tuple[str, int | None]) -> torch.Tensor:
-        kind, chunk = state
+    def _build(self, state: State) -> torch.Tensor:
+        kind, chunk = state[0], state[1]
         sp = self.specials
         mask = torch.zeros(self.vocab_size, dtype=torch.bool)
-        if kind == MARKER:
+        if kind in (MARKER, CITE):
             mask[[sp.chunks[k - 1] for k in self.retrieved]] = True
             return mask
         if kind == CHUNK:
             mask[[sp.sentences[j - 1] for j in self.retrieved[chunk]]] = True
             return mask
-        # FREE or SENTENCE: ordinary text, EOS, <|unanswerable|>, and a new pointer if possible.
+        if kind == REFUSED and self.eos_token_id is not None:
+            mask[self.eos_token_id] = True
+            return mask
+        # START, FREE, QUOTED, CITED: ordinary text, EOS, and a new pointer if possible.
         mask[:] = True
-        mask[list(sp.chunks) + list(sp.sentences) + list(sp.prompt_only())] = False
+        mask[list(sp.chunks) + list(sp.sentences) + list(sp.prompt_only()) + list(sp.reserved)] = False
+        mask[max(sp.all_ids()) + 1 :] = False  # the vocabulary ends with the specials: unused rows above them
         if not self.retrieved:
             mask[[sp.q, sp.cite]] = False
-        if kind == SENTENCE:
-            mask[[sp.sentences[j - 1] for j in self.retrieved[chunk]]] = True
+        if kind != START:
+            mask[sp.unanswerable] = False
+        if kind == QUOTED and state[2] + 1 in self.retrieved[chunk]:
+            mask[sp.sentences[state[2]]] = True  # only the next sentence: <|s(J+1)|>
+        if kind == CITED:
+            later = [j for j in self.retrieved[chunk] if j > state[2]]
+            if later:
+                mask[[sp.sentences[j - 1] for j in later]] = True
         return mask
 
     def mask_logits(self, logits: torch.Tensor, generated: torch.Tensor) -> torch.Tensor:
@@ -205,6 +239,8 @@ def validate_pointers(
     """
     problems, i, tokens = [], 0, [int(t) for t in tokens]
     markers = (specials.q, specials.cite)
+    if specials.unanswerable in tokens[1:] or (tokens[:1] == [specials.unanswerable] and len(tokens) > 2):
+        problems.append("<|unanswerable|> is not the whole answer")
     while i < len(tokens):
         t = tokens[i]
         k = specials.chunk_number(t)
@@ -216,12 +252,19 @@ def validate_pointers(
             if k not in retrieved:
                 problems.append(f"chunk c{k} was not retrieved (at {i})")
             j = i + 1
-            if j >= len(tokens) or specials.sentence_number(tokens[j]) is None:
-                problems.append(f"chunk pointer c{k} without a sentence at {i}")
+            quote = i > 0 and tokens[i - 1] == specials.q
+            if quote and (j >= len(tokens) or specials.sentence_number(tokens[j]) is None):
+                problems.append(f"quote pointer c{k} without a sentence at {i}")
+            named: list[int] = []
             while j < len(tokens) and specials.sentence_number(tokens[j]) is not None:
                 s = specials.sentence_number(tokens[j])
                 if s not in retrieved.get(k, ()):
                     problems.append(f"sentence s{s} is not in chunk c{k} (at {j})")
+                if s in named:
+                    problems.append(f"sentence s{s} of chunk c{k} named twice (at {j})")
+                elif quote and named and s != named[-1] + 1:
+                    problems.append(f"quote span not consecutive: s{s} after s{named[-1]} (at {j})")
+                named.append(s)
                 j += 1
             i = j
             continue

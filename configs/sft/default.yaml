@@ -1,0 +1,56 @@
+# @package _global_
+# Supervised fine-tuning (scripts/train_sft.py; scripts/train_sft_hf.py for the Hugging Face
+# baseline): cross-entropy on the answer tokens of the shards scripts/build_sft_data.py writes.
+# A primary config over the pretraining groups: override them as usual (model=..., trainer=...); the
+# trainer keys below replace the trainer yaml's, so both entry points take the same steps.
+#   python scripts/train_sft.py sft.data_dir=data/sft lm_checkpoint=/path/to/last.ckpt
+defaults:
+  - /model: hybrid_legal_base
+  - /trainer: h100_single_gpu
+  - /callbacks: default
+  - _self_
+
+seed: 42
+project_name: lexhybrid
+experiment_name: sft
+output_dir: ${oc.env:SCRATCH_ROOT,.}/outputs/${experiment_name}
+checkpoint_dir: ${output_dir}/checkpoints
+log_dir: ${output_dir}/logs
+# The pretrained weights to start from (a Lightning last.ckpt); weights only, no optimizer state or
+# step count, and every key must match. The hybrid entry point needs it; resume_from_checkpoint
+# resumes an SFT run itself.
+lm_checkpoint: null
+
+sft:
+  data_dir: ${oc.env:SCRATCH_ROOT,.}/data/sft  # train.parquet, dev.parquet, manifest.json
+  # Examples per device and micro-batch. Rows reach 8,192 tokens (the model's trained length); 4 of
+  # them fit an H100 next to the 220M hybrid: stage-B pretraining ran micro-batch 4 at 8,192.
+  batch_size: 4
+  eval_batch_size: 4
+  num_workers: 2
+  learning_rate: 4.0e-5  # a tenth of the pretraining peak
+  warmup_steps: 50
+  scheduler: cosine  # after the warmup, down to 0.1 x learning_rate at max_steps
+  weight_decay: 0.1
+  adam_beta2: 0.95
+  gradient_clip_val: 1.0
+  loss_slab: 512  # positions per slab of the CE: (B, L, vocab) logits never exist
+  hf_model: Qwen/Qwen3-0.6B-Base  # scripts/train_sft_hf.py only
+  hf_revision: main  # the snapshot scripts/slurm/fetch_hf.sh puts in the cache
+  lora_rank: 0  # scripts/train_sft_hf.py only: above 0, LoRA adapters of this rank on a frozen model
+
+# Global optimizer steps: tokens per step scale with the devices (trainer.devices x sft.batch_size).
+trainer:
+  max_steps: 2000
+  val_every_opt_steps: 250
+  accumulate_grad_batches: 1
+
+callbacks:
+  checkpoint:
+    every_n_train_steps: 250
+
+hydra:
+  run:
+    dir: ${output_dir}/hydra/${now:%Y-%m-%d_%H-%M-%S}
+  job:
+    chdir: false

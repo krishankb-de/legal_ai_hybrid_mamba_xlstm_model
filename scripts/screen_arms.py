@@ -113,6 +113,14 @@ ARMS: dict[str, Arm] = {
         band_pct=0.0,
     ),
 }
+# Learning-rate sensitivity: S0 and S1 at half and double the yamls' 4e-4, nothing else changed
+for _base in ("S0", "S1"):
+    for _tag, _lr in (("lr2", 2e-4), ("lr8", 8e-4)):
+        ARMS[f"{_base}-{_tag}"] = ARMS[_base]._replace(
+            isolates=f"learning rate {_lr:g}",
+            extra={"model.learning_rate": _lr},
+            band_pct=ARMS[_base].band_pct or 0.0,
+        )
 
 
 def parse_name(name: str) -> tuple[str, int]:
@@ -132,7 +140,8 @@ def _fmt(value) -> str:
 
 def hydra_overrides(arm_name: str) -> list[str]:
     arm = ARMS[arm_name]
-    out = [f"{k}={_fmt(v)}" for k, v in SCREEN.items()]
+    # an arm's extra replaces a screen setting: one value per key
+    out = [f"{k}={_fmt(v)}" for k, v in SCREEN.items() if k not in arm.extra]
     out += [f"model.{k}={_fmt(v)}" for k, v in sorted(arm.overrides.items())]
     out += [f"{k}={_fmt(v)}" for k, v in sorted(arm.extra.items())]
     return out

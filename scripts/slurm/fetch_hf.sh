@@ -35,25 +35,32 @@ if [[ -n "${HF_TOKEN:-}" ]]; then TOKEN_STATE=yes; fi
 echo "host: $(hostname)  job: ${SLURM_JOB_ID:-none}  HF_HOME: $HF_HOME  token: $TOKEN_STATE"
 echo "sync_stamp: $(cat .sync_stamp 2>/dev/null || echo missing)"
 
-QWEN_REV="$(.venv/bin/python -c 'from lexhybrid.data.tokenizer import QWEN3_REVISION as r; print(r)')"
-FLAIR_REV="$(sed -n 's/^REVISION = "\([0-9a-f]*\)".*/\1/p' scripts/scrub_ner_worker.py)"
-[[ -n "$QWEN_REV" && -n "$FLAIR_REV" ]] || { echo "FATAL: pinned revision not found"; exit 1; }
+# MODELS="<repo>[|<revision>] ..." fetches only those (revision main unless given), e.g.
+# MODELS=Qwen/Qwen3-32B for the synthetic-QA teacher, which the default list leaves out (~65 GB).
+if [[ -n "${MODELS:-}" ]]; then
+  read -r -a MODELS <<< "$MODELS"
+else
+  QWEN_REV="$(.venv/bin/python -c 'from lexhybrid.data.tokenizer import QWEN3_REVISION as r; print(r)')"
+  FLAIR_REV="$(sed -n 's/^REVISION = "\([0-9a-f]*\)".*/\1/p' scripts/scrub_ner_worker.py)"
+  [[ -n "$QWEN_REV" && -n "$FLAIR_REV" ]] || { echo "FATAL: pinned revision not found"; exit 1; }
 
-# repo|revision (the NLI model, the Qwen3 tokenizer and the teachers)
-MODELS=(
-  "Qwen/Qwen3-1.7B-Base|$QWEN_REV"
-  "Qwen/Qwen3-8B-Base|main"
-  "Qwen/Qwen3-0.6B-Base|main"
-  "flair/ner-german-legal|$FLAIR_REV"
-  "BAAI/bge-m3|main"
-  "BAAI/bge-reranker-v2-m3|main"
-  "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7|main"
-)
+  # repo|revision (the NLI model, the Qwen3 tokenizer and the teachers)
+  MODELS=(
+    "Qwen/Qwen3-1.7B-Base|$QWEN_REV"
+    "Qwen/Qwen3-8B-Base|main"
+    "Qwen/Qwen3-0.6B-Base|main"
+    "flair/ner-german-legal|$FLAIR_REV"
+    "BAAI/bge-m3|main"
+    "BAAI/bge-reranker-v2-m3|main"
+    "MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7|main"
+  )
+fi
 
 FAILED=()
 for spec in "${MODELS[@]}"; do
   repo="${spec%%|*}"
-  rev="${spec##*|}"
+  rev=main
+  [[ "$spec" != *"|"* ]] || rev="${spec##*|}"
   echo "== $repo @ $rev"
   if ! .venv/bin/hf download "$repo" --revision "$rev" --exclude "onnx/*" --exclude "*.onnx" --exclude "*.onnx_data"; then
     FAILED+=("$repo")

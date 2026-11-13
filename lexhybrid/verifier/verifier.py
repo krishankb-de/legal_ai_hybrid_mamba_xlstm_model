@@ -26,7 +26,8 @@ passages in prompt order (passage ``K`` is ``chunks[K - 1]``) and returns what t
    hypothesis -- the claim's text with each quote inline as ``„<source>“``, citations left out --
    an entailment probability of at least ``threshold`` (``ENTAILMENT_THRESHOLD``)
    given the premise: the quoted and cited sentences, or the whole chunk text (``Chunk.text``) for a
-   citation of a passage without sentences.
+   citation of a passage without sentences. A claim of verbatim quotes alone skips NLI: it says
+   nothing of its own, and the quote check has proved it.
 5. **Result**: failing claims are removed. If the first claim (the main claim) fails, the answer is
    ``REFUSAL``. The kept segments are rendered (``render_segments``: the body, then ``"\\n\\n" + NOTICE``)
    and their quotes read back from the rendered text (``quotes.check_quotes``); a mismatch refuses.
@@ -274,6 +275,10 @@ def check_claim(
     hypothesis = _hypothesis(claim, chunks)
     if not any(ch.isalnum() for ch in hypothesis):
         return ClaimCheck(index, text, pointers, False, "unsupported: the claim states nothing but citations")
+    if not any(isinstance(s, Text) and any(ch.isalnum() for ch in s.text) for _, s in claim):
+        # Nothing but verbatim quotes, which the check above proved: they entail themselves. NLI could only
+        # get this wrong, since premise and hypothesis would overflow its window for a long passage.
+        return ClaimCheck(index, text, pointers, True, None, None)
     premise = "\n".join(dict.fromkeys(_premise(s, chunks[s.passage - 1]) for _, s in found))
     p = float(nli(premise, hypothesis))
     if not p >= threshold:

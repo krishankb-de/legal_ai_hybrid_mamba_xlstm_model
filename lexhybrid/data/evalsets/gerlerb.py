@@ -2,7 +2,8 @@
 
 Source: Zenodo record 15745124 (2025-06-26, CC BY 4.0): ``topics.txt`` (``qid<TAB>query``, 367
 questions), ``qrels.txt`` (``qid<TAB>iteration<TAB>docno<TAB>label``) and ``corpus.trec.gz``
-(90,798 paragraphs as TREC ``<DOC><DOCNO>..</DOCNO><TEXT>..</TEXT></DOC>``). A ``docno`` is
+(90,917 paragraphs as TREC ``<DOC><DOCNO>..</DOCNO><TEXT>..</TEXT></DOC>``, 89,851 distinct docnos:
+the rest repeat an id, none of them judged; ``scripts/eval_retrieval.py`` resolves them). A ``docno`` is
 ``<paragraph>_<GII slug>`` (``812_bgb``), so ``gii_id`` maps it onto the GII collector's ids
 (``gii:bgb:812``) and retrieval can score GerLeRB against the project's own statute index.
 

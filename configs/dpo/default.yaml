@@ -1,0 +1,18 @@
+# Preference optimisation of an SFT model (scripts/train_dpo.py, selected with +dpo=default).
+# The hybrid's model yaml must be the SFT checkpoint's; its adam_beta2 and gradient_clip_val are
+# used, its pretraining learning rate and schedule are not.
+sft_checkpoint: ???  # policy and frozen reference both start here
+hf_model: null       # the Hugging Face baseline the SFT run trained (Qwen/Qwen3-0.6B-Base); null: the hybrid
+hf_revision: main    # the snapshot scripts/slurm/fetch_hf.sh puts in the cache
+pairs: ???           # train pairs from scripts/build_dpo_pairs.py
+val_pairs: null      # dev pairs; null: no validation (and no best-val/loss checkpoint)
+loss: dpo            # dpo | kto
+beta: 0.1
+desirable_weight: 1.0    # KTO only
+undesirable_weight: 1.0  # KTO only
+batch_size: 4        # pairs per device and micro-batch (2 x rows per forward; KTO needs >= 2)
+learning_rate: 5.0e-7
+weight_decay: 0.0
+warmup_steps: 50
+scheduler: cosine    # wsd | cosine | linear | constant
+num_workers: 2

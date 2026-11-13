@@ -53,6 +53,7 @@ from lexhybrid.training.callbacks import (
 )
 from lexhybrid.training.diagnostics import SpikeDiagnosticsCallback
 from lexhybrid.training.pretrain_module import PretrainLightningModule
+from lexhybrid.training.sft_module import best_val_checkpoint
 from lexhybrid.utils.run_metadata import write_run_metadata
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -190,14 +191,18 @@ def build_callbacks(cfg: DictConfig, enable_checkpointing: bool) -> list:
             )
         )
     ck = cfg.callbacks.checkpoint
+    # a monitored step save scores the previous validation, so ranking happens at validation end instead
+    ranked = ck.monitor is not None
     if enable_checkpointing:
         callbacks.append(FinalCheckpointCallback(cfg.checkpoint_dir))  # the final step, not only every n
+        if ranked and ck.save_top_k:
+            callbacks.append(best_val_checkpoint(cfg.checkpoint_dir, ck.save_top_k))
         callbacks.append(
             ModelCheckpoint(
                 dirpath=cfg.checkpoint_dir,
-                monitor=ck.monitor,
+                monitor=None,
                 mode=ck.mode,
-                save_top_k=ck.save_top_k,
+                save_top_k=0 if ranked else ck.save_top_k,
                 save_last=ck.save_last,
                 filename=ck.filename,
                 auto_insert_metric_name=ck.auto_insert_metric_name,

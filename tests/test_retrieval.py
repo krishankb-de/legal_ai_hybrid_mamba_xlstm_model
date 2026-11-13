@@ -669,3 +669,292 @@ def test_cross_source_copies_are_grouped_and_reach_the_chunks(tmp_path, script):
     linked = [c for c in chunks if c.copies]
     assert linked and all(c.doc_id == decision.id and c.copies == ("oldp:99",) for c in linked)
     assert json.loads((out / "index.json").read_text())["chunks_with_copies"] == len(linked)
+
+
+# -- dense retrieval --------------------------------------------------------------------
+
+
+def _bag_of_words(texts):
+    """A stand-in encoder: hashed, stemmed bag of words, L2-normalised (no model download)."""
+    import numpy as np
+
+    from lexhybrid.retrieval.bm25 import tokenize
+
+    out = np.zeros((len(texts), 64), np.float32)
+    for row, words in enumerate(tokenize(list(texts))):
+        for w in words:
+            out[row, sum(map(ord, w)) % 64] += 1.0
+    norms = np.linalg.norm(out, axis=1, keepdims=True)
+    return out / np.where(norms == 0, 1.0, norms)
+
+
+def test_dense_index_finds_planted_passage_and_blocks_match_brute_force(tmp_path):
+    """DenseIndex: built through a memory-mapped float16 matrix in batches, saved and loaded; the
+    blockwise top-k equals a full sort (ties to the earlier chunk); bad inputs are refused."""
+    import numpy as np
+
+    from lexhybrid.retrieval.dense import DenseIndex
+
+    chunks = [c for d in _fixture_corpus() for c in chunk_document(d)]
+    ids, texts = [c.id for c in chunks], [c.text for c in chunks]
+    index = DenseIndex.build(tmp_path / "dense", ids, iter(texts), _bag_of_words, batch_size=3, model="bow")
+    assert index.vectors.dtype == np.float16 and index.vectors.shape == (len(chunks), 64)
+    assert index.config == {"kind": "dense", "n_chunks": len(chunks), "dim": 64, "model": "bow"}
+    by_id = {c.id: c for c in chunks}
+    hit = index.query("Schriftform der Kündigung eines Mietverhältnisses", _bag_of_words, k=1)[0]
+    assert by_id[hit.chunk_id].citation_id == "BGB §568" and hit.rank == 1
+
+    queries = _bag_of_words(["Kündigung Form", "Beurkundung Notar", "Vertrag"])
+    scores = queries @ np.asarray(index.vectors, np.float32).T
+    want = [[ids[j] for j in np.lexsort((np.arange(len(ids)), -s))[:7]] for s in scores]
+    got = index.query_vectors(queries, k=7, block=4, query_block=2)
+    assert [[h.chunk_id for h in r] for r in got] == want
+    assert [h.chunk_id for h in DenseIndex.load(tmp_path / "dense").query_vectors(queries, k=7)[0]] == want[0]
+    with pytest.raises(ValueError, match="unique"):
+        DenseIndex.build(tmp_path / "dup", ["a", "a"], ["x", "y"], _bag_of_words)
+    with pytest.raises(ValueError, match="texts for"):
+        DenseIndex.build(tmp_path / "short", ["a", "b", "c"], ["x", "y"], _bag_of_words)
+
+
+def test_dense_build_killed_at_its_time_limit_resumes_from_the_last_batch(tmp_path):
+    from lexhybrid.retrieval.dense import PROGRESS_NAME, DenseIndex
+
+    ids = [f"Vertrag {i}" for i in range(10)]
+    seen = []
+
+    def encode(batch):
+        if len(seen) >= 6:
+            raise TimeoutError
+        seen.extend(batch)
+        return _bag_of_words(batch)
+
+    whole = DenseIndex.build(tmp_path / "whole", ids, ids, _bag_of_words, batch_size=3, model="m")
+    with pytest.raises(TimeoutError):
+        DenseIndex.build(tmp_path / "d", ids, iter(ids), encode, batch_size=3, model="m")
+    seen.clear()
+    resumed = DenseIndex.build(tmp_path / "d", ids, iter(ids), lambda b: seen.extend(b) or _bag_of_words(b),
+                               batch_size=3, model="m")  # fmt: skip
+    assert seen == ids[6:] and resumed.resumed == 6
+    assert (resumed.vectors == whole.vectors).all() and not (tmp_path / "d" / PROGRESS_NAME).exists()
+
+    seen.clear()
+    with pytest.raises(TimeoutError):
+        DenseIndex.build(tmp_path / "e", ids, ids, encode, batch_size=3, model="m")
+    seen.clear()
+    other = DenseIndex.build(tmp_path / "e", ids, ids, lambda b: seen.extend(b) or _bag_of_words(b),
+                             batch_size=3, model="other")  # fmt: skip
+    assert seen == ids and other.resumed == 0, "another model's vectors are not reused"
+
+
+def test_build_index_dense_and_answer_retrieve_fuse_both_rankings(tmp_path, script, monkeypatch):
+    """`build_index.py --kind dense` embeds the bm25 build's chunks.jsonl into dense/ and records
+    size and speed in index.json; answer.py's retrieve fuses BM25 and dense when dense/ exists."""
+    from lexhybrid.retrieval.dense import DenseIndex
+
+    out = _build_index(script, tmp_path, "index", _fixture_corpus())
+    bi = script("build_index")
+    monkeypatch.setattr(bi, "BgeM3Encoder", lambda *a, **k: _bag_of_words)
+    assert bi.main(["--kind", "dense", "--out", str(out)]) == 0
+    chunks = [Chunk.from_json(ln) for ln in (out / "chunks.jsonl").read_text().splitlines()]
+    dense = json.loads((out / "index.json").read_text())["dense"]
+    assert (
+        dense["n_chunks"] == len(chunks)
+        and dense["bytes"] > len(chunks) * 64 * 2
+        and dense["chunks_per_s"] > 0
+    )
+    assert DenseIndex.load(out / "dense").ids == [c.id for c in chunks]
+    with pytest.raises(SystemExit, match="bm25 index there first"):
+        bi.main(["--kind", "dense", "--out", str(tmp_path / "nothing")])
+
+    answer = script("answer")
+    calls = []
+    encode = lambda texts: calls.append(list(texts)) or _bag_of_words(texts)  # noqa: E731
+    question = "Schriftform der Kündigung eines Mietverhältnisses"
+    flat = lambda q, texts: [0.0] * len(texts)  # noqa: E731
+    got = answer.retrieve(question, out, flat, encode=encode)
+    assert got[0].citation_id == "BGB §568" and calls == [[question]]
+    assert [c.id for c in answer.retrieve(question, out, flat)] != [] and len(
+        calls
+    ) == 1  # no encoder: BM25 only
+
+
+def _tiny_eval_set(tmp_path, extra_queries=()):
+    """A set in the evalsets layout: q1 has the planted BGB §568 passage, q2 the first chunk."""
+    from lexhybrid.data.evalsets.base import EvalSetInfo, Passage, Query, RetrievalSet, write
+
+    chunks = [c for d in _fixture_corpus() for c in chunk_document(d)]
+    planted = next(c for c in chunks if c.citation_id == "BGB §568")
+    corpus = [Passage(c.id, "\n".join(c.sentences), c.citation_id) for c in chunks]
+    queries = [Query("q1", "Schriftform der Kündigung eines Mietverhältnisses"), Query("q2", "Wetter heute")]
+    queries += [Query(f"q{i}", text) for i, text in enumerate(extra_queries, start=3)]
+    qrels = {"q1": {planted.id: 1}} | {q.id: {chunks[0].id: 1} for q in queries[1:]}
+    info = EvalSetInfo(name="tiny", task="retrieval", licence="test", source="test")
+    set_dir = tmp_path / "tiny"
+    write(RetrievalSet(info, queries, qrels, corpus), set_dir, tmp_path / "manifests")
+    return set_dir, corpus, queries
+
+
+def test_eval_retrieval_scores_four_arms_and_reuses_the_corpus_vectors(tmp_path, script, monkeypatch, capsys):
+    """scripts/eval_retrieval.py on a small set in the evalsets layout: bm25, dense, fused and reranked
+    rankings scored against the qrels; the reranker's order decides its arm; a second run embeds only
+    the queries (the corpus vectors in <set>/dense/ are reused)."""
+    set_dir, corpus, queries = _tiny_eval_set(tmp_path)
+    ev = script("eval_retrieval")
+    embedded = []
+    encode = lambda texts: embedded.append(len(texts)) or _bag_of_words(texts)  # noqa: E731
+    monkeypatch.setattr(ev, "BgeM3Encoder", lambda *a, **k: encode)
+    scorer = lambda q, texts: [float("schriftlichen Form" in t) for t in texts]  # noqa: E731 -- the planted sentence
+    monkeypatch.setattr(ev, "CrossEncoderScorer", lambda *a, **k: scorer)
+    out = tmp_path / "results.json"
+    assert ev.main(["--set-dir", str(set_dir), "--out", str(out)]) == 0
+    res = json.loads(out.read_text())["tiny"]
+    assert set(res) == {"bm25", "dense", "fused", "reranked", "seconds"}
+    assert all(res[a]["queries"] == 2 and res[a]["jurisdiction"] == "DE" for a in ev.ARMS)
+    assert res["bm25"]["mrr"] >= 0.5, "BM25 ranks the planted passage first for q1"
+    assert res["reranked"]["mrr"] >= 0.5, "the reranker lifts the planted passage to rank 1 for q1"
+    assert "RETRIEVAL tiny bm25" in capsys.readouterr().out
+    assert embedded == [len(corpus), len(queries)]
+    embedded.clear()
+    assert ev.main(["--set-dir", str(set_dir), "--out", str(out)]) == 0
+    assert embedded == [len(queries)], "the corpus vectors are reused"
+
+
+def test_eval_retrieval_rerank_shards_and_a_killed_run_leave_only_the_missing_queries(tmp_path, script):
+    """Reranked lists are saved per query: after one shard and a killed shard, the scoring run reranks
+    only the query left over, and its metrics equal those of one uninterrupted run."""
+    import shutil
+
+    set_dir, _, queries = _tiny_eval_set(tmp_path, ["Kündigung Mietverhältnis Form"])
+    fresh = shutil.copytree(set_dir, tmp_path / "fresh")
+    ev = script("eval_retrieval")
+    asked = []
+
+    def scorer(q, texts, limit=None):
+        if limit is not None and len(asked) >= limit:
+            raise TimeoutError("killed at the time limit")
+        asked.append(q)
+        return [float("schriftlichen Form" in t) for t in texts]
+
+    assert ev.rank_set(set_dir, _bag_of_words, scorer, "bow", shard=(1, 2)) is None
+    assert asked == [queries[1].text]
+    asked.clear()
+    with pytest.raises(TimeoutError):  # shard 0 owns q1 and q3; dies after q1
+        ev.rank_set(set_dir, _bag_of_words, lambda q, t: scorer(q, t, limit=1), "bow", shard=(0, 2))
+    asked.clear()
+    resumed = ev.rank_set(set_dir, _bag_of_words, scorer, "bow")
+    assert asked == [queries[2].text], "only the query the killed shard did not reach"
+    assert resumed == ev.rank_set(fresh, _bag_of_words, scorer, "bow")
+    shard_file = next((set_dir / "rerank").glob("*/shard_1_of_2.jsonl"))
+    row = json.loads(shard_file.read_text())
+    assert row["cand"][::-1] != row["cand"]
+    shard_file.write_text(json.dumps(row | {"cand": row["cand"][::-1]}) + "\n")
+    asked.clear()
+    assert ev.rank_set(set_dir, _bag_of_words, scorer, "bow") == resumed
+    assert asked == [], "the same candidates in another order (query vectors from another GPU) are reused"
+    shard_file.write_text(json.dumps(row | {"cand": row["cand"][:-1] + ["elsewhere"]}) + "\n")
+    for _ in range(2):
+        assert ev.rank_set(set_dir, _bag_of_words, scorer, "bow") == resumed
+    assert asked == [queries[1].text], (
+        "another candidate set is reranked once; the stale row does not shadow it"
+    )
+    with pytest.raises(SystemExit):
+        ev.main(["--set-dir", str(set_dir), "--out", str(tmp_path / "r.json"), "--shard", "2/2"])
+    out = tmp_path / "saved.json"  # each saved file scored on its own, no model
+    assert ev.main(["--set-dir", str(set_dir), "--out", str(out), "--saved-only"]) == 0
+    saved = json.loads(out.read_text())[set_dir.name]
+    assert sorted(k.split("/")[1] for k in saved) == [
+        "rest.jsonl",
+        "shard_0_of_2.jsonl",
+        "shard_1_of_2.jsonl",
+    ]
+    shard0 = next(m for k, m in saved.items() if k.endswith("shard_0_of_2.jsonl"))
+    assert shard0["queries"] == 1 and shard0["mrr"] == 1.0, "q1: the reranker puts the planted passage first"
+
+
+def test_dense_ties_go_to_the_earlier_chunk_whatever_the_block_size(tmp_path):
+    """Identical vectors (copies of a passage) tie exactly: the earlier chunk ranks first, and the
+    ranking does not depend on how the corpus is blocked."""
+    import numpy as np
+
+    from lexhybrid.retrieval.dense import DenseIndex
+
+    base = np.eye(4, dtype=np.float32)
+    vecs = base[[0, 1, 0, 2, 0, 3, 0, 1, 0]]  # chunk 0, 2, 4, 6, 8 share one vector
+    ids = [f"c{i}" for i in range(len(vecs))]
+    index = DenseIndex.build(tmp_path / "d", ids, ids, lambda texts: vecs[[ids.index(t) for t in texts]])
+    q = base[[0]]
+    for block in (1, 2, 3, 4, 100):
+        assert [h.chunk_id for h in index.query_vectors(q, k=4, block=block)[0]] == ["c0", "c2", "c4", "c6"]
+
+
+def test_rebuilt_index_drops_stale_vectors_and_answer_ignores_partial_or_foreign_dense(
+    tmp_path, script, monkeypatch
+):
+    from lexhybrid.retrieval.dense import CONFIG_NAME
+
+    corpus = _fixture_corpus()
+    out = _build_index(script, tmp_path, "index", corpus)
+    bi = script("build_index")
+    monkeypatch.setattr(bi, "BgeM3Encoder", lambda *a, **k: _bag_of_words)
+    assert bi.main(["--kind", "dense", "--out", str(out)]) == 0
+    _build_index(script, tmp_path, "index", corpus[:2])  # rebuilt in place with fewer chunks
+    assert not (out / "dense").exists(), "vectors of the old chunks are removed"
+    assert bi.main(["--kind", "dense", "--out", str(out)]) == 0
+    (out / "dense" / CONFIG_NAME).unlink()  # an interrupted dense build writes its config last
+    answer = script("answer")
+    flat = lambda q, texts: [0.0] * len(texts)  # noqa: E731
+    calls = []
+    encode = lambda texts: calls.append(1) or _bag_of_words(texts)  # noqa: E731
+    answer.retrieve("Kündigung", out, flat, encode=encode)
+    assert calls == [], "a partial dense/ is not used"
+
+
+def test_eval_retrieval_keeps_every_text_of_a_repeated_passage_id(script):
+    from types import SimpleNamespace as P
+
+    ev = script("eval_retrieval")
+    rows = [P(id="a", text="x"), P(id="b", text="y"), P(id="a", text="x"), P(id="a", text="z")]
+    assert [(p.id, p.text) for p in ev.unique_passages(rows, {"b"})] == [("a", "x"), ("b", "y"), ("a#1", "z")]
+    with pytest.raises(SystemExit, match="more than one text"):
+        ev.unique_passages(rows, {"a"})
+
+
+def test_eval_retrieval_refuses_qrels_for_queries_it_cannot_rank(tmp_path, script):
+    from lexhybrid.data.evalsets.base import EvalSetInfo, Passage, Query, RetrievalSet, write
+
+    corpus = [Passage("p1", "Kündigung Mietvertrag Schriftform"), Passage("p2", "Testament Erblasser")]
+    qrels = {"q1": {"p1": 1}, "ghost": {"p2": 1}}
+    info = EvalSetInfo(name="tiny", task="retrieval", licence="test", source="test")
+    write(
+        RetrievalSet(info, [Query("q1", "Schriftform Kündigung")], qrels, corpus),
+        tmp_path / "s",
+        tmp_path / "m",
+    )
+    ev = script("eval_retrieval")
+    with pytest.raises(SystemExit, match="missing from queries.jsonl"):
+        ev.rank_set(tmp_path / "s", _bag_of_words, lambda q, t: [0.0] * len(t), "bow")
+
+
+def test_eval_retrieval_rebuilds_vectors_when_texts_change_or_the_cache_is_broken(tmp_path):
+    import importlib.util
+    from types import SimpleNamespace
+
+    from lexhybrid.retrieval.dense import IDS_NAME, VECTORS_NAME
+    from tests.conftest import REPO_ROOT
+
+    spec = importlib.util.spec_from_file_location("ev", REPO_ROOT / "scripts" / "eval_retrieval.py")
+    ev = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(ev)
+    calls = []
+    encode = lambda texts: calls.append(len(texts)) or _bag_of_words(texts)  # noqa: E731
+    passages = [SimpleNamespace(id=f"p{i}", text=f"Kündigung Frist {i}") for i in range(5)]
+    d = tmp_path / "dense"
+    ev.dense_index(d, passages, encode, "bow")
+    ev.dense_index(d, passages, encode, "bow")
+    assert calls == [5], "unchanged corpus: cached"
+    passages[2] = SimpleNamespace(id="p2", text="Testament")
+    ev.dense_index(d, passages, encode, "bow")
+    assert calls == [5, 5], "same ids, other text: rebuilt"
+    (d / IDS_NAME).write_text('["p0"]')  # ids no longer match the vectors
+    ev.dense_index(d, passages, encode, "bow")
+    assert calls == [5, 5, 5] and (d / VECTORS_NAME).exists()

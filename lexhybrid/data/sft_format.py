@@ -25,9 +25,18 @@ At most 16 passages of at most 64 sentences (``<|c1|>..<|c16|>``, ``<|s1|>..<|s6
 """
 
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 
-from lexhybrid.data.tokenizer import EOS_ID, EOS_TOKEN, N_PASSAGES, N_SENTENCES, encode_document, pointer_ids
+from lexhybrid.data.tokenizer import (
+    EOS_ID,
+    EOS_TOKEN,
+    N_PASSAGES,
+    N_SENTENCES,
+    SPECIALS,
+    encode_document,
+    pointer_ids,
+)
 
 Q, CITE, UNANSWERABLE = "<|q|>", "<|cite|>", "<|unanswerable|>"
 PASSAGE_OPEN, PASSAGE_CLOSE, QUESTION, ANSWER = "<|passage|>", "<|/passage|>", "<|question|>", "<|answer|>"
@@ -175,6 +184,25 @@ def encode(ex: Example, tok) -> dict[str, list[int]]:
         "labels": [-100] * len(prompt) + target,
         "doc_ids": [0] * (len(prompt) + len(target)),
     }
+
+
+def prompt_ids(question: str, passages: Sequence[Passage], tok) -> list[int]:
+    """The prompt's token ids, up to and including ``<|answer|>`` (the positions ``encode`` masks from the loss)."""
+    enc = encode(Example(question, tuple(passages)), tok)
+    return [i for i, label in zip(enc["input_ids"], enc["labels"], strict=True) if label == -100]
+
+
+def decode_answer(tokens: Sequence[int], tok) -> str:
+    """Answer tokens as the pointer markup: special tokens by name, so no tokenizer spacing can split a pointer."""
+    names = dict(zip(tok.convert_tokens_to_ids(list(SPECIALS)), SPECIALS, strict=True)) | {EOS_ID: EOS_TOKEN}
+    out, run = [], []
+    for t in tokens:
+        if t in names:
+            out += [tok.decode(run), names[t]]
+            run = []
+        else:
+            run.append(t)
+    return "".join([*out, tok.decode(run)])
 
 
 _ABBREVIATION = re.compile(

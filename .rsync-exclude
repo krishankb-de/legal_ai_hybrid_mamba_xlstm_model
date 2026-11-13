@@ -6,6 +6,7 @@
 + tests/fixtures/**
 .venv/
 .venv-vllm/
+.venv-arm/
 venv/
 Reference/
 /data/raw/

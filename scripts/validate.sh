@@ -9,7 +9,7 @@
 #
 # Gates:
 #   0  optional local pre-checks    scripts/validate.local.sh, when present (or $VALIDATE_PRE_HOOK)
-#   1  environment == lock          uv lock --check (also envs/scrub); scripts/check_env.py
+#   1  environment == lock          uv lock --check (also envs/scrub, envs/vllm, envs/arm); scripts/check_env.py
 #   2  static                       ruff check; ruff format --check; bash -n and shellcheck on *.sh
 #   3  model configs                scripts/check_configs.py (Hydra compose, operator pins, vocab)
 #   4  tests                        pytest with the mode's marker selection
@@ -75,6 +75,8 @@ echo; echo "-- Gate 1: environment --"
 if [[ -n "$UV" ]]; then
   run_gate "uv.lock matches pyproject.toml" "$UV" lock --check
   run_gate "envs/scrub/uv.lock matches its pyproject.toml" "$UV" lock --check --project envs/scrub
+  run_gate "envs/vllm/uv.lock matches its pyproject.toml" "$UV" lock --check --project envs/vllm
+  run_gate "envs/arm/uv.lock matches its pyproject.toml" "$UV" lock --check --project envs/arm
 else
   fail "uv not found on PATH (the environment is defined by uv.lock)"
 fi

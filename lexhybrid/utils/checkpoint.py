@@ -11,10 +11,13 @@
   parameter only that family owns, and refuse ambiguous layers rather than guess.
 """
 
+import json
+import os
 import re
 import warnings
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -225,3 +228,38 @@ def infer_architecture(state: Mapping[str, Any], prefix: str | None = None) -> I
             if cv:
                 arch.mamba3_conv_size = int(cv[-1])
     return arch
+
+
+def load_every_key(
+    model: torch.nn.Module, state_dict: Mapping[str, Any], checkpoint: Any = "checkpoint"
+) -> None:
+    """Load a checkpoint that must match the model exactly: any missing or unexpected key raises."""
+    missing, unexpected = load_state_dict_guarded(model, state_dict)
+    if missing or unexpected:
+        raise RuntimeError(
+            f"{checkpoint} does not match the model: {len(missing)} missing keys {missing[:5]}, "
+            f"{len(unexpected)} unexpected keys {unexpected[:5]}"
+        )
+
+
+def check_run_settings(
+    output_dir: str | Path, settings: Mapping[str, Any], resuming: bool, write: bool = True
+) -> None:
+    """One output directory, one run. A job that finds ``last.ckpt`` there resumes it, so other weights,
+    data or steps would silently continue the earlier run: its settings must equal the ones saved
+    in ``run_settings.json``. ``write`` is False on the DDP ranks that only check."""
+    path = Path(output_dir) / "run_settings.json"
+    now = json.loads(json.dumps(settings))
+    if path.exists():
+        saved = json.loads(path.read_text())
+        differ = {k: (saved.get(k), v) for k, v in now.items() if saved.get(k) != v}
+        if differ:
+            raise ValueError(
+                f"{output_dir} holds a run with other settings (saved, now): {differ}; give this run its own EXPERIMENT"
+            )
+    elif resuming:
+        raise ValueError(f"{output_dir}: a checkpoint to resume but no run_settings.json to check it against")
+    elif write:
+        tmp = path.with_name(path.name + ".tmp")
+        tmp.write_text(json.dumps(now, indent=1) + "\n")
+        os.replace(tmp, path)

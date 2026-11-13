@@ -50,6 +50,7 @@ KEY_IMPORTS = (
     "yaml",
     "bm25s",  # lexical retrieval
     "Stemmer",  # PyStemmer, bm25s's Snowball German stemmer
+    "peft",  # LoRA adapters
 )
 EXPECTED_CUDA = {"linux": "12.8", "darwin": None}
 SCRUB_ROOT = REPO_ROOT / "envs" / "scrub"

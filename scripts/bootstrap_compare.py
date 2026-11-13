@@ -37,9 +37,29 @@ def read_lines(path: str) -> list[str]:
         return [line.rstrip("\n") for line in fh]
 
 
+ID = "id"  # the item a metrics row belongs to; every other key is a numeric metric
+
+
 def read_metrics(path: str) -> list[dict[str, float]]:
     with open(path, encoding="utf-8") as fh:
         return [json.loads(line) for line in fh if line.strip()]
+
+
+def align(met_a: list[dict], met_b: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Both files in one item order, joined on ``id``: pairing by line number alone would compare
+    different questions without a sign. Files without ids (hand-written) pair by line, with a warning."""
+    ids_a, ids_b = [r.get(ID) for r in met_a], [r.get(ID) for r in met_b]
+    if not any(ids_a) and not any(ids_b):
+        print("warning: metrics carry no id: pairing by line number", file=sys.stderr)
+        return met_a, met_b
+    if None in ids_a or None in ids_b:
+        raise SystemExit("some metric rows have no id: both files must carry one on every line")
+    if len(set(ids_a)) != len(ids_a) or len(set(ids_b)) != len(ids_b):
+        raise SystemExit("repeated ids in a metrics file: give one file per system, seed and arm")
+    if set(ids_a) != set(ids_b):
+        raise SystemExit(f"the files score different items, e.g. {sorted(set(ids_a) ^ set(ids_b))[:3]}")
+    by_id = {r[ID]: r for r in met_b}
+    return met_a, [by_id[i] for i in ids_a]
 
 
 def build_cache(hyps: Sequence[str] | None, refs: Sequence[str] | None, metrics: list[dict] | None) -> dict:
@@ -65,7 +85,7 @@ def evaluate_subset(idx: Sequence[int], cache: dict) -> dict[str, float]:
         out["bleu_1"] = corpus_bleu(hyp_toks, ref_toks, max_n=1)
         out["bleu_4"] = corpus_bleu(hyp_toks, ref_toks, max_n=4)
     if "metrics" in cache:
-        keys = sorted({k for row in cache["metrics"] for k in row})
+        keys = sorted({k for row in cache["metrics"] for k in row} - {ID})
         for k in keys:
             vals = [float(cache["metrics"][i][k]) for i in idx if k in cache["metrics"][i]]
             if vals:
@@ -73,21 +93,44 @@ def evaluate_subset(idx: Sequence[int], cache: dict) -> dict[str, float]:
     return out
 
 
+def paired_items(cache_a: dict, cache_b: dict) -> dict[str, set[int]]:
+    """Per metric key, the items BOTH systems have a value for. A per-question metric that applies to
+    some items only (citation recall needs gold passages; citation precision needs a citing answer)
+    is compared on those items alone, so the difference stays paired."""
+    if "metrics" not in cache_a or "metrics" not in cache_b:
+        return {}
+    ma, mb = cache_a["metrics"], cache_b["metrics"]
+    keys = ({k for row in ma for k in row} & {k for row in mb for k in row}) - {ID}
+    return {k: {i for i in range(len(ma)) if k in ma[i] and k in mb[i]} for k in sorted(keys)}
+
+
+def _paired_mean(cache: dict, key: str, idx: Sequence[int], ok: set[int]) -> float | None:
+    vals = [float(cache["metrics"][i][key]) for i in idx if i in ok]
+    return sum(vals) / len(vals) if vals else None
+
+
+def _scores(idx: Sequence[int], cache_a: dict, cache_b: dict, paired: dict[str, set[int]]):
+    sub_a, sub_b = evaluate_subset(idx, cache_a), evaluate_subset(idx, cache_b)
+    for k, ok in paired.items():
+        sub_a[k], sub_b[k] = _paired_mean(cache_a, k, idx, ok), _paired_mean(cache_b, k, idx, ok)
+    return sub_a, sub_b
+
+
 def paired_bootstrap(cache_a: dict, cache_b: dict, n_samples: int, seed: int, alpha: float = 0.05):
     """Resample item indices ONCE per draw and score both systems on them."""
     n = cache_a["n"]
     rng = random.Random(seed)
-    point_a = evaluate_subset(range(n), cache_a)
-    point_b = evaluate_subset(range(n), cache_b)
-    metrics = [m for m in point_a if m in point_b]
+    paired = paired_items(cache_a, cache_b)
+    point_a, point_b = _scores(range(n), cache_a, cache_b, paired)
+    metrics = [m for m in point_a if point_b.get(m) is not None and point_a[m] is not None]
 
     diffs: dict[str, list[float]] = {m: [] for m in metrics}
     for _ in range(n_samples):
         idx = [rng.randrange(n) for _ in range(n)]
-        sub_a = evaluate_subset(idx, cache_a)
-        sub_b = evaluate_subset(idx, cache_b)
+        sub_a, sub_b = _scores(idx, cache_a, cache_b, paired)
         for m in metrics:
-            diffs[m].append(sub_a[m] - sub_b[m])
+            if sub_a.get(m) is not None and sub_b.get(m) is not None:  # a resample may miss every scored item
+                diffs[m].append(sub_a[m] - sub_b[m])
 
     results = {}
     lo_q, hi_q = alpha / 2, 1 - alpha / 2
@@ -103,6 +146,7 @@ def paired_bootstrap(cache_a: dict, cache_b: dict, n_samples: int, seed: int, al
         else:
             n_opposite = len(d)
         results[m] = {
+            "n": len(paired[m]) if m in paired else n,
             "a": point_a[m],
             "b": point_b[m],
             "diff": observed,
@@ -130,11 +174,11 @@ def render(results: dict, meta: dict, name_a: str, name_b: str) -> str:
             return f"**{name_a if r['diff'] > 0 else name_b} wins**"
         return "tie (CI spans 0)"
 
-    out.append(f"\n| metric | {name_a} | {name_b} | diff | 95% CI | sign flipped | verdict |\n")
-    out.append("|---|---|---|---|---|---|---|\n")
+    out.append(f"\n| metric | n | {name_a} | {name_b} | diff | 95% CI | sign flipped | verdict |\n")
+    out.append("|---|---|---|---|---|---|---|---|\n")
     for m, r in results.items():
         out.append(
-            f"| {m} | {r['a']:.4f} | {r['b']:.4f} | {r['diff']:+.4f} | [{r['ci_low']:+.4f}, {r['ci_high']:+.4f}] "
+            f"| {m} | {r['n']} | {r['a']:.4f} | {r['b']:.4f} | {r['diff']:+.4f} | [{r['ci_low']:+.4f}, {r['ci_high']:+.4f}] "
             f"| {r['frac_sign_flipped']:.1%} | {verdict(r)} |\n"
         )
     wins_a = [m for m, r in results.items() if r["significant"] and r["diff"] > 0]
@@ -182,6 +226,10 @@ def main(argv: list[str] | None = None) -> int:
             f"pairing requires equal lengths, got {sorted(lengths)}: both systems must be scored on the same items"
         )
 
+    if lengths == {0}:
+        raise SystemExit("no items to compare")
+    if metric_mode:
+        met_a, met_b = align(met_a, met_b)
     cache_a = build_cache(hyps_a, refs, met_a)
     cache_b = build_cache(hyps_b, refs, met_b)
     results, meta = paired_bootstrap(cache_a, cache_b, args.bootstrap_samples, args.seed)

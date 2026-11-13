@@ -474,8 +474,9 @@ def test_pointer_fsm_transitions():
 
     sp = _specials()
     fsm = PointerFSM(sp, RETRIEVED, POINTER_VOCAB, eos_token_id=0)
-    free = fsm.allowed((FREE, None))
-    assert free[7] and free[sp.q] and free[sp.cite] and free[sp.unanswerable] and free[0]
+    start, free = fsm.allowed(fsm.replay([])), fsm.allowed((FREE, None))
+    assert start[sp.unanswerable] and not free[sp.unanswerable], "a refusal is the whole answer"
+    assert free[7] and free[sp.q] and free[sp.cite] and free[0]
     assert not free[sp.chunks[1]], "a chunk pointer needs a marker first"
     assert not any(free[t] for t in sp.prompt_only()), "prompt structure is never generated"
     after_q = fsm.replay([sp.q])
@@ -494,6 +495,23 @@ def test_pointer_fsm_transitions():
         fsm.replay([sp.q, sp.chunks[1], sp.sentences[1]])  # s2 is not in chunk 2
     nothing = PointerFSM(sp, {}, POINTER_VOCAB)
     assert not nothing.allowed((FREE, None))[sp.q], "with nothing retrieved there is nothing to point at"
+
+
+def test_pointer_fsm_accepts_sft_citation_without_sentence():
+    """``sft_format.Cite`` writes ``<|cite|><|cK|>`` with no sentence: the FSM lets it end there
+    (text, EOS, a new marker, or sentences of K), while a quote still needs a sentence."""
+    from lexhybrid.decoding.pointer_constraints import PointerFSM, validate_pointers
+
+    sp = _specials()
+    fsm = PointerFSM(sp, RETRIEVED, POINTER_VOCAB, eos_token_id=0)
+    after_cite = fsm.allowed(fsm.replay([sp.cite, sp.chunks[8]]))
+    assert after_cite[0] and after_cite[7] and after_cite[sp.q] and after_cite[sp.sentences[3]]
+    assert not after_cite[sp.sentences[0]], "s1 is not a sentence of chunk 9"
+    tokens = [7, sp.cite, sp.chunks[8], 11, sp.cite, sp.chunks[1], 0]
+    fsm.replay(tokens)
+    assert validate_pointers(tokens, sp, RETRIEVED) == []
+    assert not fsm.allowed(fsm.replay([sp.q, sp.chunks[8]]))[0], "a quote cannot end without a sentence"
+    assert validate_pointers([sp.q, sp.chunks[8], 0], sp, RETRIEVED) != []
 
 
 def _trim_open_pointer(tokens, sp):
@@ -587,3 +605,53 @@ def test_generated_tokens_cuts_after_eos():
     row = torch.tensor([9, 9, 1, 2, 3, 7, 7])
     assert generated_tokens(row, 2) == [1, 2, 3, 7, 7]
     assert generated_tokens(row, 2, eos_token_id=3) == [1, 2, 3]
+
+
+def test_pointer_fsm_decodes_only_what_the_verifier_accepts():
+    """A quote continues only with the next sentence, a citation names sentences in increasing order
+    (each once), and <|unanswerable|> is the first token followed by the EOS alone; the independent
+    validator flags each violation."""
+    from lexhybrid.decoding.pointer_constraints import PointerFSM, validate_pointers
+
+    sp = _specials()
+    fsm = PointerFSM(sp, RETRIEVED, POINTER_VOCAB, eos_token_id=0)
+    q9 = fsm.allowed(fsm.replay([sp.q, sp.chunks[8], sp.sentences[3]]))  # quoting s4 of chunk 9 (s4..s6)
+    assert q9[sp.sentences[4]] and not q9[sp.sentences[3]] and not q9[sp.sentences[5]]
+    c9 = fsm.allowed(fsm.replay([sp.cite, sp.chunks[8], sp.sentences[4]]))  # cited s5
+    assert c9[sp.sentences[5]] and not c9[sp.sentences[4]] and not c9[sp.sentences[3]]
+    refused = fsm.allowed(fsm.replay([sp.unanswerable]))
+    assert refused.sum() == 1 and refused[0]
+    assert not fsm.allowed(fsm.replay([7]))[sp.unanswerable]
+    for bad in (
+        [sp.q, sp.chunks[8], sp.sentences[3], sp.sentences[3]],
+        [sp.q, sp.chunks[8], sp.sentences[3], sp.sentences[5]],
+        [sp.cite, sp.chunks[8], sp.sentences[4], sp.sentences[4]],
+        [7, sp.unanswerable],
+        [sp.unanswerable, 7, 0],
+    ):
+        assert validate_pointers(bad, sp, RETRIEVED), bad
+        with pytest.raises(ValueError):
+            fsm.replay(bad)
+    assert validate_pointers([sp.unanswerable, 0], sp, RETRIEVED) == []
+
+
+def test_pointer_fsm_masks_tokens_that_are_no_part_of_an_answer():
+    """The base vocabulary's other added tokens and the unused rows above the specials would only make
+    the parser refuse the sample."""
+    from dataclasses import replace
+
+    from lexhybrid.decoding.pointer_constraints import PointerFSM, SpecialTokens
+
+    sp = replace(_specials(), reserved=(195, 196))
+    fsm = PointerFSM(sp, RETRIEVED, 300, eos_token_id=0)
+    start = fsm.allowed(fsm.replay([]))
+    assert start[7] and start[0] and start[sp.q]
+    assert not start[195] and not start[196] and not start[290], "added tokens and unused rows"
+
+    class Tok:
+        unk_token_id, eos_token_id = None, 150
+
+        def convert_tokens_to_ids(self, names):
+            return [200 + i for i, _ in enumerate(names)]
+
+    assert SpecialTokens.from_tokenizer(Tok()).reserved == tuple(range(151, 200))
